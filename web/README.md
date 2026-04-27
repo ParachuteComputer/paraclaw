@@ -15,15 +15,15 @@ You need a Parachute Vault running on `127.0.0.1:1940` and NanoClaw initialized 
 # Terminal 1 — server
 cd web/server
 pnpm install --ignore-workspace
-PARACLAW_WEB_PORT=4944 pnpm dev
-# → http://127.0.0.1:4944
+pnpm dev
+# → http://127.0.0.1:1944
 
 # Terminal 2 — UI dev server (hot reload)
 cd web/ui
 pnpm install --ignore-workspace
 pnpm dev
 # → http://localhost:5173
-# (Vite proxies /api/* to the server on 4944)
+# (Vite proxies /api/* to the server on 1944)
 ```
 
 Open `http://localhost:5173/` to use the UI in dev mode.
@@ -33,7 +33,7 @@ Open `http://localhost:5173/` to use the UI in dev mode.
 ```sh
 cd web/ui && pnpm build       # → dist/
 cd ../server && pnpm start    # serves dist/ at the server's root
-# → http://127.0.0.1:4944
+# → http://127.0.0.1:1944
 ```
 
 ## Auth model
@@ -52,7 +52,7 @@ A more upstream-friendly fix would be to make NanoClaw's config compute paths fr
 
 ## Pinned to canonical port?
 
-Not yet. `4944` is a placeholder while paraclaw is exploratory. If the project earns its keep, we file an issue against `parachute-cli` to claim a slot in `PORT_RESERVATIONS` (1944–1949 range was unassigned at last check). Per `parachute-patterns/patterns/canonical-ports.md`: claim a slot when you ship, not before.
+Yes — paraclaw claims slot **1944** in the `1939–1949` Parachute range (per `parachute-patterns/patterns/canonical-ports.md`). The default is set in `web/server/src/server.ts`; override with `PARACLAW_WEB_PORT=<n>` for tests or non-default deployments. The hub-side reservation lives in `parachute-hub/src/service-spec.ts` (`PORT_RESERVATIONS`).
 
 ## What's next
 

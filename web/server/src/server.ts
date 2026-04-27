@@ -57,13 +57,18 @@ import {
   type AuthResult,
   type ClawScope,
 } from './auth.js';
+import { upsertService } from './services-manifest.js';
 
 const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIST = path.resolve(__dirname, '../../ui/dist');
-const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 4944);
+// Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
+// (1944, claimed for paraclaw 2026-04-27 via parachute-hub#…). Override
+// via PARACLAW_WEB_PORT for tests / non-default deployments.
+const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 1944);
 const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
+const SERVICE_VERSION = '0.0.6-rc.1';
 
 // NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
 // process-singleton DB connection (`getDb`). Initialize it once at boot so
@@ -242,7 +247,7 @@ async function handleApi(
   if (pathname === '/api/health' && method === 'GET') {
     json(res, 200, {
       service: 'paraclaw-web-server',
-      version: '0.0.5-rc.1',
+      version: SERVICE_VERSION,
       data_dir: DATA_DIR,
       groups_dir: GROUPS_DIR,
     });
@@ -531,5 +536,23 @@ server.listen(PORT, HOST, () => {
     console.log(`  ui:         serving from ${UI_DIST}`);
   } else {
     console.log(`  ui:         (not built — run pnpm --filter @paraclaw/web-ui build, or dev separately on :5173)`);
+  }
+  // Self-register so `parachute status` + `parachute expose` see paraclaw.
+  // Best-effort: a manifest write failure (perms / disk / race) doesn't
+  // block the server from doing its job locally.
+  try {
+    upsertService({
+      name: 'claw',
+      port: PORT,
+      paths: ['/claw'],
+      health: '/api/health',
+      version: SERVICE_VERSION,
+      displayName: 'Paraclaw',
+      tagline: 'Manage your Parachute agent groups + vault attachments.',
+    });
+  } catch (err) {
+    console.warn(
+      `paraclaw: skipped services manifest update: ${err instanceof Error ? err.message : err}`,
+    );
   }
 });
