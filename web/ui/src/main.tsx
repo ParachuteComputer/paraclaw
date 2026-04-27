@@ -9,7 +9,7 @@ if (!root) throw new Error("#root not found");
 
 createRoot(root).render(
   <StrictMode>
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
       <App />
     </BrowserRouter>
   </StrictMode>,
