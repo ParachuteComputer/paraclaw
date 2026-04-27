@@ -84,6 +84,45 @@ describe('upsertService', () => {
     expect(raw.services.map((s) => s.name).sort()).toEqual(['claw', 'vault']);
   });
 
+  it('preserves hub-stamped fields on the row (e.g. installDir from parachute-hub#84)', () => {
+    // The hub stamps `installDir` onto the row at install time. Paraclaw's
+    // self-registration row shape doesn't know about that field, but the
+    // upsert must merge rather than replace so the hub-stamped value
+    // survives the second write — otherwise `parachute start claw` after
+    // an auto-start round-trip can't resolve installDir → "unknown service".
+    writeFileSync(
+      path,
+      JSON.stringify({
+        services: [
+          {
+            name: 'claw',
+            port: 1944,
+            paths: ['/claw'],
+            health: '/api/health',
+            version: '0.0.7-rc.1',
+            installDir: '/Users/test/.parachute/claw',
+          },
+        ],
+      }),
+    );
+    upsertService(
+      {
+        name: 'claw',
+        port: 1944,
+        paths: ['/claw'],
+        health: '/api/health',
+        version: '0.0.8-rc.1',
+      },
+      path,
+    );
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as {
+      services: { version: string; installDir?: string }[];
+    };
+    expect(raw.services).toHaveLength(1);
+    expect(raw.services[0].version).toBe('0.0.8-rc.1');
+    expect(raw.services[0].installDir).toBe('/Users/test/.parachute/claw');
+  });
+
   it('throws on a malformed existing manifest (so we never silently overwrite)', () => {
     writeFileSync(path, '{"services": "not an array"}');
     expect(() =>
