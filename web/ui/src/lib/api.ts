@@ -9,15 +9,15 @@
  * fails the wrapper hard-redirects to login. /api/discovery is the one
  * exception — it's the bootstrap and is fetched directly by auth.ts.
  */
-import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from "./auth.ts";
+import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from './auth.ts';
 
 // Mount-aware: when paraclaw is served at /claw/ (under hub on tailnet), API
 // calls must go to /claw/api/* — the bare /api/* path goes to the hub origin's
 // root, where it 404s. BASE_URL has the trailing slash already; the trim keeps
 // us from emitting //api when BASE_URL is /.
-const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
-export type VaultScope = "vault:read" | "vault:write" | "vault:admin";
+export type VaultScope = 'vault:read' | 'vault:write' | 'vault:admin';
 
 export interface VaultAttachment {
   vaultBaseUrl: string;
@@ -28,8 +28,8 @@ export interface VaultAttachment {
 
 export interface SessionStatus {
   sessionId: string;
-  status: "active" | "closed";
-  containerStatus: "running" | "idle" | "stopped";
+  status: 'active' | 'closed';
+  containerStatus: 'running' | 'idle' | 'stopped';
   alive: boolean;
   lastHeartbeatAt: string | null;
   lastMessageInAt: string | null;
@@ -60,17 +60,17 @@ export interface AgentGroupView {
 
 async function doFetch(
   path: string,
-  init: RequestInit & { json?: unknown } | undefined,
+  init: (RequestInit & { json?: unknown }) | undefined,
   bearer: string | null,
 ): Promise<Response> {
   const headers: Record<string, string> = {
-    Accept: "application/json",
+    Accept: 'application/json',
     ...((init?.headers as Record<string, string>) ?? {}),
   };
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
   let body: BodyInit | undefined = init?.body as BodyInit | undefined;
   if (init?.json !== undefined) {
-    headers["Content-Type"] = "application/json";
+    headers['Content-Type'] = 'application/json';
     body = JSON.stringify(init.json);
   }
   return fetch(`${API_BASE}${path}`, { ...init, headers, body });
@@ -89,10 +89,7 @@ async function readError(res: Response): Promise<string> {
   return message;
 }
 
-export async function request<T>(
-  path: string,
-  init?: RequestInit & { json?: unknown },
-): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   let bearer = getAccessToken();
   if (!bearer) {
     // No token at all — kick off the OAuth dance. beginLogin() never returns.
@@ -119,14 +116,26 @@ export async function request<T>(
 }
 
 export async function listGroups(): Promise<AgentGroupView[]> {
-  const r = await request<{ groups: AgentGroupView[] }>("/groups");
+  const r = await request<{ groups: AgentGroupView[] }>('/groups');
   return r.groups;
 }
 
+export interface VaultListing {
+  /** Vault display name from the hub's well-known discovery doc, e.g. `default`. */
+  name: string;
+  /** Public-routable URL the agent will reach the vault at, e.g. `https://parachute.taildf9ce2.ts.net/vault/default`. */
+  url: string;
+  /** Vault version the hub reports for this entry. */
+  version: string;
+}
+
+export async function listVaults(): Promise<VaultListing[]> {
+  const r = await request<{ vaults: VaultListing[] }>('/vaults');
+  return r.vaults;
+}
+
 export async function getGroup(folder: string): Promise<AgentGroupView> {
-  const r = await request<{ group: AgentGroupView }>(
-    `/groups/${encodeURIComponent(folder)}`,
-  );
+  const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}`);
   return r.group;
 }
 
@@ -142,15 +151,15 @@ export async function attachVault(
 ): Promise<{ group: AgentGroupView; mintedToken: boolean }> {
   return request<{ group: AgentGroupView; mintedToken: boolean }>(
     `/groups/${encodeURIComponent(folder)}/attach-vault`,
-    { method: "POST", json: input },
+    { method: 'POST', json: input },
   );
 }
 
 export async function detachVault(folder: string, mcpName?: string): Promise<AgentGroupView> {
-  const r = await request<{ group: AgentGroupView }>(
-    `/groups/${encodeURIComponent(folder)}/detach-vault`,
-    { method: "POST", json: { mcpName } },
-  );
+  const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
+    method: 'POST',
+    json: { mcpName },
+  });
   return r.group;
 }
 
@@ -162,15 +171,11 @@ export interface FolderAvailability {
 }
 
 export async function checkFolderAvailability(slug: string): Promise<FolderAvailability> {
-  return request<FolderAvailability>(
-    `/folder-availability/${encodeURIComponent(slug)}`,
-  );
+  return request<FolderAvailability>(`/folder-availability/${encodeURIComponent(slug)}`);
 }
 
 export async function fetchFolderSuggestion(name: string): Promise<string> {
-  const r = await request<{ name: string; slug: string }>(
-    `/folder-suggestion?name=${encodeURIComponent(name)}`,
-  );
+  const r = await request<{ name: string; slug: string }>(`/folder-suggestion?name=${encodeURIComponent(name)}`);
   return r.slug;
 }
 
@@ -191,8 +196,5 @@ export async function createGroup(input: CreateGroupInput): Promise<{
   group: AgentGroupView;
   mintedVaultToken: boolean;
 }> {
-  return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(
-    `/groups`,
-    { method: "POST", json: input },
-  );
+  return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(`/groups`, { method: 'POST', json: input });
 }
