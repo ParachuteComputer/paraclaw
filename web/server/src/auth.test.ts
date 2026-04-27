@@ -13,6 +13,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 
 import {
   authenticate,
+  getHubOrigin,
   hasScope,
   HubJwtError,
   resetJwksCache,
@@ -177,6 +178,52 @@ describe('validateHubJwt', () => {
     fixture.setUnreachable(true);
     const token = await signJwt(kp, { iss: fixture.origin });
     await expect(validateHubJwt(token)).rejects.toBeInstanceOf(HubJwtError);
+  });
+});
+
+describe('getHubOrigin', () => {
+  // The hub lifecycle (parachute-hub/src/commands/lifecycle.ts) stamps
+  // PARACHUTE_HUB_ORIGIN onto every spawned service so iss-strict JWT
+  // validation works behind tailnet proxying. PARACLAW_HUB_ORIGIN is the
+  // test/per-service override. Loopback fallback exists for local-dev when
+  // the hub isn't supervising the process.
+  let prevParaclaw: string | undefined;
+  let prevParachute: string | undefined;
+
+  beforeEach(() => {
+    prevParaclaw = process.env.PARACLAW_HUB_ORIGIN;
+    prevParachute = process.env.PARACHUTE_HUB_ORIGIN;
+    delete process.env.PARACLAW_HUB_ORIGIN;
+    delete process.env.PARACHUTE_HUB_ORIGIN;
+  });
+
+  afterEach(() => {
+    if (prevParaclaw === undefined) delete process.env.PARACLAW_HUB_ORIGIN;
+    else process.env.PARACLAW_HUB_ORIGIN = prevParaclaw;
+    if (prevParachute === undefined) delete process.env.PARACHUTE_HUB_ORIGIN;
+    else process.env.PARACHUTE_HUB_ORIGIN = prevParachute;
+  });
+
+  it('reads PARACHUTE_HUB_ORIGIN as primary (set by hub lifecycle)', () => {
+    process.env.PARACHUTE_HUB_ORIGIN = 'https://parachute.taildf9ce2.ts.net';
+    expect(getHubOrigin()).toBe('https://parachute.taildf9ce2.ts.net');
+  });
+
+  it('PARACLAW_HUB_ORIGIN overrides PARACHUTE_HUB_ORIGIN', () => {
+    process.env.PARACHUTE_HUB_ORIGIN = 'https://parachute.taildf9ce2.ts.net';
+    process.env.PARACLAW_HUB_ORIGIN = 'http://localhost:9999';
+    expect(getHubOrigin()).toBe('http://localhost:9999');
+  });
+
+  it('falls back to loopback when neither env is set', () => {
+    expect(getHubOrigin()).toBe('http://127.0.0.1:1939');
+  });
+
+  it('strips trailing slash from either env', () => {
+    process.env.PARACHUTE_HUB_ORIGIN = 'https://hub.example/';
+    expect(getHubOrigin()).toBe('https://hub.example');
+    process.env.PARACLAW_HUB_ORIGIN = 'https://override.example/';
+    expect(getHubOrigin()).toBe('https://override.example');
   });
 });
 
