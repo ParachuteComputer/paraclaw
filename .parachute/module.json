@@ -1,0 +1,14 @@
+{
+  "name": "claw",
+  "manifestName": "paraclaw",
+  "displayName": "Paraclaw",
+  "tagline": "Manage your Parachute agent groups + vault attachments.",
+  "kind": "frontend",
+  "port": 1944,
+  "paths": ["/claw"],
+  "health": "/api/health",
+  "startCmd": ["node", "web/server/dist/server.js"],
+  "scopes": {
+    "defines": ["claw:read", "claw:write", "claw:admin"]
+  }
+}

@@ -1,7 +1,7 @@
 /**
  * HTTP client to the Paraclaw web server.
  *
- * In dev: Vite proxies /api/* to localhost:4944.
+ * In dev: Vite proxies /api/* to localhost:1944.
  * In prod: server serves the built UI under /claw/, /api/* on the same origin.
  *
  * Auth: every /api/* request gets `Authorization: Bearer <jwt>` from the
