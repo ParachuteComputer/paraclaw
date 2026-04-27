@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ScopeGrants, SCOPE_OPTIONS } from "../components/ScopeGrants.tsx";
-import { StatusDot, formatRelative } from "../components/StatusDot.tsx";
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ScopeGrants, SCOPE_OPTIONS } from '../components/ScopeGrants.tsx';
+import { StatusDot, formatRelative } from '../components/StatusDot.tsx';
+import { VaultPicker } from '../components/VaultPicker.tsx';
 import {
   attachVault,
   detachVault,
@@ -9,7 +10,7 @@ import {
   type AgentGroupView,
   type GroupStatus,
   type VaultScope,
-} from "../lib/api.ts";
+} from '../lib/api.ts';
 
 const POLL_MS = 7_000;
 
@@ -19,13 +20,16 @@ export function GroupDetail() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Attach form state.
-  const [scope, setScope] = useState<VaultScope>("vault:read");
-  const [vaultBaseUrl, setVaultBaseUrl] = useState("http://127.0.0.1:1940/vault/default");
-  const [pasteToken, setPasteToken] = useState("");
-  const [tokenLabel, setTokenLabel] = useState("");
+  // Attach form state. vaultBaseUrl starts empty — VaultPicker fills it in
+  // with the first registered vault's URL once /api/vaults resolves, or
+  // surfaces a free-text input when discovery is empty / errors.
+  const [scope, setScope] = useState<VaultScope>('vault:read');
+  const [vaultBaseUrl, setVaultBaseUrl] = useState('');
+  const [pickedVaultName, setPickedVaultName] = useState<string | null>(null);
+  const [pasteToken, setPasteToken] = useState('');
+  const [tokenLabel, setTokenLabel] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [flash, setFlash] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [flash, setFlash] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const reload = useCallback(async () => {
     if (!folder) return;
@@ -67,21 +71,21 @@ export function GroupDetail() {
     try {
       const result = await attachVault(folder, {
         scope,
-        vaultBaseUrl: vaultBaseUrl.trim().replace(/\/+$/, ""),
+        vaultBaseUrl: vaultBaseUrl.trim().replace(/\/+$/, ''),
         tokenLabel: tokenLabel.trim() || undefined,
         token: pasteToken.trim() || undefined,
       });
       setGroup(result.group);
       setFlash({
-        kind: "ok",
+        kind: 'ok',
         text: result.mintedToken
           ? `Vault attached (server minted a fresh ${scope} token via parachute CLI).`
           : `Vault attached using your pasted token.`,
       });
-      setPasteToken("");
+      setPasteToken('');
     } catch (err) {
       setFlash({
-        kind: "error",
+        kind: 'error',
         text: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -100,12 +104,12 @@ export function GroupDetail() {
       const updated = await detachVault(folder);
       setGroup(updated);
       setFlash({
-        kind: "ok",
-        text: "Vault detached. To revoke the token: parachute vault tokens revoke <label>",
+        kind: 'ok',
+        text: 'Vault detached. To revoke the token: parachute vault tokens revoke <label>',
       });
     } catch (err) {
       setFlash({
-        kind: "error",
+        kind: 'error',
         text: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -116,12 +120,14 @@ export function GroupDetail() {
   if (loading && !group) {
     return (
       <div>
-        <Link to="/" className="muted">← All groups</Link>
-        <div className="skeleton skeleton-heading" style={{ marginTop: "1rem" }} />
+        <Link to="/" className="muted">
+          ← All groups
+        </Link>
+        <div className="skeleton skeleton-heading" style={{ marginTop: '1rem' }} />
         <div className="section">
-          <div className="skeleton skeleton-line" style={{ width: "30%" }} />
+          <div className="skeleton skeleton-line" style={{ width: '30%' }} />
           <div className="skeleton skeleton-line" />
-          <div className="skeleton skeleton-line" style={{ width: "70%" }} />
+          <div className="skeleton skeleton-line" style={{ width: '70%' }} />
         </div>
       </div>
     );
@@ -130,11 +136,15 @@ export function GroupDetail() {
   if (error) {
     return (
       <div>
-        <Link to="/" className="muted">← All groups</Link>
-        <div className="error-banner" style={{ marginTop: "1rem" }}>{error}</div>
-        <div className="actions" style={{ marginTop: "1rem" }}>
+        <Link to="/" className="muted">
+          ← All groups
+        </Link>
+        <div className="error-banner" style={{ marginTop: '1rem' }}>
+          {error}
+        </div>
+        <div className="actions" style={{ marginTop: '1rem' }}>
           <button onClick={reload} disabled={loading}>
-            {loading ? "Retrying…" : "Retry"}
+            {loading ? 'Retrying…' : 'Retry'}
           </button>
         </div>
       </div>
@@ -144,7 +154,9 @@ export function GroupDetail() {
   if (!group) {
     return (
       <div>
-        <Link to="/" className="muted">← All groups</Link>
+        <Link to="/" className="muted">
+          ← All groups
+        </Link>
         <div className="empty">Group not found.</div>
       </div>
     );
@@ -152,8 +164,10 @@ export function GroupDetail() {
 
   return (
     <div>
-      <Link to="/" className="muted">← All groups</Link>
-      <h2 style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+      <Link to="/" className="muted">
+        ← All groups
+      </Link>
+      <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
         <StatusDot status={group.status} />
         {group.name}
         {group.vault ? (
@@ -163,20 +177,25 @@ export function GroupDetail() {
         )}
       </h2>
 
-      {flash && (
-        <div className={flash.kind === "ok" ? "status-banner" : "error-banner"}>
-          {flash.text}
-        </div>
-      )}
+      {flash && <div className={flash.kind === 'ok' ? 'status-banner' : 'error-banner'}>{flash.text}</div>}
 
       <div className="section">
         <h3>Agent group</h3>
         <div className="kv">
-          <div>name</div><div>{group.name}</div>
-          <div>folder</div><div><code>{group.folder}</code></div>
-          <div>id</div><div><code>{group.id}</code></div>
-          <div>provider</div><div>{group.agent_provider ?? <em className="dim">default</em>}</div>
-          <div>created</div><div>{new Date(group.created_at).toLocaleString()}</div>
+          <div>name</div>
+          <div>{group.name}</div>
+          <div>folder</div>
+          <div>
+            <code>{group.folder}</code>
+          </div>
+          <div>id</div>
+          <div>
+            <code>{group.id}</code>
+          </div>
+          <div>provider</div>
+          <div>{group.agent_provider ?? <em className="dim">default</em>}</div>
+          <div>created</div>
+          <div>{new Date(group.created_at).toLocaleString()}</div>
         </div>
       </div>
 
@@ -186,38 +205,44 @@ export function GroupDetail() {
         <div className="section">
           <h3>Vault attachment</h3>
           <div className="kv">
-            <div>vault url</div><div><code>{group.vault.vaultBaseUrl}</code></div>
-            <div>scope</div><div><span className="tag">{group.vault.scope}</span></div>
-            <div>token label</div><div><code>{group.vault.tokenLabel}</code></div>
-            <div>attached</div><div>{new Date(group.vault.attachedAt).toLocaleString()}</div>
+            <div>vault url</div>
+            <div>
+              <code>{group.vault.vaultBaseUrl}</code>
+            </div>
+            <div>scope</div>
+            <div>
+              <span className="tag">{group.vault.scope}</span>
+            </div>
+            <div>token label</div>
+            <div>
+              <code>{group.vault.tokenLabel}</code>
+            </div>
+            <div>attached</div>
+            <div>{new Date(group.vault.attachedAt).toLocaleString()}</div>
           </div>
           <hr className="sep" />
-          <div className="dim" style={{ marginBottom: "0.75rem" }}>
-            The agent's container.json has a <code>parachute-vault</code> MCP entry pointing at this URL with a Bearer token. Detach removes the entry; the token stays valid until you revoke it via{" "}
+          <div className="dim" style={{ marginBottom: '0.75rem' }}>
+            The agent's container.json has a <code>parachute-vault</code> MCP entry pointing at this URL with a Bearer
+            token. Detach removes the entry; the token stays valid until you revoke it via{' '}
             <code>parachute vault tokens revoke {group.vault.tokenLabel}</code>.
           </div>
           <button className="danger" onClick={onDetach} disabled={submitting}>
-            {submitting ? "Working…" : "Detach vault"}
+            {submitting ? 'Working…' : 'Detach vault'}
           </button>
         </div>
       ) : (
         <div className="section">
-          <h3>Attach vault</h3>
+          <h3>Attach {pickedVaultName ? <code>{pickedVaultName}</code> : null} vault</h3>
           <form onSubmit={onAttach}>
             <div className="row">
-              <label htmlFor="vaultBaseUrl">Vault URL</label>
-              <input
-                id="vaultBaseUrl"
-                type="text"
+              <label htmlFor="vaultBaseUrl">Vault</label>
+              <VaultPicker
+                inputId="vaultBaseUrl"
                 value={vaultBaseUrl}
-                onChange={(e) => setVaultBaseUrl(e.target.value)}
+                onChange={setVaultBaseUrl}
+                onPickedName={setPickedVaultName}
                 disabled={submitting}
               />
-              <p className="dim">
-                The agent will reach this at{" "}
-                <code>{vaultBaseUrl.replace(/\/+$/, "")}/mcp</code>. Default
-                is the local vault at <code>http://127.0.0.1:1940/vault/default</code>.
-              </p>
             </div>
 
             <div className="row">
@@ -266,16 +291,18 @@ export function GroupDetail() {
                 placeholder="pvt_…  (leave blank to mint a fresh one via the parachute CLI)"
               />
               <p className="dim">
-                When blank: the server runs{" "}
-                <code>parachute vault tokens create --scope {scope} --label {tokenLabel || `claw-${folder}`}</code>
-                {" "}for you. (Until vault OAuth is wired in Phase B; then
-                you'll never see <code>pvt_…</code> tokens at all.)
+                When blank: the server runs{' '}
+                <code>
+                  parachute vault tokens create --scope {scope} --label {tokenLabel || `claw-${folder}`}
+                </code>{' '}
+                for you. (Until vault OAuth is wired in Phase B; then you'll never see <code>pvt_…</code> tokens at
+                all.)
               </p>
             </div>
 
             <div className="actions">
               <button type="submit" disabled={submitting}>
-                {submitting ? "Attaching…" : "Attach vault"}
+                {submitting ? 'Attaching…' : 'Attach vault'}
               </button>
             </div>
           </form>
@@ -285,17 +312,13 @@ export function GroupDetail() {
       <div className="section">
         <h3>What the agent gets</h3>
         <p className="muted">
-          When attached, the agent's container has a{" "}
-          <code>parachute-vault</code> MCP server available with the nine
-          vault tools: <code>query-notes</code>, <code>create-note</code>,{" "}
-          <code>update-note</code>, <code>delete-note</code>,{" "}
-          <code>list-tags</code>, <code>update-tag</code>,{" "}
-          <code>delete-tag</code>, <code>find-path</code>,{" "}
-          <code>vault-info</code>. Constrained by the scope you chose.
+          When attached, the agent's container has a <code>parachute-vault</code> MCP server available with the nine
+          vault tools: <code>query-notes</code>, <code>create-note</code>, <code>update-note</code>,{' '}
+          <code>delete-note</code>, <code>list-tags</code>, <code>update-tag</code>, <code>delete-tag</code>,{' '}
+          <code>find-path</code>, <code>vault-info</code>. Constrained by the scope you chose.
         </p>
         <p className="muted">
-          Paraclaw doesn't impose a vault-note layout on the agent — the
-          claw decides how to use vault access. (See{" "}
+          Paraclaw doesn't impose a vault-note layout on the agent — the claw decides how to use vault access. (See{' '}
           <a
             href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
             target="_blank"
@@ -324,12 +347,14 @@ function StatusSection({ status }: { status: GroupStatus }) {
           )}
         </div>
         <div>active sessions</div>
-        <div>{status.activeSessionCount} of {status.sessionCount}</div>
+        <div>
+          {status.activeSessionCount} of {status.sessionCount}
+        </div>
         <div>last heartbeat</div>
         <div>
           {status.lastHeartbeatAt ? (
             <>
-              {formatRelative(status.lastHeartbeatAt)}{" "}
+              {formatRelative(status.lastHeartbeatAt)}{' '}
               <span className="dim">({new Date(status.lastHeartbeatAt).toLocaleString()})</span>
             </>
           ) : (
@@ -340,7 +365,7 @@ function StatusSection({ status }: { status: GroupStatus }) {
         <div>
           {status.lastMessageInAt ? (
             <>
-              {formatRelative(status.lastMessageInAt)}{" "}
+              {formatRelative(status.lastMessageInAt)}{' '}
               <span className="dim">({new Date(status.lastMessageInAt).toLocaleString()})</span>
             </>
           ) : (
@@ -351,7 +376,7 @@ function StatusSection({ status }: { status: GroupStatus }) {
         <div>
           {status.lastMessageOutAt ? (
             <>
-              {formatRelative(status.lastMessageOutAt)}{" "}
+              {formatRelative(status.lastMessageOutAt)}{' '}
               <span className="dim">({new Date(status.lastMessageOutAt).toLocaleString()})</span>
             </>
           ) : (
@@ -362,22 +387,23 @@ function StatusSection({ status }: { status: GroupStatus }) {
       {status.sessions.length > 0 && (
         <>
           <hr className="sep" />
-          <div className="dim" style={{ marginBottom: "0.5rem" }}>
+          <div className="dim" style={{ marginBottom: '0.5rem' }}>
             Sessions ({status.sessions.length}):
           </div>
           <ul className="session-list">
             {status.sessions.map((s) => (
               <li key={s.sessionId}>
-                <code>{s.sessionId}</code>{" "}
+                <code>{s.sessionId}</code>{' '}
                 {s.alive ? (
                   <span className="status-text alive">alive</span>
                 ) : (
                   <span className="status-text idle">{s.containerStatus}</span>
-                )}{" "}
+                )}{' '}
                 <span className="dim">— {s.status}</span>
                 {s.lastHeartbeatAt && (
                   <>
-                    {" "}<span className="dim">· hb {formatRelative(s.lastHeartbeatAt)}</span>
+                    {' '}
+                    <span className="dim">· hb {formatRelative(s.lastHeartbeatAt)}</span>
                   </>
                 )}
               </li>
