@@ -231,6 +231,22 @@ The agent container runs on **Bun**; the host runs on **Node** (pnpm). They comm
 - **Changing session-DB pragmas** (`container/agent-runner/src/db/connection.ts`) → `journal_mode=DELETE` is load-bearing for cross-mount visibility. Read the comment block at the top of the file first.
 - **Editing `.parachute/module.json` `startCmd`** → use `["pnpm", "exec", "tsx", "web/server/src/server.ts"]`, NOT `bun`. The web server reuses NanoClaw's `initDb()` which loads `better-sqlite3` (native bindings) — bun crashes on import. Host-runs-on-Node applies to the parachute lifecycle spawn too.
 
+## Web UI (mount-aware)
+
+The paraclaw SPA in `web/ui/` is served at the origin root in dev (`/`) and under a mount prefix in prod (`/claw/` when running behind the parachute hub on tailnet). The hub owns `/`; an absolute `/api/...` from the browser goes to the hub origin, NOT paraclaw — and the hub 404s on it. Anything the bundle sends to paraclaw must include the mount prefix.
+
+**Rule:** every URL the UI builds for `fetch`, router basenames, or OAuth redirects must be derived from `import.meta.env.BASE_URL`, not hardcoded with a leading `/`. Same bundle has to work whether the deploy lands at `/`, `/claw/`, or `/some/other/mount/`.
+
+Pattern (BASE_URL has a trailing slash; trim it for joining):
+
+```ts
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
+const cb       = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
+<BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+```
+
+The server-side mirror lives in `web/server/src/server.ts`: `MOUNT` (from `PARACLAW_WEB_MOUNT`) is stripped uniformly before dispatch so `/api/*` and static-serve both see paths without the prefix.
+
 ## CJK font support
 
 Agent containers ship without CJK fonts by default (~200MB saved). If you notice signals the user works with Chinese/Japanese/Korean content — conversing in CJK, CJK timezone (e.g., `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Seoul`, `Asia/Taipei`, `Asia/Hong_Kong`), system locale hint, or mentions of needing to render CJK in screenshots/PDFs/scraped pages — offer to enable it:

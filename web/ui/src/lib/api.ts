@@ -11,7 +11,11 @@
  */
 import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from "./auth.ts";
 
-const API_BASE = "/api";
+// Mount-aware: when paraclaw is served at /claw/ (under hub on tailnet), API
+// calls must go to /claw/api/* — the bare /api/* path goes to the hub origin's
+// root, where it 404s. BASE_URL has the trailing slash already; the trim keeps
+// us from emitting //api when BASE_URL is /.
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
 
 export type VaultScope = "vault:read" | "vault:write" | "vault:admin";
 

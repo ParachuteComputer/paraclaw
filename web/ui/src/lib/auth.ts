@@ -73,9 +73,12 @@ async function getDiscovery(): Promise<DiscoveryResponse> {
   const cached = readJson<DiscoveryResponse>(localStorage, DISCOVERY_KEY);
   if (cached) return cached;
   // Fetch raw — discovery is unauthenticated, and routing it through the API
-  // wrapper would create a bootstrap dep cycle (api ↔ auth).
-  const res = await fetch("/api/discovery", { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`/api/discovery failed: ${res.status}`);
+  // wrapper would create a bootstrap dep cycle (api ↔ auth). Mount-aware:
+  // BASE_URL prepended so the request hits paraclaw under /claw/ on tailnet
+  // rather than the hub origin's root (which 404s on /api/discovery).
+  const url = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/discovery`;
+  const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
   const fresh = (await res.json()) as DiscoveryResponse;
   writeJson(localStorage, DISCOVERY_KEY, fresh);
   return fresh;
