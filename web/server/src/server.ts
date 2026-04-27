@@ -58,6 +58,7 @@ import {
   type ClawScope,
 } from './auth.js';
 import { upsertService } from './services-manifest.js';
+import { makeServeStatic, normalizeMount } from './static-serve.js';
 
 const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 
@@ -68,7 +69,13 @@ const UI_DIST = path.resolve(__dirname, '../../ui/dist');
 // via PARACLAW_WEB_PORT for tests / non-default deployments.
 const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 1944);
 const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
-const SERVICE_VERSION = '0.0.6-rc.1';
+// When fronted by `parachute expose tailnet` at a path prefix, set
+// PARACLAW_WEB_MOUNT to that prefix (e.g. `/claw`) so static-serve strips
+// it before resolving against dist/. The hub-managed lifecycle (once
+// parachute-hub#83 ships) will set this from `module.json` `paths[0]`
+// automatically. Empty string = serve at the origin root (default).
+const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
+const SERVICE_VERSION = '0.0.7-rc.1';
 
 // NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
 // process-singleton DB connection (`getDb`). Initialize it once at boot so
@@ -458,52 +465,7 @@ async function handleApi(
 
 // --- Static file serving (built UI) -----------------------------------------
 
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8',
-};
-
-function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, urlPath: string): void {
-  if (!fs.existsSync(UI_DIST)) {
-    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end(
-      'UI bundle not found at ' +
-        UI_DIST +
-        '\n\nIn dev: run `pnpm --filter @paraclaw/web-ui dev` and open http://localhost:5173/.\n' +
-        'In prod: run `pnpm --filter @paraclaw/web-ui build` first.',
-    );
-    return;
-  }
-
-  // Map / → index.html. Strip leading slash.
-  let rel = urlPath.replace(/^\/+/, '') || 'index.html';
-
-  // Path traversal guard.
-  if (rel.includes('..')) {
-    res.writeHead(400);
-    res.end('bad path');
-    return;
-  }
-
-  let abs = path.join(UI_DIST, rel);
-  // SPA fallback — any unknown route under root falls back to index.html so
-  // BrowserRouter routes resolve.
-  if (!fs.existsSync(abs)) {
-    abs = path.join(UI_DIST, 'index.html');
-    rel = 'index.html';
-  }
-  const ext = path.extname(abs).toLowerCase();
-  const mime = MIME_TYPES[ext] ?? 'application/octet-stream';
-  const stream = fs.createReadStream(abs);
-  res.writeHead(200, { 'content-type': mime });
-  stream.pipe(res);
-}
+const serveStatic = makeServeStatic({ distDir: UI_DIST, mount: MOUNT });
 
 // --- Server ------------------------------------------------------------------
 
@@ -536,6 +498,9 @@ server.listen(PORT, HOST, () => {
     console.log(`  ui:         serving from ${UI_DIST}`);
   } else {
     console.log(`  ui:         (not built — run pnpm --filter @paraclaw/web-ui build, or dev separately on :5173)`);
+  }
+  if (MOUNT) {
+    console.log(`  mount:      ${MOUNT} (PARACLAW_WEB_MOUNT — strips this prefix off static-serve requests)`);
   }
   // Self-register so `parachute status` + `parachute expose` see paraclaw.
   // Best-effort: a manifest write failure (perms / disk / race) doesn't
