@@ -1,9 +1,25 @@
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { GroupList } from "./routes/GroupList.tsx";
 import { GroupDetail } from "./routes/GroupDetail.tsx";
 import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
+import { OAuthCallback } from "./routes/OAuthCallback.tsx";
 
 export function App() {
+  // The OAuth callback page is intentionally chrome-free — the user is
+  // mid-handoff back from the hub and the nav frame would just be noise.
+  const location = useLocation();
+  const isCallback = location.pathname === "/oauth/callback";
+
+  if (isCallback) {
+    return (
+      <div className="page">
+        <Routes>
+          <Route path="/oauth/callback" element={<OAuthCallback />} />
+        </Routes>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <nav className="nav">

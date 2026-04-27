@@ -10,9 +10,15 @@
  * just exposes /api/*. In dev, run vite separately on port 5173 with the
  * proxy in vite.config.ts pointing back to this server.
  *
- * Auth model for v1: server runs locally, binds 127.0.0.1, no auth.
- * Anyone with shell access to your laptop can act as you. Phase B replaces
- * with vault OAuth handshake.
+ * Auth model: every `/api/*` route requires a hub-issued JWT — operator
+ * token (CLI/scripts) or user OAuth (browser) — validated via JWKS against
+ * the hub origin. Loopback bind is no longer load-bearing for safety; a
+ * compromised browser extension on the same machine can hit 127.0.0.1, so
+ * every endpoint auths. See `auth.ts` for the validation seam.
+ *
+ * Two endpoints stay unauthenticated: `/api/health` (operational probe)
+ * and `/api/discovery` (returns hub origin so the SPA can bootstrap its
+ * OAuth flow without baking the origin into the bundle).
  */
 // MUST be first — chdirs to project root so NanoClaw's config.ts resolves
 // DATA_DIR / GROUPS_DIR correctly regardless of where the server was invoked.
@@ -43,6 +49,14 @@ import {
   validateFolderSlug,
 } from '../../../src/parachute/create-agent.js';
 import { getGroupStatus, type GroupStatus } from '../../../src/parachute/group-status.js';
+import {
+  authenticate,
+  getHubOrigin,
+  SCOPE_CLAW_READ,
+  SCOPE_CLAW_WRITE,
+  type AuthResult,
+  type ClawScope,
+} from './auth.js';
 
 const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 
@@ -186,6 +200,34 @@ async function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
 
 const VALID_SCOPES: VaultScope[] = ['vault:read', 'vault:write', 'vault:admin'];
 
+function send401or403(res: http.ServerResponse, fail: Extract<AuthResult, { ok: false }>): void {
+  const body: Record<string, unknown> = { error: fail.error };
+  if (fail.errorType) body.error_type = fail.errorType;
+  if (fail.requiredScope) body.required_scope = fail.requiredScope;
+  if (fail.grantedScopes) body.granted_scopes = fail.grantedScopes;
+  // RFC 6750 challenge for 401; insufficient_scope challenge for 403.
+  if (fail.status === 401) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+  } else if (fail.errorType === 'insufficient_scope' && fail.requiredScope) {
+    res.setHeader(
+      'WWW-Authenticate',
+      `Bearer error="insufficient_scope", scope="${fail.requiredScope}"`,
+    );
+  }
+  json(res, fail.status, body);
+}
+
+async function gate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  required: ClawScope,
+): Promise<boolean> {
+  const result = await authenticate(req.headers.authorization, required);
+  if (result.ok) return true;
+  send401or403(res, result);
+  return false;
+}
+
 async function handleApi(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -194,17 +236,26 @@ async function handleApi(
   const { pathname } = url;
   const method = req.method ?? 'GET';
 
+  // Unauthenticated probes: liveness check and OAuth-bootstrap discovery.
+  // Discovery surfaces the hub origin so the SPA can reach the AS metadata
+  // (`/.well-known/oauth-authorization-server`) without hard-coding it.
   if (pathname === '/api/health' && method === 'GET') {
     json(res, 200, {
       service: 'paraclaw-web-server',
-      version: '0.0.4-rc.1',
+      version: '0.0.5-rc.1',
       data_dir: DATA_DIR,
       groups_dir: GROUPS_DIR,
     });
     return;
   }
 
+  if (pathname === '/api/discovery' && method === 'GET') {
+    json(res, 200, { hubOrigin: getHubOrigin() });
+    return;
+  }
+
   if (pathname === '/api/groups' && method === 'GET') {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     try {
       const groups = listAgentGroups();
       json(res, 200, { groups });
@@ -215,6 +266,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/groups' && method === 'POST') {
+    if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
     try {
       const body = await readJsonBody<{
         name?: string;
@@ -287,9 +339,11 @@ async function handleApi(
   }
 
   // GET /api/folder-availability/:slug — used by the new-agent wizard for
-  // live "is this slug free?" feedback.
+  // live "is this slug free?" feedback. Read-gated: the slug namespace is
+  // operator-private state.
   const folderAvail = pathname.match(/^\/api\/folder-availability\/([^/]+)$/);
   if (folderAvail && method === 'GET') {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     const slug = decodeURIComponent(folderAvail[1]);
     const v = validateFolderSlug(slug);
     if (!v.ok) {
@@ -301,8 +355,10 @@ async function handleApi(
   }
 
   // GET /api/folder-suggestion?name=... — wizard uses this to seed the slug
-  // input from the agent name.
+  // input from the agent name. Pure transform but kept behind read-gate so
+  // the auth-required surface is uniform.
   if (pathname === '/api/folder-suggestion' && method === 'GET') {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     const name = url.searchParams.get('name') ?? '';
     json(res, 200, { name, slug: suggestFolderSlug(name) });
     return;
@@ -313,6 +369,14 @@ async function handleApi(
   if (groupRoute) {
     const folder = decodeURIComponent(groupRoute[1]);
     const sub = groupRoute[2] ?? '';
+
+    // Pick the scope for the matching sub-route up front so we can gate
+    // before any DB read. GET → read; POST → write.
+    const requiredScope: ClawScope =
+      sub === '' && method === 'GET'
+        ? SCOPE_CLAW_READ
+        : SCOPE_CLAW_WRITE;
+    if (!(await gate(req, res, requiredScope))) return;
 
     const group = getAgentGroup(folder);
     if (!group) {
