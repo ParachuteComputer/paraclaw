@@ -49,6 +49,9 @@ import {
   validateFolderSlug,
 } from '../../../src/parachute/create-agent.js';
 import { getGroupStatus, type GroupStatus } from '../../../src/parachute/group-status.js';
+import { resolveSession } from '../../../src/session-manager.js';
+import { wakeContainer } from '../../../src/container-runner.js';
+import { log } from '../../../src/log.js';
 import {
   authenticate,
   getHubOrigin,
@@ -76,7 +79,7 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // parachute-hub#83 ships) will set this from `module.json` `paths[0]`
 // automatically. Empty string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.12-rc.1';
+const SERVICE_VERSION = '0.0.13-rc.1';
 
 // NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
 // process-singleton DB connection (`getDb`). Initialize it once at boot so
@@ -428,6 +431,34 @@ async function handleApi(
         // Re-read so the response reflects the persisted state.
         const updated = getAgentGroup(folder);
         json(res, 200, { group: updated, mintedToken: !body.token });
+      } catch (err) {
+        error(res, 500, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    // POST /api/groups/:folder/sessions — spawn (or wake) the agent-shared
+    // session for this group. Returns 202 immediately; container boot is
+    // fire-and-forget. The UI polls /api/groups/:folder for live status to
+    // see the session appear and the container come up. We choose
+    // 'agent-shared' mode because paraclaw-managed groups today are not
+    // wired to a messaging group at all (no Discord/Slack channel) — the
+    // claw runs in the background under whatever instructions live in
+    // its CLAUDE.md. agent-shared collapses to one session per group,
+    // which is the right shape for that no-channel case.
+    if (sub === '/sessions' && method === 'POST') {
+      try {
+        const { session, created } = resolveSession(group.id, null, null, 'agent-shared');
+        // Fire-and-forget: wakeContainer can take several seconds (image
+        // pull, mount setup, OneCLI agent ensure). Holding the request
+        // open that long would force the UI into a fake spinner; instead
+        // we 202 and let the existing /api/groups/:folder poll surface
+        // the live containerRunning state. Errors get logged on the host;
+        // the UI sees them as "container never came up" via the same poll.
+        void wakeContainer(session).catch((err) => {
+          log.error('paraclaw: wakeContainer failed', { sessionId: session.id, err });
+        });
+        json(res, 202, { sessionId: session.id, created });
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));
       }
