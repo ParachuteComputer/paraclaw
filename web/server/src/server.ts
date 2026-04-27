@@ -57,6 +57,7 @@ import {
   type AuthResult,
   type ClawScope,
 } from './auth.js';
+import { fetchHubVaults } from './hub-discovery.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 
@@ -75,7 +76,7 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // parachute-hub#83 ships) will set this from `module.json` `paths[0]`
 // automatically. Empty string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.10-rc.1';
+const SERVICE_VERSION = '0.0.12-rc.1';
 
 // NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
 // process-singleton DB connection (`getDb`). Initialize it once at boot so
@@ -111,9 +112,7 @@ function listAgentGroups(): AgentGroupView[] {
   const db = getDb();
   try {
     const rows = db
-      .prepare(
-        'SELECT id, name, folder, agent_provider, created_at FROM agent_groups ORDER BY created_at DESC',
-      )
+      .prepare('SELECT id, name, folder, agent_provider, created_at FROM agent_groups ORDER BY created_at DESC')
       .all() as AgentGroupRow[];
     return rows.map((r) => ({
       ...r,
@@ -129,9 +128,7 @@ function getAgentGroup(folder: string): AgentGroupView | null {
   const db = getDb();
   try {
     const row = db
-      .prepare(
-        'SELECT id, name, folder, agent_provider, created_at FROM agent_groups WHERE folder = ?',
-      )
+      .prepare('SELECT id, name, folder, agent_provider, created_at FROM agent_groups WHERE folder = ?')
       .get(folder) as AgentGroupRow | undefined;
     if (!row) return null;
     return {
@@ -149,10 +146,7 @@ function getAgentGroup(folder: string): AgentGroupView | null {
  * `pvt_…` line. Used by the attach flow so the user never types/pastes a
  * raw token through the UI.
  */
-function mintVaultToken(opts: {
-  scope: VaultScope;
-  label: string;
-}): Promise<{ token: string; label: string }> {
+function mintVaultToken(opts: { scope: VaultScope; label: string }): Promise<{ token: string; label: string }> {
   return new Promise((resolve, reject) => {
     const args = ['vault', 'tokens', 'create', '--scope', opts.scope, '--label', opts.label];
     const proc = spawn('parachute', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -167,11 +161,7 @@ function mintVaultToken(opts: {
     proc.on('error', (err) => reject(err));
     proc.on('close', (code) => {
       if (code !== 0) {
-        reject(
-          new Error(
-            `parachute vault tokens create exited ${code}: ${stderr.trim() || stdout.trim()}`,
-          ),
-        );
+        reject(new Error(`parachute vault tokens create exited ${code}: ${stderr.trim() || stdout.trim()}`));
         return;
       }
       // Output shape (vault 0.3.x):
@@ -191,11 +181,7 @@ function mintVaultToken(opts: {
 
 // --- HTTP plumbing -----------------------------------------------------------
 
-const json = (
-  res: http.ServerResponse,
-  status: number,
-  body: unknown,
-): void => {
+const json = (res: http.ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
 };
@@ -221,19 +207,12 @@ function send401or403(res: http.ServerResponse, fail: Extract<AuthResult, { ok: 
   if (fail.status === 401) {
     res.setHeader('WWW-Authenticate', 'Bearer');
   } else if (fail.errorType === 'insufficient_scope' && fail.requiredScope) {
-    res.setHeader(
-      'WWW-Authenticate',
-      `Bearer error="insufficient_scope", scope="${fail.requiredScope}"`,
-    );
+    res.setHeader('WWW-Authenticate', `Bearer error="insufficient_scope", scope="${fail.requiredScope}"`);
   }
   json(res, fail.status, body);
 }
 
-async function gate(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  required: ClawScope,
-): Promise<boolean> {
+async function gate(req: http.IncomingMessage, res: http.ServerResponse, required: ClawScope): Promise<boolean> {
   const result = await authenticate(req.headers.authorization, required);
   if (result.ok) return true;
   send401or403(res, result);
@@ -277,6 +256,23 @@ async function handleApi(
     return;
   }
 
+  // GET /api/vaults — enumerate registered vaults so the attach-vault
+  // picker can populate a dropdown. Sourced from the hub's well-known
+  // discovery doc (`<hubOrigin>/.well-known/parachute.json`), which
+  // returns the public-routable URL — critical because that URL gets
+  // baked into the agent container's MCP config and loopback would break
+  // any non-host-network agent.
+  if (pathname === '/api/vaults' && method === 'GET') {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    try {
+      const vaults = await fetchHubVaults();
+      json(res, 200, { vaults });
+    } catch (err) {
+      error(res, 502, err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
   if (pathname === '/api/groups' && method === 'POST') {
     if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
     try {
@@ -309,9 +305,7 @@ async function handleApi(
         return;
       }
 
-      let vaultArg:
-        | Parameters<typeof createParachuteAgentGroup>[0]['vault']
-        | undefined;
+      let vaultArg: Parameters<typeof createParachuteAgentGroup>[0]['vault'] | undefined;
       let mintedVaultToken = false;
       if (body.vault) {
         const scope = (body.vault.scope ?? 'vault:read') as VaultScope;
@@ -384,10 +378,7 @@ async function handleApi(
 
     // Pick the scope for the matching sub-route up front so we can gate
     // before any DB read. GET → read; POST → write.
-    const requiredScope: ClawScope =
-      sub === '' && method === 'GET'
-        ? SCOPE_CLAW_READ
-        : SCOPE_CLAW_WRITE;
+    const requiredScope: ClawScope = sub === '' && method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
     if (!(await gate(req, res, requiredScope))) return;
 
     const group = getAgentGroup(folder);
@@ -527,8 +518,6 @@ server.listen(PORT, HOST, () => {
       tagline: 'Manage your Parachute agent groups + vault attachments.',
     });
   } catch (err) {
-    console.warn(
-      `paraclaw: skipped services manifest update: ${err instanceof Error ? err.message : err}`,
-    );
+    console.warn(`paraclaw: skipped services manifest update: ${err instanceof Error ? err.message : err}`);
   }
 });
