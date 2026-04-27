@@ -42,6 +42,7 @@ import {
   suggestFolderSlug,
   validateFolderSlug,
 } from '../../../src/parachute/create-agent.js';
+import { getGroupStatus, type GroupStatus } from '../../../src/parachute/group-status.js';
 
 const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 
@@ -68,6 +69,7 @@ interface AgentGroupRow {
 
 interface AgentGroupView extends AgentGroupRow {
   vault: ReturnType<typeof readVaultAttachment>;
+  status: GroupStatus | null;
 }
 
 function getDb(): Database.Database {
@@ -90,6 +92,7 @@ function listAgentGroups(): AgentGroupView[] {
     return rows.map((r) => ({
       ...r,
       vault: readVaultAttachment(r.folder),
+      status: getGroupStatus(r.folder),
     }));
   } finally {
     db.close();
@@ -105,7 +108,11 @@ function getAgentGroup(folder: string): AgentGroupView | null {
       )
       .get(folder) as AgentGroupRow | undefined;
     if (!row) return null;
-    return { ...row, vault: readVaultAttachment(row.folder) };
+    return {
+      ...row,
+      vault: readVaultAttachment(row.folder),
+      status: getGroupStatus(row.folder),
+    };
   } finally {
     db.close();
   }
@@ -190,7 +197,7 @@ async function handleApi(
   if (pathname === '/api/health' && method === 'GET') {
     json(res, 200, {
       service: 'paraclaw-web-server',
-      version: '0.0.3-rc.1',
+      version: '0.0.4-rc.1',
       data_dir: DATA_DIR,
       groups_dir: GROUPS_DIR,
     });

@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ScopeGrants, SCOPE_OPTIONS } from "../components/ScopeGrants.tsx";
+import { StatusDot, formatRelative } from "../components/StatusDot.tsx";
 import {
   attachVault,
   detachVault,
   getGroup,
   type AgentGroupView,
+  type GroupStatus,
   type VaultScope,
 } from "../lib/api.ts";
+
+const POLL_MS = 7_000;
 
 export function GroupDetail() {
   const { folder } = useParams<{ folder: string }>();
@@ -43,6 +47,17 @@ export function GroupDetail() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Background poll for live status — silent on failure.
+  useEffect(() => {
+    if (!folder || !group) return;
+    const t = setInterval(() => {
+      getGroup(folder)
+        .then((g) => setGroup(g))
+        .catch(() => {});
+    }, POLL_MS);
+    return () => clearInterval(t);
+  }, [folder, group]);
 
   const onAttach = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +154,7 @@ export function GroupDetail() {
     <div>
       <Link to="/" className="muted">← All groups</Link>
       <h2 style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+        <StatusDot status={group.status} />
         {group.name}
         {group.vault ? (
           <span className="tag">{group.vault.scope}</span>
@@ -163,6 +179,8 @@ export function GroupDetail() {
           <div>created</div><div>{new Date(group.created_at).toLocaleString()}</div>
         </div>
       </div>
+
+      {group.status && <StatusSection status={group.status} />}
 
       {group.vault ? (
         <div className="section">
@@ -292,3 +310,81 @@ export function GroupDetail() {
   );
 }
 
+function StatusSection({ status }: { status: GroupStatus }) {
+  return (
+    <div className="section">
+      <h3>Live status</h3>
+      <div className="kv">
+        <div>container</div>
+        <div>
+          {status.containerRunning ? (
+            <span className="status-text alive">running</span>
+          ) : (
+            <span className="status-text idle">idle</span>
+          )}
+        </div>
+        <div>active sessions</div>
+        <div>{status.activeSessionCount} of {status.sessionCount}</div>
+        <div>last heartbeat</div>
+        <div>
+          {status.lastHeartbeatAt ? (
+            <>
+              {formatRelative(status.lastHeartbeatAt)}{" "}
+              <span className="dim">({new Date(status.lastHeartbeatAt).toLocaleString()})</span>
+            </>
+          ) : (
+            <span className="dim">never</span>
+          )}
+        </div>
+        <div>last message in</div>
+        <div>
+          {status.lastMessageInAt ? (
+            <>
+              {formatRelative(status.lastMessageInAt)}{" "}
+              <span className="dim">({new Date(status.lastMessageInAt).toLocaleString()})</span>
+            </>
+          ) : (
+            <span className="dim">none</span>
+          )}
+        </div>
+        <div>last message out</div>
+        <div>
+          {status.lastMessageOutAt ? (
+            <>
+              {formatRelative(status.lastMessageOutAt)}{" "}
+              <span className="dim">({new Date(status.lastMessageOutAt).toLocaleString()})</span>
+            </>
+          ) : (
+            <span className="dim">none</span>
+          )}
+        </div>
+      </div>
+      {status.sessions.length > 0 && (
+        <>
+          <hr className="sep" />
+          <div className="dim" style={{ marginBottom: "0.5rem" }}>
+            Sessions ({status.sessions.length}):
+          </div>
+          <ul className="session-list">
+            {status.sessions.map((s) => (
+              <li key={s.sessionId}>
+                <code>{s.sessionId}</code>{" "}
+                {s.alive ? (
+                  <span className="status-text alive">alive</span>
+                ) : (
+                  <span className="status-text idle">{s.containerStatus}</span>
+                )}{" "}
+                <span className="dim">— {s.status}</span>
+                {s.lastHeartbeatAt && (
+                  <>
+                    {" "}<span className="dim">· hb {formatRelative(s.lastHeartbeatAt)}</span>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
