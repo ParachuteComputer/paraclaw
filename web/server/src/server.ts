@@ -75,7 +75,7 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // parachute-hub#83 ships) will set this from `module.json` `paths[0]`
 // automatically. Empty string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.7-rc.1';
+const SERVICE_VERSION = '0.0.10-rc.1';
 
 // NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
 // process-singleton DB connection (`getDb`). Initialize it once at boot so
@@ -244,8 +244,8 @@ async function handleApi(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
+  pathname: string = url.pathname,
 ): Promise<void> {
-  const { pathname } = url;
   const method = req.method ?? 'GET';
 
   // Unauthenticated probes: liveness check and OAuth-bootstrap discovery.
@@ -472,8 +472,19 @@ const serveStatic = makeServeStatic({ distDir: UI_DIST, mount: MOUNT });
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    if (url.pathname.startsWith('/api/')) {
-      await handleApi(req, res, url);
+    // Strip MOUNT (e.g. `/claw`) once, here, before dispatch — Tailscale
+    // serve / the hub's reverse proxy preserve the prefix when forwarding.
+    // Without this, `/claw/api/health` falls through `/api/`-startsWith
+    // and gets SPA-shelled as text/html. (parachute-hub/src/notes-serve.ts
+    // does the same dance for the notes PWA.) Static-serve does its own
+    // internal strip via makeServeStatic, but routing through one
+    // canonical strip keeps the two surfaces consistent.
+    const dispatchPath =
+      MOUNT && (url.pathname === MOUNT || url.pathname.startsWith(`${MOUNT}/`))
+        ? url.pathname.slice(MOUNT.length) || '/'
+        : url.pathname;
+    if (dispatchPath.startsWith('/api/')) {
+      await handleApi(req, res, url, dispatchPath);
       return;
     }
     if (req.method === 'GET' || req.method === 'HEAD') {

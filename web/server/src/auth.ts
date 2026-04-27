@@ -7,10 +7,13 @@
  * The shared scope-guard library proposed in cli#59 will eventually absorb
  * both.
  *
- * Hub origin resolution: `PARACLAW_HUB_ORIGIN` env override → loopback
- * `http://127.0.0.1:1939`. We intentionally do NOT read services.json — the
- * hub is the dispatcher, not a registered service in that file (matching
- * vault's choice).
+ * Hub origin resolution: `PARACLAW_HUB_ORIGIN` (test override) →
+ * `PARACHUTE_HUB_ORIGIN` (the hub lifecycle stamps this on every spawned
+ * service — see `parachute-hub/src/commands/lifecycle.ts`) → loopback
+ * `http://127.0.0.1:1939`. We intentionally do NOT read services.json —
+ * the hub is the dispatcher, not a registered service in that file
+ * (matching vault's choice). Tailnet-served paraclaw must see the hub's
+ * tailnet origin or `iss` mismatch rejects every JWT.
  *
  * Scope vocabulary introduced here: `claw:read` / `claw:write` / `claw:admin`
  * with `admin ⊇ write ⊇ read` inheritance per
@@ -34,8 +37,10 @@ export type ClawScope =
   | typeof SCOPE_CLAW_ADMIN;
 
 export function getHubOrigin(): string {
-  const env = process.env.PARACLAW_HUB_ORIGIN?.replace(/\/$/, '');
-  if (env && env.length > 0) return env;
+  const override = process.env.PARACLAW_HUB_ORIGIN?.replace(/\/$/, '');
+  if (override && override.length > 0) return override;
+  const fromHub = process.env.PARACHUTE_HUB_ORIGIN?.replace(/\/$/, '');
+  if (fromHub && fromHub.length > 0) return fromHub;
   return DEFAULT_HUB_LOOPBACK;
 }
 
