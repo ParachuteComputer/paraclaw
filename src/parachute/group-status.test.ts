@@ -81,9 +81,7 @@ function seedInboundDb(sessionId: string, lastTimestamp: string) {
   const dbPath = inboundDbPath('ag-1', sessionId);
   const db = new Database(dbPath);
   db.exec(INBOUND_SCHEMA);
-  db.prepare(
-    "INSERT INTO messages_in (id, kind, timestamp, content) VALUES ('m1', 'msg', ?, '{}')",
-  ).run(lastTimestamp);
+  db.prepare("INSERT INTO messages_in (id, kind, timestamp, content) VALUES ('m1', 'msg', ?, '{}')").run(lastTimestamp);
   db.close();
 }
 
@@ -91,9 +89,9 @@ function seedOutboundDb(sessionId: string, lastTimestamp: string) {
   const dbPath = outboundDbPath('ag-1', sessionId);
   const db = new Database(dbPath);
   db.exec(OUTBOUND_SCHEMA);
-  db.prepare(
-    "INSERT INTO messages_out (id, kind, timestamp, content) VALUES ('o1', 'msg', ?, '{}')",
-  ).run(lastTimestamp);
+  db.prepare("INSERT INTO messages_out (id, kind, timestamp, content) VALUES ('o1', 'msg', ?, '{}')").run(
+    lastTimestamp,
+  );
   db.close();
 }
 

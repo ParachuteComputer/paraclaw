@@ -76,7 +76,13 @@ export function getGroupStatus(folder: string, opts: GroupStatusOpts = {}): Grou
 
 function readSessionStatus(
   agentGroupId: string,
-  session: { id: string; status: 'active' | 'closed'; container_status: 'running' | 'idle' | 'stopped'; created_at: string; last_active: string | null },
+  session: {
+    id: string;
+    status: 'active' | 'closed';
+    container_status: 'running' | 'idle' | 'stopped';
+    created_at: string;
+    last_active: string | null;
+  },
   nowMs: number,
   aliveThresholdMs: number,
 ): SessionStatus {
@@ -109,9 +115,7 @@ function maxTimestamp(dbPath: string, table: 'messages_in' | 'messages_out'): st
   let db: Database.Database | null = null;
   try {
     db = new Database(dbPath, { readonly: true, fileMustExist: true });
-    const row = db.prepare(`SELECT MAX(timestamp) AS ts FROM ${table}`).get() as
-      | { ts: string | null }
-      | undefined;
+    const row = db.prepare(`SELECT MAX(timestamp) AS ts FROM ${table}`).get() as { ts: string | null } | undefined;
     return row?.ts ?? null;
   } catch {
     // Session DB not initialized yet, schema mismatch, or transient lock — caller treats null as "no data".
