@@ -229,6 +229,7 @@ The agent container runs on **Bun**; the host runs on **Node** (pnpm). They comm
 - **Adding a Node CLI the agent invokes at runtime** (like `agent-browser`, `claude-code`, `vercel`) → put it in the Dockerfile's pnpm global-install block, pinned to an exact version via a new `ARG`. Don't use `bun install -g` — that bypasses the pnpm supply-chain policy.
 - **Changing the Dockerfile entrypoint or the dynamic-spawn command** (`src/container-runner.ts` line ~301) → keep `exec bun ...` so signals forward cleanly. The image has no `/app/dist`; don't reintroduce a tsc build step.
 - **Changing session-DB pragmas** (`container/agent-runner/src/db/connection.ts`) → `journal_mode=DELETE` is load-bearing for cross-mount visibility. Read the comment block at the top of the file first.
+- **Editing `.parachute/module.json` `startCmd`** → use `["pnpm", "exec", "tsx", "web/server/src/server.ts"]`, NOT `bun`. The web server reuses NanoClaw's `initDb()` which loads `better-sqlite3` (native bindings) — bun crashes on import. Host-runs-on-Node applies to the parachute lifecycle spawn too.
 
 ## CJK font support
 
