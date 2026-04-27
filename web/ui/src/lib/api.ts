@@ -3,7 +3,13 @@
  *
  * In dev: Vite proxies /api/* to localhost:4944.
  * In prod: server serves the built UI under /claw/, /api/* on the same origin.
+ *
+ * Auth: every /api/* request gets `Authorization: Bearer <jwt>` from the
+ * hub-OAuth flow in `./auth.ts`. On a 401 we refresh once; if the refresh
+ * fails the wrapper hard-redirects to login. /api/discovery is the one
+ * exception — it's the bootstrap and is fetched directly by auth.ts.
  */
+import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from "./auth.ts";
 
 const API_BASE = "/api";
 
@@ -48,31 +54,61 @@ export interface AgentGroupView {
   status: GroupStatus | null;
 }
 
-async function request<T>(
+async function doFetch(
   path: string,
-  init?: RequestInit & { json?: unknown },
-): Promise<T> {
+  init: RequestInit & { json?: unknown } | undefined,
+  bearer: string | null,
+): Promise<Response> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...((init?.headers as Record<string, string>) ?? {}),
   };
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
   let body: BodyInit | undefined = init?.body as BodyInit | undefined;
   if (init?.json !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.json);
   }
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, body });
-  if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`;
-    try {
-      const text = await res.text();
-      const parsed = JSON.parse(text) as { error?: string };
-      if (parsed.error) message = parsed.error;
-      else if (text) message = text;
-    } catch {
-      // not JSON, use status
+  return fetch(`${API_BASE}${path}`, { ...init, headers, body });
+}
+
+async function readError(res: Response): Promise<string> {
+  let message = `${res.status} ${res.statusText}`;
+  try {
+    const text = await res.text();
+    const parsed = JSON.parse(text) as { error?: string };
+    if (parsed.error) message = parsed.error;
+    else if (text) message = text;
+  } catch {
+    // not JSON, use status
+  }
+  return message;
+}
+
+export async function request<T>(
+  path: string,
+  init?: RequestInit & { json?: unknown },
+): Promise<T> {
+  let bearer = getAccessToken();
+  if (!bearer) {
+    // No token at all — kick off the OAuth dance. beginLogin() never returns.
+    await beginLogin();
+  }
+  let res = await doFetch(path, init, bearer);
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      bearer = refreshed;
+      res = await doFetch(path, init, bearer);
     }
-    throw new Error(message);
+    if (res.status === 401) {
+      // Refresh failed or post-refresh still 401 — drop tokens and re-auth.
+      clearTokens();
+      await beginLogin();
+    }
+  }
+  if (!res.ok) {
+    throw new Error(await readError(res));
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;

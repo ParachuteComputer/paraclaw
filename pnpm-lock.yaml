@@ -26,6 +26,9 @@ importers:
       cron-parser:
         specifier: 5.5.0
         version: 5.5.0
+      jose:
+        specifier: ^6.2.2
+        version: 6.2.2
       kleur:
         specifier: ^4.1.5
         version: 4.1.5
@@ -873,6 +876,9 @@ packages:
 
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
+
+  jose@6.2.2:
+    resolution: {integrity: sha512-d7kPDd34KO/YnzaDOlikGpOurfF0ByC2sEV4cANCtdqLlTfBlw2p14O/5d/zv40gJPbIQxfES3nSx1/oYNyuZQ==}
 
   js-yaml@4.1.1:
     resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==}
@@ -2229,6 +2235,8 @@ snapshots:
   is-plain-obj@4.1.0: {}
 
   isexe@2.0.0: {}
+
+  jose@6.2.2: {}
 
   js-yaml@4.1.1:
     dependencies:
