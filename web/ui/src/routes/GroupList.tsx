@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { StatusDot, formatRelative } from "../components/StatusDot.tsx";
 import { listGroups, type AgentGroupView } from "../lib/api.ts";
+
+const POLL_MS = 7_000;
 
 export function GroupList() {
   const [state, setState] = useState<
@@ -15,6 +18,7 @@ export function GroupList() {
     setReloadKey((k) => k + 1);
   }, []);
 
+  // Initial load + manual reload.
   useEffect(() => {
     let cancelled = false;
     listGroups()
@@ -31,6 +35,25 @@ export function GroupList() {
       cancelled = true;
     };
   }, [reloadKey]);
+
+  // Background poll — refresh status without flipping back to loading state.
+  useEffect(() => {
+    if (state.kind !== "ok") return;
+    let cancelled = false;
+    const t = setInterval(() => {
+      listGroups()
+        .then((groups) => {
+          if (!cancelled) setState({ kind: "ok", groups });
+        })
+        .catch(() => {
+          // Polling error is silent — leave the last good snapshot in view.
+        });
+    }, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [state.kind]);
 
   if (state.kind === "loading") {
     return (
@@ -112,6 +135,7 @@ export function GroupList() {
           className="group-row"
         >
           <div className="name">
+            <StatusDot status={g.status} />
             {g.name}
             {g.vault ? (
               <span className="tag">{g.vault.scope}</span>
@@ -123,6 +147,16 @@ export function GroupList() {
             folder: <code>{g.folder}</code>
             {g.agent_provider && (
               <> &middot; provider: <code>{g.agent_provider}</code></>
+            )}
+            {g.status && g.status.containerRunning && (
+              <> &middot; <span className="status-text alive">
+                {g.status.activeSessionCount} session{g.status.activeSessionCount === 1 ? "" : "s"} alive
+              </span></>
+            )}
+            {g.status && !g.status.containerRunning && g.status.lastHeartbeatAt && (
+              <> &middot; <span className="status-text idle">
+                idle &middot; last active {formatRelative(g.status.lastHeartbeatAt)}
+              </span></>
             )}
             {g.vault && (
               <>

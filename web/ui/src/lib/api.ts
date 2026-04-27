@@ -16,6 +16,28 @@ export interface VaultAttachment {
   attachedAt: string;
 }
 
+export interface SessionStatus {
+  sessionId: string;
+  status: "active" | "closed";
+  containerStatus: "running" | "idle" | "stopped";
+  alive: boolean;
+  lastHeartbeatAt: string | null;
+  lastMessageInAt: string | null;
+  lastMessageOutAt: string | null;
+  createdAt: string;
+  lastActiveAt: string | null;
+}
+
+export interface GroupStatus {
+  containerRunning: boolean;
+  activeSessionCount: number;
+  sessionCount: number;
+  lastHeartbeatAt: string | null;
+  lastMessageInAt: string | null;
+  lastMessageOutAt: string | null;
+  sessions: SessionStatus[];
+}
+
 export interface AgentGroupView {
   id: string;
   name: string;
@@ -23,6 +45,7 @@ export interface AgentGroupView {
   agent_provider: string | null;
   created_at: string;
   vault: VaultAttachment | null;
+  status: GroupStatus | null;
 }
 
 async function request<T>(
