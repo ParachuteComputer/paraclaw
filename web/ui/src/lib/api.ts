@@ -155,6 +155,18 @@ export async function attachVault(
   );
 }
 
+export interface SpawnSessionResult {
+  sessionId: string;
+  created: boolean;
+}
+
+export async function spawnSession(folder: string): Promise<SpawnSessionResult> {
+  return request<SpawnSessionResult>(`/groups/${encodeURIComponent(folder)}/sessions`, {
+    method: "POST",
+    json: {},
+  });
+}
+
 export async function detachVault(folder: string, mcpName?: string): Promise<AgentGroupView> {
   const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
     method: 'POST',

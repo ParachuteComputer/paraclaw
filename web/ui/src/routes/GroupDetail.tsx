@@ -7,6 +7,7 @@ import {
   attachVault,
   detachVault,
   getGroup,
+  spawnSession,
   type AgentGroupView,
   type GroupStatus,
   type VaultScope,
@@ -29,6 +30,7 @@ export function GroupDetail() {
   const [pasteToken, setPasteToken] = useState('');
   const [tokenLabel, setTokenLabel] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [spawning, setSpawning] = useState(false);
   const [flash, setFlash] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const reload = useCallback(async () => {
@@ -90,6 +92,32 @@ export function GroupDetail() {
       });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const onSpawn = async () => {
+    if (!folder) return;
+    setSpawning(true);
+    setFlash(null);
+    try {
+      const result = await spawnSession(folder);
+      // Reload immediately so the new session shows up in the live-status
+      // list before the next 7s poll tick. Container `running` flips on a
+      // later tick once the heartbeat lands.
+      await reload();
+      setFlash({
+        kind: 'ok',
+        text: result.created
+          ? `Session ${result.sessionId} created — container starting…`
+          : `Session ${result.sessionId} already exists — waking container…`,
+      });
+    } catch (err) {
+      setFlash({
+        kind: 'error',
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setSpawning(false);
     }
   };
 
@@ -199,7 +227,9 @@ export function GroupDetail() {
         </div>
       </div>
 
-      {group.status && <StatusSection status={group.status} />}
+      {group.status && (
+        <StatusSection status={group.status} onSpawn={onSpawn} spawning={spawning} />
+      )}
 
       {group.vault ? (
         <div className="section">
@@ -333,11 +363,24 @@ export function GroupDetail() {
   );
 }
 
-function StatusSection({ status }: { status: GroupStatus }) {
+function StatusSection({
+  status,
+  onSpawn,
+  spawning,
+}: {
+  status: GroupStatus;
+  onSpawn: () => void;
+  spawning: boolean;
+}) {
   return (
     <div className="section">
-      <h3>Live status</h3>
-      <div className="kv">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+        <h3 style={{ margin: 0 }}>Live status</h3>
+        <button onClick={onSpawn} disabled={spawning}>
+          {spawning ? 'Spawning…' : '+ New session'}
+        </button>
+      </div>
+      <div className="kv" style={{ marginTop: '1rem' }}>
         <div>container</div>
         <div>
           {status.containerRunning ? (
@@ -384,9 +427,13 @@ function StatusSection({ status }: { status: GroupStatus }) {
           )}
         </div>
       </div>
-      {status.sessions.length > 0 && (
+      <hr className="sep" />
+      {status.sessions.length === 0 ? (
+        <p className="dim" style={{ marginBottom: 0 }}>
+          No sessions yet — spawn one with the button above to start the agent's container.
+        </p>
+      ) : (
         <>
-          <hr className="sep" />
           <div className="dim" style={{ marginBottom: '0.5rem' }}>
             Sessions ({status.sessions.length}):
           </div>
