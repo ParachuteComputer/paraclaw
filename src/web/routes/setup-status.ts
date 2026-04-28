@@ -133,9 +133,7 @@ function checkVaultAttached(): SetupCheck {
   // but isn't vault-bound yet.
   let folders: string[] = [];
   try {
-    const rows = getDb()
-      .prepare<{ folder: string }>('SELECT folder FROM agent_groups')
-      .all();
+    const rows = getDb().prepare<{ folder: string }>('SELECT folder FROM agent_groups').all();
     folders = rows.map((r) => r.folder);
   } catch (err) {
     return {

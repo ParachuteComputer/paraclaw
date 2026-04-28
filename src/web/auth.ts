@@ -31,10 +31,7 @@ export const SCOPE_CLAW_WRITE = 'claw:write' as const;
 export const SCOPE_CLAW_ADMIN = 'claw:admin' as const;
 export const SCOPE_VAULT_ADMIN = 'vault:admin' as const;
 
-export type ClawScope =
-  | typeof SCOPE_CLAW_READ
-  | typeof SCOPE_CLAW_WRITE
-  | typeof SCOPE_CLAW_ADMIN;
+export type ClawScope = typeof SCOPE_CLAW_READ | typeof SCOPE_CLAW_WRITE | typeof SCOPE_CLAW_ADMIN;
 
 export function getHubOrigin(): string {
   const override = process.env.PARACLAW_HUB_ORIGIN?.replace(/\/$/, '');
@@ -163,10 +160,7 @@ function extractBearer(header: string | undefined): string | null {
  * structured pass/fail rather than throwing so callers can shape the
  * response uniformly (RFC-6749-style 403 body for insufficient_scope).
  */
-export async function authenticate(
-  authHeader: string | undefined,
-  required: ClawScope,
-): Promise<AuthResult> {
+export async function authenticate(authHeader: string | undefined, required: ClawScope): Promise<AuthResult> {
   const token = extractBearer(authHeader);
   if (!token) {
     return { ok: false, status: 401, error: 'missing or malformed Authorization header' };

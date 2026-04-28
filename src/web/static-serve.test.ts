@@ -92,10 +92,7 @@ describe('makeServeStatic', () => {
 
   beforeEach(() => {
     distDir = mkdtempSync(join(tmpdir(), 'paraclaw-static-'));
-    writeFileSync(
-      join(distDir, 'index.html'),
-      '<!doctype html><html><body>shell</body></html>',
-    );
+    writeFileSync(join(distDir, 'index.html'), '<!doctype html><html><body>shell</body></html>');
     mkdirSync(join(distDir, 'assets'));
     writeFileSync(join(distDir, 'assets', 'index-X.js'), 'export const k = 1;');
     writeFileSync(join(distDir, 'assets', 'index-X.css'), 'body { color: red }');

@@ -175,9 +175,8 @@ function rowToView(row: WireJoinRow): ChannelWireView {
     agentGroupFolder: row.ag_folder,
     agentGroupName: row.ag_name,
     engageMode: dbToApiEngage(row.engage_mode, row.engage_pattern),
-    engagePattern: row.engage_mode === 'pattern' && row.engage_pattern !== ALL_MESSAGES_PATTERN_SENTINEL
-      ? row.engage_pattern
-      : null,
+    engagePattern:
+      row.engage_mode === 'pattern' && row.engage_pattern !== ALL_MESSAGES_PATTERN_SENTINEL ? row.engage_pattern : null,
     senderScope: dbToApiSenderScope(row.sender_scope),
     ignoredMessagePolicy: dbToApiIgnoredPolicy(row.ignored_message_policy),
     priority: row.priority,

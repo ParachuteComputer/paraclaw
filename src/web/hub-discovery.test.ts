@@ -87,10 +87,7 @@ describe('fetchHubVaults', () => {
     process.env.PARACHUTE_HUB_ORIGIN = 'https://other.example';
     await fetchHubVaults(stub, now);
     expect(stub).toHaveBeenCalledTimes(2);
-    expect(stub).toHaveBeenLastCalledWith(
-      'https://other.example/.well-known/parachute.json',
-      expect.anything(),
-    );
+    expect(stub).toHaveBeenLastCalledWith('https://other.example/.well-known/parachute.json', expect.anything());
   });
 
   it('throws on non-2xx so the endpoint can surface the error to the UI', async () => {

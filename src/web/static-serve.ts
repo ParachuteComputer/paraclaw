@@ -59,11 +59,7 @@ export interface StaticServeOpts {
  */
 export function makeServeStatic(opts: StaticServeOpts) {
   const { distDir, mount } = opts;
-  return function serveStatic(
-    _req: http.IncomingMessage,
-    res: http.ServerResponse,
-    urlPath: string,
-  ): void {
+  return function serveStatic(_req: http.IncomingMessage, res: http.ServerResponse, urlPath: string): void {
     if (!fs.existsSync(distDir)) {
       res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
       res.end(
