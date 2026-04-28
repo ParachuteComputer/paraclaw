@@ -81,8 +81,14 @@ function main(): void {
     const name = (raw.name ?? '').trim();
     const value = raw.value;
     if (!name || typeof value !== 'string') {
+      // Redact the value field before logging — the migration input file
+      // contains plaintext secrets and we don't want them surfacing in shell
+      // captures or terminal scrollback. Name is also redacted because some
+      // operators key secrets by an identifier the value would expose
+      // (e.g. `MY_TOKEN_xoxb-…`).
       skipped++;
-      process.stderr.write(`skipped: missing name or value (${JSON.stringify(raw).slice(0, 80)})\n`);
+      const safe = { ...raw, name: name || '[unnamed]', value: '[REDACTED]' };
+      process.stderr.write(`skipped: missing name or value (${JSON.stringify(safe).slice(0, 120)})\n`);
       continue;
     }
     let kind: SecretKind = 'generic';

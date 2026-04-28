@@ -56,7 +56,7 @@ import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
-  log.info('NanoClaw starting');
+  log.info('Paraclaw starting');
 
   // 1. Init central DB
   const dbPath = path.join(DATA_DIR, 'v2.db');
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
   startHostSweep();
   log.info('Host sweep started');
 
-  log.info('NanoClaw running');
+  log.info('Paraclaw running');
 }
 
 /** Graceful shutdown. */

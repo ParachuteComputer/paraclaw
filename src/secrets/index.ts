@@ -15,8 +15,16 @@ import crypto from 'crypto';
 
 import { getDb } from '../db/connection.js';
 import type { Database } from '../db/connection.js';
-import { decryptSecret, encryptSecret } from './crypto.js';
+import { decryptSecret, deriveKey, encryptSecret } from './crypto.js';
 import { loadOrCreateMasterKey } from './master-key.js';
+
+// Domain tag for HKDF-derived secrets-store key. Bumping the version (v2…)
+// would force re-encryption of every row in this table. See crypto.ts.
+const SECRETS_INFO = 'paraclaw.secrets.v1';
+
+function secretsKey(): Buffer {
+  return deriveKey(loadOrCreateMasterKey(), SECRETS_INFO);
+}
 
 export type SecretKind = 'channel-token' | 'api-key' | 'generic';
 export type AssignedMode = 'all' | 'selective';
@@ -53,7 +61,7 @@ function nowIso(): string {
 
 /** Insert or update a secret. Returns the row's id. */
 export function putSecret(name: string, value: string, opts: PutSecretOpts = {}): string {
-  const key = loadOrCreateMasterKey();
+  const key = secretsKey();
   const ct = encryptSecret(value, key);
   const agentGroupId = opts.agent_group_id ?? null;
   const kind = opts.kind ?? 'generic';
@@ -115,7 +123,7 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
  * agent-scoped secret beats a global one with the same name.
  */
 export function getSecret(name: string, agentGroupId?: string | null): string | undefined {
-  const key = loadOrCreateMasterKey();
+  const key = secretsKey();
   const scoped = agentGroupId
     ? db()
         .prepare<RawRow>(`SELECT * FROM secrets WHERE name = @name AND agent_group_id = @agent_group_id`)
@@ -166,7 +174,7 @@ export function deleteSecret(id: string): boolean {
  * env vars and never log. Agent-scoped wins over global on name collision.
  */
 export function resolveInjectableSecrets(agentGroupId: string): Map<string, string> {
-  const key = loadOrCreateMasterKey();
+  const key = secretsKey();
   const rows = db()
     .prepare<RawRow>(
       `SELECT * FROM secrets

@@ -345,9 +345,15 @@ async function handleApi(
   }
 
   // /api/secrets — local AES-GCM secret store. Read-gated for list,
-  // write-gated for put/delete. Plaintext values are never returned.
+  // ADMIN-gated for put/delete. Mutating the secret store is materially
+  // more dangerous than other writes: a write-only token would be enough
+  // to swap out any vault credential and silently MITM downstream API
+  // calls. We force `claw:admin` so the operator has to explicitly grant
+  // that scope to whatever client is touching this surface (typically only
+  // the web UI when an admin is signed in). Plaintext values are never
+  // returned by any GET regardless of scope.
   if (pathname === '/api/secrets' || pathname.startsWith('/api/secrets/')) {
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSecretsRoute({ pathname, method, url, req, res });
