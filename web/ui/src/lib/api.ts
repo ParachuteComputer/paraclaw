@@ -338,6 +338,12 @@ export async function listGroupActivity(
  */
 export type AppConnectionStatus = 'active' | 'expired' | 'revoked';
 
+/**
+ * Per-connection scope: `all` injects into every agent group; `selective`
+ * consults the join table. Mirrors the secrets shape from PR1.
+ */
+export type AssignedMode = 'all' | 'selective';
+
 export interface AppConnectionView {
   id: string;
   provider: string;
@@ -351,6 +357,13 @@ export interface AppConnectionView {
   status: AppConnectionStatus;
   /** Count only — the assignment list isn't returned here. */
   agentGroupCount: number;
+  /**
+   * Forward-compat: nullable in v1; mandatory once the cross-page-pivot
+   * follow-up lands the per-connection assignment editor. UI is not yet
+   * bound to this field — leaving the slot in the type so the next PR
+   * doesn't have to retrofit.
+   */
+  assignedMode: AssignedMode | null;
 }
 
 export interface AppConfigView {
@@ -367,8 +380,12 @@ export interface AppConfigView {
 export async function listAppConnections(): Promise<AppConnectionView[]> {
   // Server returns the list directly per the brief (no envelope), but we
   // accept either shape so a future envelope migration doesn't break here.
-  const r = await request<AppConnectionView[] | { apps: AppConnectionView[] }>('/apps');
-  return Array.isArray(r) ? r : r.apps;
+  // assignedMode is forward-compat (see type comment) — default to null
+  // when the v1 server omits it.
+  type Wire = Omit<AppConnectionView, 'assignedMode'> & { assignedMode?: AssignedMode | null };
+  const r = await request<Wire[] | { apps: Wire[] }>('/apps');
+  const list = Array.isArray(r) ? r : r.apps;
+  return list.map((c) => ({ ...c, assignedMode: c.assignedMode ?? null }));
 }
 
 export async function getAppConfig(provider: string): Promise<AppConfigView | null> {
