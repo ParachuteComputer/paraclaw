@@ -199,10 +199,7 @@ Access layer: `src/db/agent-destinations.ts`.
 
 ### 1.11 `pending_approvals`
 
-Two workflows share this table:
-
-- **Session-bound MCP approvals** — `install_packages`, `add_mcp_server`. `session_id` is set.
-- **OneCLI credential approvals** — `session_id` may be NULL; `agent_group_id` + `channel_type` + `platform_id` route the admin card.
+Session-bound MCP approvals (`install_packages`, `add_mcp_server`) — `session_id` is set; `agent_group_id` + `channel_type` + `platform_id` columns route the admin card and let non-session-bound flows share the table without a schema change.
 
 ```sql
 CREATE TABLE pending_approvals (
@@ -226,7 +223,7 @@ CREATE INDEX idx_pending_approvals_action_status ON pending_approvals(action, st
 
 - `status`: `pending` | `approved` | `rejected` | `expired`.
 - `platform_message_id` lets the host edit the admin card in place after a decision.
-- Access layer: `src/db/sessions.ts`; sweep + delivery: `src/onecli-approvals.ts`.
+- Access layer: `src/db/sessions.ts`; sweep + delivery: `src/modules/approvals/`.
 
 ### 1.12 `unregistered_senders`
 
@@ -308,7 +305,7 @@ Migrations live in `src/db/migrations/`, one file per migration. Runner: `runMig
 |---|------|------------|
 | 001 | `001-initial.ts` | Core tables: `agent_groups`, `messaging_groups`, `messaging_group_agents`, `users`, `user_roles`, `agent_group_members`, `user_dms`, `sessions`, `pending_questions` |
 | 002 | `002-chat-sdk-state.ts` | `chat_sdk_kv`, `chat_sdk_subscriptions`, `chat_sdk_locks`, `chat_sdk_lists` |
-| 003 | `003-pending-approvals.ts` | `pending_approvals` (session-bound + OneCLI fields) |
+| 003 | `003-pending-approvals.ts` | `pending_approvals` (session-bound + non-session routing fields) |
 | 004 | `004-agent-destinations.ts` | `agent_destinations` + backfill from existing `messaging_group_agents` wirings |
 | 007 | `007-pending-approvals-title-options.ts` | `ALTER TABLE pending_approvals` add `title`, `options_json` (retrofits DBs created between 003 and 007) |
 | 008 | `008-dropped-messages.ts` | `unregistered_senders` |

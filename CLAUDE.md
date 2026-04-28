@@ -104,20 +104,9 @@ Surfaces:
 - **HTTP API** — `/api/secrets` (GET / POST / PATCH / DELETE) is the same code path the UI uses; scope-gated by `claw:admin`.
 - **Per-agent assignment** — every secret carries `assigned_mode` (`all` = injected into every group; `selective` = injected only into groups in `secret_assignments`).
 
-### Migrating from OneCLI
-
-Pre-paraclaw installs that used the OneCLI Agent Vault have a one-shot migration:
-
-```bash
-onecli secrets list --json > /tmp/onecli-secrets.json     # operator's shell
-bun src/cli/migrate-onecli.ts /tmp/onecli-secrets.json    # encrypts with master key + upserts into central DB
-```
-
-The migration is idempotent (`putSecret` is upsert-by `(name, agent_group_id)`) and re-runnable. After it lands, OneCLI is no longer reachable from paraclaw at runtime — the gateway URL/API key env vars are gone, the SDK is uninstalled, and the long-poll bridge is deleted. Operators are free to shut OneCLI down.
-
 ### Approval-gated credential use
 
-Approval flows for credential use are now paraclaw-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`. There's no external gateway in the loop and no in-memory promise bridge to time out.
+Approval flows for credential use are paraclaw-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`.
 
 ## Skills
 

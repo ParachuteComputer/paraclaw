@@ -16,7 +16,6 @@
     "prepare": "husky",
     "parachute": "bun scripts/parachute.ts",
     "web:build": "cd web/ui && pnpm install --ignore-workspace && pnpm build",
-    "migrate-onecli": "bun src/cli/migrate-onecli.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

@@ -1,6 +1,6 @@
 # Running Agents on Local Ollama
 
-NanoClaw agents can be routed to a local [Ollama](https://ollama.com) instance instead of the Anthropic API. This cuts API costs to zero and keeps all inference on your hardware.
+Paraclaw agents can be routed to a local [Ollama](https://ollama.com) instance instead of the Anthropic API. This cuts API costs to zero and keeps all inference on your hardware.
 
 ## How It Works
 
@@ -20,15 +20,6 @@ Ollama exposes an Anthropic-compatible `/v1/messages` endpoint. The Claude Code 
 
 `host.docker.internal` is Docker's magic hostname that resolves to the host machine from inside a container — so Ollama running on your Mac or Linux box is reachable at that address.
 
-## The OneCLI Complication
-
-NanoClaw normally runs API calls through an OneCLI HTTPS proxy that injects real credentials in place of a placeholder key. When redirecting to Ollama you need to bypass that proxy so requests go direct. Two env vars handle this:
-
-- `NO_PROXY=host.docker.internal` — tells the Anthropic SDK's HTTP client to skip the proxy for that hostname
-- `no_proxy=host.docker.internal` — lowercase variant for tools that check the lowercase form
-
-Both are set in the agent group's `container.json` alongside `ANTHROPIC_BASE_URL`.
-
 ## Network Isolation
 
 Setting `ANTHROPIC_BASE_URL` redirects requests but doesn't prevent a misconfigured agent from accidentally reaching `api.anthropic.com` directly. The `blockedHosts` field in `container.json` adds a Docker `--add-host` flag that resolves the domain to `0.0.0.0`, making it physically unreachable from inside the container:
@@ -41,7 +32,7 @@ With this in place, even if the model setting drifts back to a Claude model name
 
 ## Model Selection
 
-The Claude Code CLI reads its model from `~/.claude/settings.json` inside the container, which NanoClaw bind-mounts from `data/v2-sessions/<agent-group-id>/.claude-shared/settings.json`. Set `"model": "gemma4:latest"` (or whatever Ollama model you've pulled) there. Use the exact name from `ollama list`.
+The Claude Code CLI reads its model from `~/.claude/settings.json` inside the container, which paraclaw bind-mounts from `data/v2-sessions/<agent-group-id>/.claude-shared/settings.json`. Set `"model": "gemma4:latest"` (or whatever Ollama model you've pulled) there. Use the exact name from `ollama list`.
 
 Model selection considerations for Apple Silicon:
 
@@ -59,7 +50,7 @@ Three files need to support this feature. See `/add-ollama-provider` for the exa
 
 **`src/container-config.ts`** — `ContainerConfig` interface needs `env` and `blockedHosts` fields so the per-group JSON can carry them.
 
-**`src/container-runner.ts`** — At container spawn time, `env` entries become `-e KEY=VAL` Docker flags (applied after OneCLI's injected vars so they win), and `blockedHosts` entries become `--add-host HOST:0.0.0.0` flags.
+**`src/container-runner.ts`** — At container spawn time, `env` entries become `-e KEY=VAL` Docker flags (applied after paraclaw's injected secret env vars so the per-group config wins), and `blockedHosts` entries become `--add-host HOST:0.0.0.0` flags.
 
 **`container/Dockerfile`** — The container runs as the host user's uid (e.g. 501 on macOS), not as the `node` user (uid 1000). The home directory must be `chmod 777` so any uid can write `~/.claude.json` and `~/.claude/settings.json`.
 

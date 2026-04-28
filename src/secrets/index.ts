@@ -1,12 +1,10 @@
 /**
- * Public API for paraclaw's secret store. Replaces OneCLI as the host's
- * credential dependency. Values are AES-256-GCM encrypted in-process before
- * landing in the central DB; decrypted only when injected into per-session
- * containers (`src/container-runner.ts`).
+ * Public API for paraclaw's secret store. Values are AES-256-GCM encrypted
+ * in-process before landing in the central DB; decrypted only when injected
+ * into per-session containers (`src/container-runner.ts`).
  *
  * Naming: a secret is keyed by `(name, agent_group_id)`. A NULL agent_group_id
- * is global — visible to any agent group when its host_pattern matches.
- * A non-NULL agent_group_id scopes the secret to that group only.
+ * is global; a non-NULL agent_group_id scopes the secret to that group only.
  *
  * Resolution preference at injection time: agent-scoped secret with that
  * name beats the global one. The host walks both rows and the scoped wins.
@@ -35,7 +33,6 @@ export interface SecretRow {
   kind: SecretKind;
   agent_group_id: string | null;
   assigned_mode: AssignedMode;
-  host_pattern: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -44,7 +41,6 @@ export interface PutSecretOpts {
   kind?: SecretKind;
   agent_group_id?: string | null;
   assigned_mode?: AssignedMode;
-  host_pattern?: string | null;
 }
 
 interface RawRow extends SecretRow {
@@ -66,7 +62,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
   const agentGroupId = opts.agent_group_id ?? null;
   const kind = opts.kind ?? 'generic';
   const mode = opts.assigned_mode ?? 'all';
-  const hostPattern = opts.host_pattern ?? null;
 
   const existing = db()
     .prepare<{ id: string }>(`SELECT id FROM secrets WHERE name = @name AND agent_group_id IS @agent_group_id`)
@@ -80,7 +75,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
             SET value_encrypted = @value_encrypted,
                 kind            = @kind,
                 assigned_mode   = @assigned_mode,
-                host_pattern    = @host_pattern,
                 updated_at      = @updated_at
           WHERE id = @id`,
       )
@@ -89,7 +83,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
         value_encrypted: ct,
         kind,
         assigned_mode: mode,
-        host_pattern: hostPattern,
         updated_at: now,
       });
     return existing.id;
@@ -99,9 +92,9 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
   db()
     .prepare(
       `INSERT INTO secrets
-         (id, name, value_encrypted, kind, agent_group_id, assigned_mode, host_pattern, created_at, updated_at)
+         (id, name, value_encrypted, kind, agent_group_id, assigned_mode, created_at, updated_at)
        VALUES
-         (@id, @name, @value_encrypted, @kind, @agent_group_id, @assigned_mode, @host_pattern, @created_at, @updated_at)`,
+         (@id, @name, @value_encrypted, @kind, @agent_group_id, @assigned_mode, @created_at, @updated_at)`,
     )
     .run({
       id,
@@ -110,7 +103,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
       kind,
       agent_group_id: agentGroupId,
       assigned_mode: mode,
-      host_pattern: hostPattern,
       created_at: now,
       updated_at: now,
     });
@@ -140,7 +132,7 @@ export function listSecrets(agentGroupId?: string | null): SecretRow[] {
   if (agentGroupId === undefined) {
     return db()
       .prepare<SecretRow>(
-        `SELECT id, name, kind, agent_group_id, assigned_mode, host_pattern, created_at, updated_at
+        `SELECT id, name, kind, agent_group_id, assigned_mode, created_at, updated_at
          FROM secrets ORDER BY name`,
       )
       .all();
@@ -148,14 +140,14 @@ export function listSecrets(agentGroupId?: string | null): SecretRow[] {
   if (agentGroupId === null) {
     return db()
       .prepare<SecretRow>(
-        `SELECT id, name, kind, agent_group_id, assigned_mode, host_pattern, created_at, updated_at
+        `SELECT id, name, kind, agent_group_id, assigned_mode, created_at, updated_at
          FROM secrets WHERE agent_group_id IS NULL ORDER BY name`,
       )
       .all();
   }
   return db()
     .prepare<SecretRow>(
-      `SELECT id, name, kind, agent_group_id, assigned_mode, host_pattern, created_at, updated_at
+      `SELECT id, name, kind, agent_group_id, assigned_mode, created_at, updated_at
        FROM secrets
        WHERE agent_group_id = @agent_group_id OR agent_group_id IS NULL
        ORDER BY name`,

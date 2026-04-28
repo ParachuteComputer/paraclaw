@@ -1,18 +1,18 @@
 /**
- * Local secrets store. Replaces OneCLI as paraclaw's hard dependency for
- * credential storage: AES-256-GCM encryption with a master key at
+ * Local secrets store: AES-256-GCM encryption with a master key at
  * `~/.parachute/claw/master.key`, decrypted in-process at session spawn,
- * injected to per-session containers as env vars.
+ * injected into per-session containers as env vars.
  *
- * Schema mirrors OneCLI's so the migration command (`migrate-onecli`) can
- * port credentials over without renames. Differences:
  *   - `value_encrypted` is `iv || ciphertext || authTag` (12 + N + 16 bytes),
  *     base64-encoded. Storing IV alongside ciphertext keeps each row
  *     self-contained.
- *   - `agent_group_id` is nullable: NULL = global (any agent group sees it
- *     subject to host_pattern), non-NULL = scoped to that group only.
- *   - `assigned_mode` mirrors OneCLI's "all" / "selective" semantics for the
- *     UI's per-agent-group injection picker.
+ *   - `agent_group_id` is nullable: NULL = global, non-NULL = scoped to that
+ *     group only.
+ *   - `assigned_mode` is `all` (every agent sees this secret) or `selective`
+ *     (allowlist join table — not yet wired; column reserved for the UI's
+ *     per-agent-group injection picker).
+ *
+ * Migration 015 drops the now-vestigial `host_pattern` column.
  */
 import type { Database } from '../connection.js';
 import type { Migration } from './index.js';

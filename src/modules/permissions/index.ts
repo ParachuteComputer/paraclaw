@@ -186,8 +186,8 @@ setSenderScopeGate(
  * Response handler for the unknown-sender approval card.
  *
  * Claim rule: questionId matches a row in pending_sender_approvals. If no
- * such row, return false so the next handler (approvals module, OneCLI,
- * interactive) gets a shot.
+ * such row, return false so the next handler (approvals module, interactive)
+ * gets a shot.
  *
  * Approve: add the sender to agent_group_members + re-invoke routeInbound
  * with the stored event. The second routing attempt clears the gate because

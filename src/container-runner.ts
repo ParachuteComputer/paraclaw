@@ -48,10 +48,10 @@ const activeContainers = new Map<string, { process: ChildProcess; containerName:
 /**
  * In-flight wake promises, keyed by session id. Deduplicates concurrent
  * `wakeContainer` calls while the first spawn is still mid-setup (async
- * buildContainerArgs, OneCLI gateway apply, etc.) — otherwise a second
- * wake in that window passes the `activeContainers.has` check and spawns
- * a duplicate container against the same session directory, producing
- * racy double-replies.
+ * buildContainerArgs, secret resolution, etc.) — otherwise a second wake
+ * in that window passes the `activeContainers.has` check and spawns a
+ * duplicate container against the same session directory, producing racy
+ * double-replies.
  */
 const wakePromises = new Map<string, Promise<void>>();
 

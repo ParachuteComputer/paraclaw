@@ -11,37 +11,32 @@ You can deploy web applications to Vercel using the `vercel` CLI.
 
 ## Auth
 
-Auth is handled by OneCLI — the HTTPS_PROXY injects the real token into API requests automatically. The Vercel CLI requires a token to be present to skip its local credential check, so **always pass `--token placeholder`** on every command. OneCLI replaces this with the real token at the proxy level.
-
-Before any Vercel operation, verify auth:
+Paraclaw injects a `VERCEL_TOKEN` env var into your container at spawn time when one is configured in the host's secret store. The Vercel CLI picks it up automatically — you don't need to pass `--token` on commands. To verify auth:
 
 ```bash
-vercel whoami --token placeholder
+vercel whoami
 ```
 
-If this fails with an auth error, ask the user to add a Vercel token to OneCLI. They can create one at https://vercel.com/account/tokens and register it via `onecli secrets create` on the host. Once added, retry `vercel whoami`.
+If this fails with an auth error, ask the user to add a Vercel token to paraclaw's secret store (web UI → `/secrets`, name it `VERCEL_TOKEN`). They can create one at https://vercel.com/account/tokens. Once added, the next container spawn picks it up.
 
 ## Deploying
 
-Always use `--yes` to skip interactive prompts and `--token placeholder` for auth (OneCLI replaces with real token).
+Always use `--yes` to skip interactive prompts.
 
 ```bash
 # Deploy to production
-vercel deploy --yes --prod --token placeholder
-
+vercel deploy --yes --prod
 # Deploy from a specific directory
 vercel deploy --yes --prod --token placeholder --cwd /path/to/project
 
 # Preview deployment (not production)
-vercel deploy --yes --token placeholder
-```
+vercel deploy --yes```
 
 After deploying, verify the live URL:
 
 ```bash
 # Check deployment status
-vercel inspect <deployment-url> --token placeholder
-```
+vercel inspect <deployment-url>```
 
 If you have `agent-browser` available, open the deployed URL and take a screenshot to visually verify.
 
@@ -49,34 +44,27 @@ If you have `agent-browser` available, open the deployed URL and take a screensh
 
 ```bash
 # Link to an existing Vercel project (non-interactive)
-vercel link --yes --token placeholder
-
+vercel link --yes
 # List recent deployments
-vercel ls --token placeholder
-
+vercel ls
 # List all projects
-vercel project ls --token placeholder
-```
+vercel project ls```
 
 ## Domains
 
 ```bash
 # List domains
-vercel domains ls --token placeholder
-
+vercel domains ls
 # Add a domain to the current project
-vercel domains add example.com --token placeholder
-```
+vercel domains add example.com```
 
 ## Environment Variables
 
 ```bash
 # Pull env vars from Vercel to local .env
-vercel env pull --token placeholder
-
+vercel env pull
 # Add an env var (use echo to pipe the value — avoids interactive prompt)
-echo "value" | vercel env add VAR_NAME production --token placeholder
-```
+echo "value" | vercel env add VAR_NAME production```
 
 ## Common Errors
 
@@ -86,7 +74,7 @@ echo "value" | vercel env add VAR_NAME production --token placeholder
 | `Error: Rate limited` | Wait and retry. Don't loop — report to user |
 | `Error: You have reached your project limit` | User needs to upgrade Vercel plan or delete unused projects |
 | `ENOTFOUND api.vercel.com` | Network issue. Check proxy connectivity |
-| Auth error after `vercel whoami` | Credential may be expired. Ask the user to refresh the Vercel token in OneCLI |
+| Auth error after `vercel whoami` | Credential may be expired. Ask the user to refresh `VERCEL_TOKEN` in paraclaw's `/secrets` page |
 
 ## Building Websites — Delegate to Frontend Engineer
 
