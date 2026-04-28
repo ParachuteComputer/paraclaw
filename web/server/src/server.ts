@@ -53,6 +53,7 @@ import { log } from '../../../src/log.js';
 import {
   authenticate,
   getHubOrigin,
+  SCOPE_CLAW_ADMIN,
   SCOPE_CLAW_READ,
   SCOPE_CLAW_WRITE,
   type AuthResult,
@@ -60,6 +61,7 @@ import {
 } from './auth.js';
 import { fetchHubVaults } from './hub-discovery.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
+import { handleChannelsRoute } from './routes/channels.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
@@ -303,6 +305,23 @@ async function handleApi(
     }
     try {
       const handled = await handleApprovalsRoute({ pathname, method, req, res, claims: auth.claims });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  // /api/channels — channel-wire list + per-wire patch / delete.
+  // GET = read-gated, PATCH / DELETE = admin-gated. Patch is the
+  // operator's surface for tweaking engage rules / priority on existing
+  // wires; delete unlinks a messaging group from an agent group without
+  // touching the messaging_groups row itself.
+  if (pathname === '/api/channels' || pathname.startsWith('/api/channels/')) {
+    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+    if (!(await gate(req, res, required))) return;
+    try {
+      const handled = await handleChannelsRoute({ pathname, method, req, res });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
