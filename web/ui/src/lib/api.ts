@@ -304,8 +304,13 @@ export interface SecretView {
 }
 
 export async function listSecrets(): Promise<SecretView[]> {
-  const r = await request<{ secrets: SecretView[] }>('/secrets');
-  return r.secrets;
+  // The list-secrets endpoint may not yet surface `assignedMode` (it lands in
+  // a separate paraclaw-server PR). Default missing values to 'all' so the UI
+  // renders correctly until the field is wired through.
+  const r = await request<{ secrets: Array<Omit<SecretView, 'assignedMode'> & { assignedMode?: AssignedMode }> }>(
+    '/secrets',
+  );
+  return r.secrets.map((s) => ({ ...s, assignedMode: s.assignedMode ?? 'all' }));
 }
 
 export interface PutSecretInput {
@@ -335,8 +340,12 @@ export async function putSecret(input: PutSecretInput): Promise<SecretView> {
     body.assignedMode = input.assignedMode;
     body.assigned_mode = input.assignedMode;
   }
-  const r = await request<{ secret: SecretView }>('/secrets', { method: 'POST', json: body });
-  return r.secret;
+  const r = await request<{
+    secret: Omit<SecretView, 'assignedMode'> & { assignedMode?: AssignedMode };
+  }>('/secrets', { method: 'POST', json: body });
+  // Same fallback as listSecrets — until paraclaw-server surfaces the field,
+  // assume the just-written value (or 'all' if we didn't send one).
+  return { ...r.secret, assignedMode: r.secret.assignedMode ?? input.assignedMode ?? 'all' };
 }
 
 export async function deleteSecret(id: string): Promise<void> {
