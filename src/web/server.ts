@@ -269,8 +269,7 @@ async function handleApi(
   // those handlers 405 on unknown sub-paths and would shadow /activity.
   if (
     method === 'GET' &&
-    (/^\/api\/groups\/[^/]+\/activity$/.test(pathname) ||
-      /^\/api\/sessions\/[^/]+\/activity$/.test(pathname))
+    (/^\/api\/groups\/[^/]+\/activity$/.test(pathname) || /^\/api\/sessions\/[^/]+\/activity$/.test(pathname))
   ) {
     if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     try {

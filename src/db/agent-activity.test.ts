@@ -1,13 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  createAgentGroup,
-  createSession,
-  closeDb,
-  getDb,
-  initTestDb,
-  runMigrations,
-} from './index.js';
+import { createAgentGroup, createSession, closeDb, getDb, initTestDb, runMigrations } from './index.js';
 import {
   getActivitySyncedSeq,
   listActivityByAgentGroup,

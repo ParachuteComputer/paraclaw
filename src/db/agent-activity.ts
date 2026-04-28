@@ -29,9 +29,9 @@ export interface ActivityRow {
 }
 
 export function getActivitySyncedSeq(sessionId: string): number {
-  const row = getDb()
-    .prepare('SELECT activity_synced_seq AS seq FROM sessions WHERE id = ?')
-    .get(sessionId) as { seq: number } | undefined;
+  const row = getDb().prepare('SELECT activity_synced_seq AS seq FROM sessions WHERE id = ?').get(sessionId) as
+    | { seq: number }
+    | undefined;
   return row?.seq ?? 0;
 }
 
@@ -41,11 +41,7 @@ export function getActivitySyncedSeq(sessionId: string): number {
  * input is empty so callers don't have to short-circuit. Returns the new
  * cursor value (max input seq, or the unchanged prior cursor).
  */
-export function mergeActivityBatch(
-  agentGroupId: string,
-  sessionId: string,
-  rows: OutboundActivityRow[],
-): number {
+export function mergeActivityBatch(agentGroupId: string, sessionId: string, rows: OutboundActivityRow[]): number {
   if (rows.length === 0) return getActivitySyncedSeq(sessionId);
 
   const db = getDb();
