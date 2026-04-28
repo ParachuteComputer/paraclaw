@@ -59,6 +59,7 @@ import {
   type ClawScope,
 } from './auth.js';
 import { fetchHubVaults } from './hub-discovery.js';
+import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { upsertService } from './services-manifest.js';
@@ -88,6 +89,27 @@ const SERVICE_VERSION = '0.0.13-rc.1';
 // handles multiple writers per file. Migrations are idempotent.
 const centralDb = initDb(CENTRAL_DB_PATH);
 runMigrations(centralDb);
+
+// Load the host's optional modules so approval handlers (install_packages,
+// add_mcp_server, scheduling, self-mod, permissions, …) are registered in
+// THIS process's in-memory registries. Without this, /api/approvals/:id/decide
+// would update the row but find no handler to dispatch to.
+//
+// Side effects to be aware of:
+//   - approvals/index.ts subscribes to onDeliveryAdapterReady; in the web
+//     process the adapter is never set, so the callback never fires (no
+//     OneCLI long-poll). Memory cost: one queued closure.
+//   - permissions/index.ts wires the router's senderResolver/accessGate;
+//     redundant in a dual-process layout but harmless — those are called
+//     from `routeInbound`, which only runs on the host's channel-adapter path.
+//   - self-mod/index.ts registers handlers that rebuild the container image
+//     via `./container/build.sh`. The web server runs on the same host as
+//     the docker daemon (paraclaw deployment shape), so this is correct.
+//
+// Once the web-merge directive lands (single `bun src/index.ts` boots
+// everything), this import becomes redundant — index.ts already does it —
+// but harmless: import is idempotent.
+import '../../../src/modules/index.js';
 
 interface AgentGroupRow {
   id: string;
@@ -258,6 +280,28 @@ async function handleApi(
     if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     try {
       const handled = await handleSetupStatusRoute({ pathname, method, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  // /api/approvals — pending agent-action approvals (list + decide).
+  // GET = read-gated for the list view. POST /:id/decide = write-gated
+  // because deciding is a mutation that triggers downstream effects
+  // (handler dispatch, container restart for self-mod, etc.). The
+  // deciding userId is recorded from the JWT `sub` claim, so we need
+  // the auth result, not just the boolean gate.
+  if (pathname === '/api/approvals' || pathname.startsWith('/api/approvals/')) {
+    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    const auth = await authenticate(req.headers.authorization, required);
+    if (!auth.ok) {
+      send401or403(res, auth);
+      return;
+    }
+    try {
+      const handled = await handleApprovalsRoute({ pathname, method, req, res, claims: auth.claims });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
