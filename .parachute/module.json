@@ -7,7 +7,7 @@
   "port": 1944,
   "paths": ["/claw"],
   "health": "/api/health",
-  "startCmd": ["pnpm", "exec", "tsx", "web/server/src/server.ts"],
+  "startCmd": ["bun", "src/index.ts"],
   "scopes": {
     "defines": ["claw:read", "claw:write", "claw:admin"]
   }

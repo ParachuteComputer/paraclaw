@@ -15,7 +15,6 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "prepare": "husky",
     "parachute": "bun scripts/parachute.ts",
-    "web": "bun web/server/src/server.ts",
     "web:build": "cd web/ui && pnpm install --ignore-workspace && pnpm build",
     "migrate-onecli": "bun src/cli/migrate-onecli.ts",
     "lint": "eslint src/",

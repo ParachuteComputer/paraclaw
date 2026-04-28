@@ -21,10 +21,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
-import { GROUPS_DIR } from '../../../../src/config.js';
-import { getDb } from '../../../../src/db/connection.js';
-import { getMasterKeyPath, loadOrCreateMasterKey } from '../../../../src/secrets/master-key.js';
-import { readVaultAttachment } from '../../../../src/parachute/vault-mcp.js';
+import { GROUPS_DIR } from '../../config.js';
+import { getDb } from '../../db/connection.js';
+import { getMasterKeyPath, loadOrCreateMasterKey } from '../../secrets/master-key.js';
+import { readVaultAttachment } from '../../parachute/vault-mcp.js';
 import { getHubOrigin } from '../auth.js';
 
 interface SetupCheck {

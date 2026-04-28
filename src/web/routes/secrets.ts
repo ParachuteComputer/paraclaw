@@ -16,7 +16,7 @@ import {
   deleteSecret,
   listSecrets,
   putSecret,
-} from '../../../../src/secrets/index.js';
+} from '../../secrets/index.js';
 
 const ALLOWED_KINDS: SecretKind[] = ['channel-token', 'api-key', 'generic'];
 const ALLOWED_MODES: AssignedMode[] = ['all', 'selective'];

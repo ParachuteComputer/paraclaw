@@ -1,14 +1,9 @@
 /**
  * Paraclaw web UI server.
  *
- * Thin Node http surface over:
- *   - NanoClaw's central v2.db (agent_groups table) — read-only
- *   - The Parachute attach helpers in src/parachute/vault-mcp.ts — write
- *   - The `parachute` CLI for token minting (shells out)
- *
- * Static-serves the built UI bundle from ../ui/dist when present; otherwise
- * just exposes /api/*. In dev, run vite separately on port 5173 with the
- * proxy in vite.config.ts pointing back to this server.
+ * Same `/api/*` surface that previously lived in the standalone
+ * `web/server/src/server.ts` package, now folded into the host process so a
+ * single `bun src/index.ts` boots both the orchestrator and the web UI.
  *
  * Auth model: every `/api/*` route requires a hub-issued JWT — operator
  * token (CLI/scripts) or user OAuth (browser) — validated via JWKS against
@@ -19,37 +14,35 @@
  * Two endpoints stay unauthenticated: `/api/health` (operational probe)
  * and `/api/discovery` (returns hub origin so the SPA can bootstrap its
  * OAuth flow without baking the origin into the bundle).
+ *
+ * Static-serves the built UI bundle from `<projectRoot>/web/ui/dist` when
+ * present; otherwise just exposes `/api/*`. In dev, run vite separately on
+ * port 5173 with the proxy in `web/ui/vite.config.ts` pointing back here.
  */
-// MUST be first — chdirs to project root so NanoClaw's config.ts resolves
-// DATA_DIR / GROUPS_DIR correctly regardless of where the server was invoked.
-import './bootstrap.js';
-
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
-import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR } from '../../../src/config.js';
-import { initDb, migrateCentralDbLocation, openDb, type Database } from '../../../src/db/connection.js';
-import { runMigrations } from '../../../src/db/migrations/index.js';
+import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR } from '../config.js';
+import { openDb, type Database } from '../db/connection.js';
 import {
   attachVaultToGroup,
   detachVaultFromGroup,
   readVaultAttachment,
   DEFAULT_VAULT_MCP_NAME,
-} from '../../../src/parachute/vault-mcp.js';
-import type { VaultScope } from '../../../src/parachute/types.js';
+} from '../parachute/vault-mcp.js';
+import type { VaultScope } from '../parachute/types.js';
 import {
   createParachuteAgentGroup,
   isFolderTaken,
   suggestFolderSlug,
   validateFolderSlug,
-} from '../../../src/parachute/create-agent.js';
-import { getGroupStatus, type GroupStatus } from '../../../src/parachute/group-status.js';
-import { resolveSession } from '../../../src/session-manager.js';
-import { wakeContainer } from '../../../src/container-runner.js';
-import { log } from '../../../src/log.js';
+} from '../parachute/create-agent.js';
+import { getGroupStatus, type GroupStatus } from '../parachute/group-status.js';
+import { resolveSession } from '../session-manager.js';
+import { wakeContainer } from '../container-runner.js';
+import { log } from '../log.js';
 import {
   authenticate,
   getHubOrigin,
@@ -68,8 +61,8 @@ import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UI_DIST = path.resolve(__dirname, '../../ui/dist');
+const PROJECT_ROOT = process.cwd();
+const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
 // Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
 // (1944, claimed for paraclaw 2026-04-27 via parachute-hub#…). Override
 // via PARACLAW_WEB_PORT for tests / non-default deployments.
@@ -77,47 +70,11 @@ const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 1944);
 const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // When fronted by `parachute expose tailnet` at a path prefix, set
 // PARACLAW_WEB_MOUNT to that prefix (e.g. `/claw`) so static-serve strips
-// it before resolving against dist/. The hub-managed lifecycle (once
-// parachute-hub#83 ships) will set this from `module.json` `paths[0]`
-// automatically. Empty string = serve at the origin root (default).
+// it before resolving against dist/. The hub-managed lifecycle (parachute-
+// hub#83) sets this from `module.json` `paths[0]` automatically. Empty
+// string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.13-rc.1';
-
-// NanoClaw's mutating helpers (createAgentGroup, etc.) talk to a
-// process-singleton DB connection (`getDb`). Initialize it once at boot so
-// the wizard endpoint can write. WAL mode + foreign_keys ON are set inside.
-// Concurrent with a running NanoClaw service (also WAL) is fine — SQLite
-// handles multiple writers per file. Migrations are idempotent.
-//
-// migrateCentralDbLocation runs first to relocate <PROJECT_ROOT>/data/v2.db
-// → ~/.parachute/claw/paraclaw.db on installs that pre-date the move. After
-// the host process performs the migration once, every subsequent open of
-// CENTRAL_DB_PATH (here, in the host main, in CLI scripts) hits the new
-// location — they don't race because the migration is copy-not-rename.
-migrateCentralDbLocation();
-const centralDb = initDb(CENTRAL_DB_PATH);
-runMigrations(centralDb);
-
-// Load the host's optional modules so approval handlers (install_packages,
-// add_mcp_server, scheduling, self-mod, permissions, …) are registered in
-// THIS process's in-memory registries. Without this, /api/approvals/:id/decide
-// would update the row but find no handler to dispatch to.
-//
-// Side effects to be aware of:
-//   - approvals/index.ts subscribes to onDeliveryAdapterReady; in the web
-//     process the adapter is never set, so the callback never fires (no
-//     OneCLI long-poll). Memory cost: one queued closure.
-//   - permissions/index.ts wires the router's senderResolver/accessGate;
-//     redundant in a dual-process layout but harmless — those are called
-//     from `routeInbound`, which only runs on the host's channel-adapter path.
-//   - self-mod/index.ts registers handlers that rebuild the container image
-//     via `./container/build.sh`. The web server runs on the same host as
-//     the docker daemon (paraclaw deployment shape), so this is correct.
-//
-// Once the web-merge directive lands (single `bun src/index.ts` boots
-// everything), this import becomes redundant — index.ts already does it —
-// but harmless: import is idempotent.
-import '../../../src/modules/index.js';
+const SERVICE_VERSION = '0.0.14-rc.3';
 
 interface AgentGroupRow {
   id: string;
@@ -197,11 +154,6 @@ function mintVaultToken(opts: { scope: VaultScope; label: string }): Promise<{ t
         reject(new Error(`parachute vault tokens create exited ${code}: ${stderr.trim() || stdout.trim()}`));
         return;
       }
-      // Output shape (vault 0.3.x):
-      //   Created token for vault "<vault>":
-      //     Token:      pvt_...
-      //     Permission: ...
-      //     Scopes:     ...
       const m = stdout.match(/Token:\s+(pvt_[A-Za-z0-9_-]+)/);
       if (!m) {
         reject(new Error(`could not parse pvt_… from CLI output:\n${stdout}`));
@@ -211,8 +163,6 @@ function mintVaultToken(opts: { scope: VaultScope; label: string }): Promise<{ t
     });
   });
 }
-
-// --- HTTP plumbing -----------------------------------------------------------
 
 const json = (res: http.ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, { 'content-type': 'application/json' });
@@ -236,7 +186,6 @@ function send401or403(res: http.ServerResponse, fail: Extract<AuthResult, { ok: 
   if (fail.errorType) body.error_type = fail.errorType;
   if (fail.requiredScope) body.required_scope = fail.requiredScope;
   if (fail.grantedScopes) body.granted_scopes = fail.grantedScopes;
-  // RFC 6750 challenge for 401; insufficient_scope challenge for 403.
   if (fail.status === 401) {
     res.setHeader('WWW-Authenticate', 'Bearer');
   } else if (fail.errorType === 'insufficient_scope' && fail.requiredScope) {
@@ -260,9 +209,6 @@ async function handleApi(
 ): Promise<void> {
   const method = req.method ?? 'GET';
 
-  // Unauthenticated probes: liveness check and OAuth-bootstrap discovery.
-  // Discovery surfaces the hub origin so the SPA can reach the AS metadata
-  // (`/.well-known/oauth-authorization-server`) without hard-coding it.
   if (pathname === '/api/health' && method === 'GET') {
     json(res, 200, {
       service: 'paraclaw-web-server',
@@ -278,12 +224,6 @@ async function handleApi(
     return;
   }
 
-  // /api/setup/status — readiness probe for the setup wizard. Read-gated
-  // because the per-check details (which folders, which keys) are
-  // operator-private. The endpoint itself is idempotent + side-effect-free
-  // EXCEPT for the master-key first-touch (loadOrCreateMasterKey generates
-  // ~/.parachute/claw/master.key on first call); that's intentional — the
-  // wizard polling drives bootstrap.
   if (pathname === '/api/setup/status' && method === 'GET') {
     if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     try {
@@ -295,12 +235,6 @@ async function handleApi(
     }
   }
 
-  // /api/approvals — pending agent-action approvals (list + decide).
-  // GET = read-gated for the list view. POST /:id/decide = write-gated
-  // because deciding is a mutation that triggers downstream effects
-  // (handler dispatch, container restart for self-mod, etc.). The
-  // deciding userId is recorded from the JWT `sub` claim, so we need
-  // the auth result, not just the boolean gate.
   if (pathname === '/api/approvals' || pathname.startsWith('/api/approvals/')) {
     const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
     const auth = await authenticate(req.headers.authorization, required);
@@ -317,11 +251,6 @@ async function handleApi(
     }
   }
 
-  // /api/channels — channel-wire list + per-wire patch / delete.
-  // GET = read-gated, PATCH / DELETE = admin-gated. Patch is the
-  // operator's surface for tweaking engage rules / priority on existing
-  // wires; delete unlinks a messaging group from an agent group without
-  // touching the messaging_groups row itself.
   if (pathname === '/api/channels' || pathname.startsWith('/api/channels/')) {
     const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
     if (!(await gate(req, res, required))) return;
@@ -334,9 +263,6 @@ async function handleApi(
     }
   }
 
-  // /api/sessions — global session list + per-session close.
-  // GET = read-gated, POST :id/close = write-gated. Liveness derives from
-  // heartbeat-file mtime (cross-process visible), not in-memory state.
   if (pathname === '/api/sessions' || pathname.startsWith('/api/sessions/')) {
     const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
     if (!(await gate(req, res, required))) return;
@@ -349,14 +275,9 @@ async function handleApi(
     }
   }
 
-  // /api/secrets — local AES-GCM secret store. Read-gated for list,
-  // ADMIN-gated for put/delete. Mutating the secret store is materially
-  // more dangerous than other writes: a write-only token would be enough
-  // to swap out any vault credential and silently MITM downstream API
-  // calls. We force `claw:admin` so the operator has to explicitly grant
-  // that scope to whatever client is touching this surface (typically only
-  // the web UI when an admin is signed in). Plaintext values are never
-  // returned by any GET regardless of scope.
+  // ADMIN-gated for put/delete on the secret store: a write-only token
+  // would otherwise be enough to swap any vault credential and silently
+  // MITM downstream API calls. Plaintext values are never returned by GET.
   if (pathname === '/api/secrets' || pathname.startsWith('/api/secrets/')) {
     const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
     if (!(await gate(req, res, required))) return;
@@ -380,12 +301,6 @@ async function handleApi(
     return;
   }
 
-  // GET /api/vaults — enumerate registered vaults so the attach-vault
-  // picker can populate a dropdown. Sourced from the hub's well-known
-  // discovery doc (`<hubOrigin>/.well-known/parachute.json`), which
-  // returns the public-routable URL — critical because that URL gets
-  // baked into the agent container's MCP config and loopback would break
-  // any non-host-network agent.
   if (pathname === '/api/vaults' && method === 'GET') {
     if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     try {
@@ -468,9 +383,6 @@ async function handleApi(
     return;
   }
 
-  // GET /api/folder-availability/:slug — used by the new-agent wizard for
-  // live "is this slug free?" feedback. Read-gated: the slug namespace is
-  // operator-private state.
   const folderAvail = pathname.match(/^\/api\/folder-availability\/([^/]+)$/);
   if (folderAvail && method === 'GET') {
     if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
@@ -484,9 +396,6 @@ async function handleApi(
     return;
   }
 
-  // GET /api/folder-suggestion?name=... — wizard uses this to seed the slug
-  // input from the agent name. Pure transform but kept behind read-gate so
-  // the auth-required surface is uniform.
   if (pathname === '/api/folder-suggestion' && method === 'GET') {
     if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
     const name = url.searchParams.get('name') ?? '';
@@ -494,14 +403,11 @@ async function handleApi(
     return;
   }
 
-  // /api/groups/:folder/...
   const groupRoute = pathname.match(/^\/api\/groups\/([^/]+)(\/.*)?$/);
   if (groupRoute) {
     const folder = decodeURIComponent(groupRoute[1]);
     const sub = groupRoute[2] ?? '';
 
-    // Pick the scope for the matching sub-route up front so we can gate
-    // before any DB read. GET → read; POST → write.
     const requiredScope: ClawScope = sub === '' && method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
     if (!(await gate(req, res, requiredScope))) return;
 
@@ -516,7 +422,6 @@ async function handleApi(
       return;
     }
 
-    // POST /api/groups/:folder/attach-vault
     if (sub === '/attach-vault' && method === 'POST') {
       try {
         const body = await readJsonBody<{
@@ -524,7 +429,7 @@ async function handleApi(
           vaultBaseUrl?: string;
           tokenLabel?: string;
           mcpName?: string;
-          token?: string; // optional — if absent, server mints via CLI
+          token?: string;
         }>(req);
         const scope = (body.scope ?? 'vault:read') as VaultScope;
         if (!VALID_SCOPES.includes(scope)) {
@@ -549,7 +454,6 @@ async function handleApi(
           mcpName: body.mcpName,
         });
 
-        // Re-read so the response reflects the persisted state.
         const updated = getAgentGroup(folder);
         json(res, 200, { group: updated, mintedToken: !body.token });
       } catch (err) {
@@ -558,24 +462,12 @@ async function handleApi(
       return;
     }
 
-    // POST /api/groups/:folder/sessions — spawn (or wake) the agent-shared
-    // session for this group. Returns 202 immediately; container boot is
-    // fire-and-forget. The UI polls /api/groups/:folder for live status to
-    // see the session appear and the container come up. We choose
-    // 'agent-shared' mode because paraclaw-managed groups today are not
-    // wired to a messaging group at all (no Discord/Slack channel) — the
-    // claw runs in the background under whatever instructions live in
-    // its CLAUDE.md. agent-shared collapses to one session per group,
-    // which is the right shape for that no-channel case.
+    // Spawn (or wake) the agent-shared session for this group. Returns
+    // 202 immediately; container boot is fire-and-forget. The UI polls
+    // /api/groups/:folder for live status.
     if (sub === '/sessions' && method === 'POST') {
       try {
         const { session, created } = resolveSession(group.id, null, null, 'agent-shared');
-        // Fire-and-forget: wakeContainer can take several seconds (image
-        // pull, mount setup, OneCLI agent ensure). Holding the request
-        // open that long would force the UI into a fake spinner; instead
-        // we 202 and let the existing /api/groups/:folder poll surface
-        // the live containerRunning state. Errors get logged on the host;
-        // the UI sees them as "container never came up" via the same poll.
         void wakeContainer(session).catch((err) => {
           log.error('paraclaw: wakeContainer failed', { sessionId: session.id, err });
         });
@@ -586,7 +478,6 @@ async function handleApi(
       return;
     }
 
-    // POST /api/groups/:folder/detach-vault
     if (sub === '/detach-vault' && method === 'POST') {
       try {
         const body = await readJsonBody<{ mcpName?: string }>(req);
@@ -606,70 +497,68 @@ async function handleApi(
   error(res, 404, `not found: ${pathname}`);
 }
 
-// --- Static file serving (built UI) -----------------------------------------
+/**
+ * Boot the web server. Returns the http.Server so the caller can stop it
+ * during shutdown. The central DB is assumed to be initialized already by
+ * the host process — this fn does NOT call initDb / runMigrations.
+ */
+export function startWebServer(): http.Server {
+  const serveStatic = makeServeStatic({ distDir: UI_DIST, mount: MOUNT });
 
-const serveStatic = makeServeStatic({ distDir: UI_DIST, mount: MOUNT });
-
-// --- Server ------------------------------------------------------------------
-
-const server = http.createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    // Strip MOUNT (e.g. `/claw`) once, here, before dispatch — Tailscale
-    // serve / the hub's reverse proxy preserve the prefix when forwarding.
-    // Without this, `/claw/api/health` falls through `/api/`-startsWith
-    // and gets SPA-shelled as text/html. (parachute-hub/src/notes-serve.ts
-    // does the same dance for the notes PWA.) Static-serve does its own
-    // internal strip via makeServeStatic, but routing through one
-    // canonical strip keeps the two surfaces consistent.
-    const dispatchPath =
-      MOUNT && (url.pathname === MOUNT || url.pathname.startsWith(`${MOUNT}/`))
-        ? url.pathname.slice(MOUNT.length) || '/'
-        : url.pathname;
-    if (dispatchPath.startsWith('/api/')) {
-      await handleApi(req, res, url, dispatchPath);
-      return;
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+      // Strip MOUNT (e.g. `/claw`) once, here, before dispatch — Tailscale
+      // serve / the hub's reverse proxy preserve the prefix when forwarding.
+      // Without this, `/claw/api/health` falls through `/api/`-startsWith
+      // and gets SPA-shelled as text/html.
+      const dispatchPath =
+        MOUNT && (url.pathname === MOUNT || url.pathname.startsWith(`${MOUNT}/`))
+          ? url.pathname.slice(MOUNT.length) || '/'
+          : url.pathname;
+      if (dispatchPath.startsWith('/api/')) {
+        await handleApi(req, res, url, dispatchPath);
+        return;
+      }
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        serveStatic(req, res, url.pathname);
+        return;
+      }
+      error(res, 405, `method not allowed: ${req.method} ${url.pathname}`);
+    } catch (err) {
+      if (!res.headersSent) {
+        error(res, 500, err instanceof Error ? err.message : String(err));
+      } else {
+        res.end();
+      }
     }
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      serveStatic(req, res, url.pathname);
-      return;
-    }
-    error(res, 405, `method not allowed: ${req.method} ${url.pathname}`);
-  } catch (err) {
-    if (!res.headersSent) {
-      error(res, 500, err instanceof Error ? err.message : String(err));
-    } else {
-      res.end();
-    }
-  }
-});
+  });
 
-server.listen(PORT, HOST, () => {
-  console.log(`paraclaw-web listening on http://${HOST}:${PORT}`);
-  console.log(`  data_dir:   ${DATA_DIR}`);
-  console.log(`  groups_dir: ${GROUPS_DIR}`);
-  if (fs.existsSync(UI_DIST)) {
-    console.log(`  ui:         serving from ${UI_DIST}`);
-  } else {
-    console.log(`  ui:         (not built — run pnpm --filter @paraclaw/web-ui build, or dev separately on :5173)`);
-  }
-  if (MOUNT) {
-    console.log(`  mount:      ${MOUNT} (PARACLAW_WEB_MOUNT — strips this prefix off static-serve requests)`);
-  }
-  // Self-register so `parachute status` + `parachute expose` see paraclaw.
-  // Best-effort: a manifest write failure (perms / disk / race) doesn't
-  // block the server from doing its job locally.
-  try {
-    upsertService({
-      name: 'claw',
-      port: PORT,
-      paths: ['/claw'],
-      health: '/api/health',
-      version: SERVICE_VERSION,
-      displayName: 'Paraclaw',
-      tagline: 'Manage your Parachute agent groups + vault attachments.',
+  server.listen(PORT, HOST, () => {
+    log.info('Web server listening', {
+      url: `http://${HOST}:${PORT}`,
+      uiDist: fs.existsSync(UI_DIST) ? UI_DIST : null,
+      mount: MOUNT || null,
     });
-  } catch (err) {
-    console.warn(`paraclaw: skipped services manifest update: ${err instanceof Error ? err.message : err}`);
-  }
-});
+    // Self-register so `parachute status` + `parachute expose` see paraclaw.
+    // Best-effort: a manifest write failure (perms / disk / race) doesn't
+    // block the server from doing its job locally.
+    try {
+      upsertService({
+        name: 'claw',
+        port: PORT,
+        paths: ['/claw'],
+        health: '/api/health',
+        version: SERVICE_VERSION,
+        displayName: 'Paraclaw',
+        tagline: 'Manage your Parachute agent groups + vault attachments.',
+      });
+    } catch (err) {
+      log.warn('Skipped services manifest update', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  return server;
+}

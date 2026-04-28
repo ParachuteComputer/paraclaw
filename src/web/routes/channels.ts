@@ -23,21 +23,21 @@
  */
 import http from 'node:http';
 
-import { getAgentGroup } from '../../../../src/db/agent-groups.js';
-import { getDb } from '../../../../src/db/connection.js';
+import { getAgentGroup } from '../../db/agent-groups.js';
+import { getDb } from '../../db/connection.js';
 import {
   deleteMessagingGroupAgent,
   getMessagingGroup,
   getMessagingGroupAgent,
   updateMessagingGroupAgent,
-} from '../../../../src/db/messaging-groups.js';
-import { log } from '../../../../src/log.js';
+} from '../../db/messaging-groups.js';
+import { log } from '../../log.js';
 import type {
   EngageMode as DbEngageMode,
   IgnoredMessagePolicy as DbIgnoredMessagePolicy,
   SenderScope as DbSenderScope,
   MessagingGroupAgent,
-} from '../../../../src/types.js';
+} from '../../types.js';
 
 type ApiEngageMode = 'mention' | 'pattern' | 'all';
 type ApiSenderScope = 'allowlist' | 'all';

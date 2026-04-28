@@ -47,8 +47,10 @@ export function clearHubDiscoveryCache(): void {
   cache = null;
 }
 
+export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
 export async function fetchHubVaults(
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: FetchLike = fetch,
   now: () => number = Date.now,
 ): Promise<VaultListing[]> {
   const origin = getHubOrigin();

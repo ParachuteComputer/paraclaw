@@ -4,6 +4,8 @@
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
  */
+import http from 'node:http';
+
 import { CENTRAL_DB_PATH } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb, migrateCentralDbLocation } from './db/connection.js';
@@ -12,6 +14,7 @@ import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runti
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
+import { startWebServer } from './web/server.js';
 import { log } from './log.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -29,6 +32,8 @@ import {
 } from './response-registry.js';
 export { registerResponseHandler, onShutdown };
 export type { ResponsePayload, ResponseHandler };
+
+let webServer: http.Server | null = null;
 
 async function dispatchResponse(payload: ResponsePayload): Promise<void> {
   for (const handler of getResponseHandlers()) {
@@ -159,6 +164,10 @@ async function main(): Promise<void> {
   startHostSweep();
   log.info('Host sweep started');
 
+  // 7. Start the web server (single-process boot — replaces the old
+  //    standalone @paraclaw/web-server package).
+  webServer = startWebServer();
+
   log.info('Paraclaw running');
 }
 
@@ -174,6 +183,10 @@ async function shutdown(signal: string): Promise<void> {
   }
   stopDeliveryPolls();
   stopHostSweep();
+  if (webServer) {
+    await new Promise<void>((resolve) => webServer!.close(() => resolve()));
+    webServer = null;
+  }
   await teardownChannelAdapters();
   process.exit(0);
 }

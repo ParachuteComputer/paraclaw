@@ -25,11 +25,11 @@ import http from 'node:http';
 
 import fs from 'node:fs';
 
-import { getAllAgentGroups } from '../../../../src/db/agent-groups.js';
-import { getSession, getSessionsByAgentGroup, updateSession } from '../../../../src/db/sessions.js';
-import { log } from '../../../../src/log.js';
-import { DEFAULT_ALIVE_THRESHOLD_MS } from '../../../../src/parachute/group-status.js';
-import { heartbeatPath } from '../../../../src/session-manager.js';
+import { getAllAgentGroups } from '../../db/agent-groups.js';
+import { getSession, getSessionsByAgentGroup, updateSession } from '../../db/sessions.js';
+import { log } from '../../log.js';
+import { DEFAULT_ALIVE_THRESHOLD_MS } from '../../parachute/group-status.js';
+import { heartbeatPath } from '../../session-manager.js';
 
 interface SessionView {
   id: string;

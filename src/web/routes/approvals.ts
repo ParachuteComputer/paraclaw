@@ -19,11 +19,11 @@
  */
 import http from 'node:http';
 
-import { getDb } from '../../../../src/db/connection.js';
-import { getAgentGroup } from '../../../../src/db/agent-groups.js';
-import { getSession } from '../../../../src/db/sessions.js';
-import { handleApprovalsResponse } from '../../../../src/modules/approvals/response-handler.js';
-import { log } from '../../../../src/log.js';
+import { getDb } from '../../db/connection.js';
+import { getAgentGroup } from '../../db/agent-groups.js';
+import { getSession } from '../../db/sessions.js';
+import { handleApprovalsResponse } from '../../modules/approvals/response-handler.js';
+import { log } from '../../log.js';
 import type { HubJwtClaims } from '../auth.js';
 
 interface ApprovalRow {
