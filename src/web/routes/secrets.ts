@@ -33,6 +33,7 @@ interface SecretView {
   name: string;
   kind: SecretKind;
   agentGroupId: string | null;
+  assignedMode: AssignedMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,6 +44,7 @@ function toView(r: SecretRow): SecretView {
     name: r.name,
     kind: r.kind,
     agentGroupId: r.agent_group_id,
+    assignedMode: r.assigned_mode,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

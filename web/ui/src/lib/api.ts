@@ -282,12 +282,21 @@ export async function closeSession(sessionId: string): Promise<{ id: string; sta
 /** Per PRIMITIVES.md §"Secret": kinds keyed by purpose. */
 export type SecretKind = 'channel-token' | 'api-key' | 'generic';
 
+/**
+ * `all` — inject into every agent container (subject to scoped-vs-global
+ *   resolution per `src/secrets/index.ts:resolveInjectableSecrets`).
+ * `selective` — inject only into the agent groups explicitly assigned via
+ *   /api/secrets/:id/assignments.
+ */
+export type AssignedMode = 'all' | 'selective';
+
 export interface SecretView {
   id: string;
   name: string;
   kind: SecretKind;
   /** null when the secret is global (not bound to a single agent group). */
   agentGroupId: string | null;
+  assignedMode: AssignedMode;
   createdAt: string;
   updatedAt: string;
   // Values are NEVER returned — they exist only to be injected into
@@ -305,6 +314,7 @@ export interface PutSecretInput {
   kind?: SecretKind;
   /** Bind to a specific agent group. Omit for a global secret. */
   agentGroupId?: string | null;
+  assignedMode?: AssignedMode;
 }
 
 /**
@@ -313,15 +323,44 @@ export interface PutSecretInput {
  * raw value is dropped from memory the moment the request resolves.
  */
 export async function putSecret(input: PutSecretInput): Promise<SecretView> {
-  const r = await request<{ secret: SecretView }>('/secrets', {
-    method: 'POST',
-    json: input,
-  });
+  const body: Record<string, unknown> = {
+    name: input.name,
+    value: input.value,
+  };
+  if (input.kind !== undefined) body.kind = input.kind;
+  if (input.agentGroupId !== undefined) body.agentGroupId = input.agentGroupId;
+  // Server reads snake_case for assigned_mode (src/web/routes/secrets.ts);
+  // send both so the wire is robust to a future camelCase migration.
+  if (input.assignedMode !== undefined) {
+    body.assignedMode = input.assignedMode;
+    body.assigned_mode = input.assignedMode;
+  }
+  const r = await request<{ secret: SecretView }>('/secrets', { method: 'POST', json: body });
   return r.secret;
 }
 
 export async function deleteSecret(id: string): Promise<void> {
   return request<void>(`/secrets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * Per-secret assignment endpoints (selective-mode only). The server returns
+ * just IDs; the UI denormalizes against listGroups() for display.
+ * See migrations/016 + src/web/routes/secrets.ts.
+ */
+export async function listSecretAssignments(secretId: string): Promise<string[]> {
+  const r = await request<{ secretId: string; agentGroupIds: string[] }>(
+    `/secrets/${encodeURIComponent(secretId)}/assignments`,
+  );
+  return r.agentGroupIds;
+}
+
+export async function setSecretAssignments(secretId: string, agentGroupIds: string[]): Promise<string[]> {
+  const r = await request<{ secretId: string; agentGroupIds: string[] }>(
+    `/secrets/${encodeURIComponent(secretId)}/assignments`,
+    { method: 'PUT', json: { agentGroupIds } },
+  );
+  return r.agentGroupIds;
 }
 
 // --- Approvals ---
