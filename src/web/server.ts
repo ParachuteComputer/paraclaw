@@ -53,6 +53,7 @@ import {
   type ClawScope,
 } from './auth.js';
 import { fetchHubVaults } from './hub-discovery.js';
+import { handleAppsRoute } from './routes/apps.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleChannelsRoute } from './routes/channels.js';
 import { handleActivityRoute } from './routes/activity.js';
@@ -286,6 +287,25 @@ async function handleApi(
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSessionsRoute({ pathname, method, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  // OAuth callback redirects come from the provider's authorization
+  // server with no Authorization header — the unguessable `state` token
+  // (single-use, 10-min TTL, see oauth/state-store.ts) is the auth.
+  // Everything else under /api/apps requires a JWT.
+  if (pathname === '/api/apps' || pathname.startsWith('/api/apps/')) {
+    const isCallback = /^\/api\/apps\/[^/]+\/callback$/.test(pathname) && method === 'GET';
+    if (!isCallback) {
+      const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+      if (!(await gate(req, res, required))) return;
+    }
+    try {
+      const handled = await handleAppsRoute({ pathname, method, url, req, res });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));

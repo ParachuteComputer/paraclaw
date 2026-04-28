@@ -14,6 +14,9 @@ import { migration014 } from './014-secrets.js';
 import { migration015 } from './015-secrets-drop-host-pattern.js';
 import { migration016 } from './016-secret-assignments.js';
 import { migration017 } from './017-agent-activity.js';
+import { migration018 } from './018-oauth-app-configs.js';
+import { migration019 } from './019-oauth-app-connections.js';
+import { migration020 } from './020-agent-app-connections.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 
@@ -39,6 +42,9 @@ const migrations: Migration[] = [
   migration015,
   migration016,
   migration017,
+  migration018,
+  migration019,
+  migration020,
 ];
 
 export function runMigrations(db: Database): void {
