@@ -389,8 +389,10 @@ export interface PutAppConfigInput {
 }
 
 export async function putAppConfig(provider: string, input: PutAppConfigInput): Promise<AppConfigView> {
+  // Canonical wire shape: PUT (idempotent upsert) per the team-lead's brief.
+  // Server-side handler keys on (paraclaw-instance, provider) and replaces.
   return request<AppConfigView>(`/apps/${encodeURIComponent(provider)}/config`, {
-    method: 'POST',
+    method: 'PUT',
     json: input,
   });
 }
