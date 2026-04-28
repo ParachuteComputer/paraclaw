@@ -17,6 +17,7 @@ import {
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { rewriteMcpUrlsForContainer } from './parachute/vault-mcp.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -244,9 +245,20 @@ function buildMounts(
 
   // container.json — nested RO mount on top of RW group dir so the agent
   // can read its config but cannot modify it.
+  //
+  // We don't mount the on-disk file directly: we write a per-spawn copy
+  // to the session dir with HTTP MCP URLs translated from loopback
+  // (`127.0.0.1` / `localhost`) to `host.docker.internal`. The on-disk
+  // file keeps the operator-facing URL (what the UI displays, what they
+  // typed); the container sees a derived copy that's actually reachable
+  // from inside Docker. See `rewriteMcpUrlsForContainer` in
+  // src/parachute/vault-mcp.ts for the rewrite rules.
   const containerJsonPath = path.join(groupDir, 'container.json');
   if (fs.existsSync(containerJsonPath)) {
-    mounts.push({ hostPath: containerJsonPath, containerPath: '/workspace/agent/container.json', readonly: true });
+    const spawnConfig = rewriteMcpUrlsForContainer(containerConfig);
+    const spawnConfigPath = path.join(sessDir, '.spawn-container.json');
+    fs.writeFileSync(spawnConfigPath, JSON.stringify(spawnConfig, null, 2) + '\n');
+    mounts.push({ hostPath: spawnConfigPath, containerPath: '/workspace/agent/container.json', readonly: true });
   }
 
   // Composer-managed CLAUDE.md artifacts — nested RO mounts. These are
