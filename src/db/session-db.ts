@@ -266,6 +266,35 @@ export function migrateDeliveredTable(db: Database): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// activity (read-only from host)
+// ---------------------------------------------------------------------------
+
+export interface OutboundActivityRow {
+  seq: number;
+  ts: string;
+  kind: string;
+  target: string | null;
+  summary: string | null;
+}
+
+/**
+ * Read activity rows the host hasn't yet merged. Returns rows ordered by
+ * seq ascending so the merge runs in chronological order and the cursor
+ * advances monotonically. Returns [] (without throwing) if the outbound
+ * DB pre-dates the activity table — old session DBs simply won't emit
+ * activity until the next container reboot creates the table on demand.
+ */
+export function getOutboundActivity(db: Database, sinceSeq: number): OutboundActivityRow[] {
+  try {
+    return db
+      .prepare(`SELECT seq, ts, kind, target, summary FROM activity WHERE seq > ? ORDER BY seq ASC`)
+      .all(sinceSeq) as OutboundActivityRow[];
+  } catch {
+    return [];
+  }
+}
+
 // Adds columns added to messages_in after the initial v2 schema to
 // pre-existing session DBs. No-op on fresh installs where the columns are
 // in the baseline schema. Backfills existing rows so invariants hold.

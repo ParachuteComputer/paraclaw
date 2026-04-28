@@ -3,7 +3,7 @@ import path from 'path';
 
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
-import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
+import { appendActivity, clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
 import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 
@@ -164,6 +164,20 @@ const preToolUseHook: HookCallback = async (input) => {
     setContainerToolInFlight(toolName, declaredTimeoutMs);
   } catch (err) {
     log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  // Activity ledger — append-only per-invocation row. Kind classifies; target
+  // names the tool. summary is left null for Bash because tool_input.command
+  // can carry env-injected secrets via argv. Other tools' inputs may also
+  // contain secrets, so we keep summary null across the board for now and
+  // tighten case-by-case as the surface stabilizes.
+  try {
+    let kind: string;
+    if (toolName === 'Bash') kind = 'cmd_exec';
+    else if (toolName.startsWith('mcp__')) kind = 'mcp_call';
+    else kind = 'tool_call';
+    appendActivity(kind, toolName || null, null);
+  } catch (err) {
+    log(`PreToolUse: failed to append activity: ${err instanceof Error ? err.message : String(err)}`);
   }
   return { continue: true };
 };

@@ -74,8 +74,35 @@ export function getOutboundDb(): Database {
         updated_at               TEXT NOT NULL
       );
     `);
+    // activity: append-only ledger of tool invocations, drained by the host's
+    // delivery loop into central agent_activity. seq is monotonic and serves
+    // as the host's merge cursor (sessions.activity_synced_seq). Forward-
+    // compat for older outbound.db files. Privacy: never write secret values
+    // or full Bash command strings into `summary` — env-injected creds can
+    // leak via argv. Caller (PreToolUse hook) is responsible.
+    _outbound.exec(`
+      CREATE TABLE IF NOT EXISTS activity (
+        seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts         TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        target     TEXT,
+        summary    TEXT
+      );
+    `);
   }
   return _outbound;
+}
+
+/**
+ * Append a tool-invocation row to the outbound activity ledger. Called from
+ * the provider's PreToolUse hook. Sanitization is the caller's job — pass
+ * `summary = null` for kinds that may carry secrets (e.g. Bash argv).
+ */
+export function appendActivity(kind: string, target: string | null, summary: string | null): void {
+  const ts = new Date().toISOString();
+  getOutboundDb()
+    .prepare(`INSERT INTO activity (ts, kind, target, summary) VALUES (?, ?, ?, ?)`)
+    .run(ts, kind, target, summary);
 }
 
 /**
@@ -211,6 +238,13 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       tool_declared_timeout_ms INTEGER,
       tool_started_at          TEXT,
       updated_at               TEXT NOT NULL
+    );
+    CREATE TABLE activity (
+      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts         TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      target     TEXT,
+      summary    TEXT
     );
   `);
 
