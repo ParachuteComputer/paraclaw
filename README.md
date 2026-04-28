@@ -37,13 +37,13 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 
 ## Quick Start
 
+Paraclaw is a [Parachute](https://parachute.computer) module — install it through the hub and configure it from the web UI:
+
 ```bash
-git clone https://github.com/qwibitai/nanoclaw.git nanoclaw-v2
-cd nanoclaw-v2
-bash nanoclaw.sh
+parachute install paraclaw
 ```
 
-`nanoclaw.sh` walks you from a fresh machine to a named agent you can message. It installs Node, pnpm, and Docker if missing, registers your Anthropic credential with OneCLI, builds the agent container, and pairs your first channel (Telegram, Discord, WhatsApp, or a local CLI). If a step fails, Claude Code is invoked automatically to diagnose and resume from where it broke.
+The hub builds the agent container, brings the host process up under `bun src/index.ts`, and serves the configuration UI at `http://127.0.0.1:1944/claw/`. From there: drop in your Anthropic API key, pick a channel (Telegram, Discord, or the local CLI), and pair your first agent — no shell scripts required. See [`docs/parachute-integration.md`](docs/parachute-integration.md) for the full Parachute path.
 
 ## Philosophy
 

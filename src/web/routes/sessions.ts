@@ -8,24 +8,18 @@
  * threshold) — see src/parachute/group-status.ts for the rationale.
  *
  * Close behavior: marks the row `status='closed'`, `container_status='stopped'`
- * in the central DB. The host process owns the container lifecycle —
- * `killContainer` reads from a host-process-only `activeContainers` Map and
- * is a no-op when called from this (separate) web process. The container
- * therefore keeps running until either the host's sweep tick reaps it on
- * an idle ceiling, or the upcoming web-merge directive collapses host +
- * web into a single `bun src/index.ts` boot — at which point killContainer
- * works directly because both surfaces share the activeContainers map.
- *
- * UI consequence today: the row flips to status='closed' immediately, the
- * container's `alive` indicator may stay true for up to 30 minutes (the
- * sweep ceiling) before it idles out. Acceptable for the rebuild's
- * intermediate state; the merge PR removes the gap.
+ * AND calls `killContainer` to actually stop the running Docker container.
+ * Post web-server merge, the host + web share one process and one
+ * `activeContainers` Map, so `killContainer` is no longer a no-op from this
+ * route — it reaps the container synchronously and the operator's "Close"
+ * click takes effect immediately rather than waiting for the sweep ceiling.
  */
 import http from 'node:http';
 
 import fs from 'node:fs';
 
 import { getAllAgentGroups } from '../../db/agent-groups.js';
+import { killContainer } from '../../container-runner.js';
 import { getSession, getSessionsByAgentGroup, updateSession } from '../../db/sessions.js';
 import { log } from '../../log.js';
 import { DEFAULT_ALIVE_THRESHOLD_MS } from '../../parachute/group-status.js';
@@ -117,6 +111,9 @@ export async function handleSessionsRoute(ctx: SessionsRouteContext): Promise<bo
       return true;
     }
     updateSession(id, { status: 'closed', container_status: 'stopped' });
+    // Kill the running container synchronously. Post web-merge, host + web
+    // share `activeContainers`, so this is no longer a no-op.
+    killContainer(id, 'closed via web');
     log.info('session closed via web', { sessionId: id });
     json(res, 200, { id, status: 'closed' });
     return true;
