@@ -30,8 +30,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { DATA_DIR, GROUPS_DIR } from '../../../src/config.js';
-import { initDb, openDb, type Database } from '../../../src/db/connection.js';
+import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR } from '../../../src/config.js';
+import { initDb, migrateCentralDbLocation, openDb, type Database } from '../../../src/db/connection.js';
 import { runMigrations } from '../../../src/db/migrations/index.js';
 import {
   attachVaultToGroup,
@@ -68,8 +68,6 @@ import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 
-const CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIST = path.resolve(__dirname, '../../ui/dist');
 // Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
@@ -90,6 +88,13 @@ const SERVICE_VERSION = '0.0.13-rc.1';
 // the wizard endpoint can write. WAL mode + foreign_keys ON are set inside.
 // Concurrent with a running NanoClaw service (also WAL) is fine — SQLite
 // handles multiple writers per file. Migrations are idempotent.
+//
+// migrateCentralDbLocation runs first to relocate <PROJECT_ROOT>/data/v2.db
+// → ~/.parachute/claw/paraclaw.db on installs that pre-date the move. After
+// the host process performs the migration once, every subsequent open of
+// CENTRAL_DB_PATH (here, in the host main, in CLI scripts) hits the new
+// location — they don't race because the migration is copy-not-rename.
+migrateCentralDbLocation();
 const centralDb = initDb(CENTRAL_DB_PATH);
 runMigrations(centralDb);
 

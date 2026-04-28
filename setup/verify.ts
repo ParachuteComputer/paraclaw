@@ -11,7 +11,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { DATA_DIR } from '../src/config.js';
+import { CENTRAL_DB_PATH, LEGACY_CENTRAL_DB_PATH } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { log } from '../src/log.js';
 import { pingCliAgent, type PingResult } from './lib/agent-ping.js';
@@ -188,9 +188,12 @@ export async function run(_args: string[]): Promise<void> {
   const configuredChannels = Object.keys(channelAuth);
   const anyChannelConfigured = configuredChannels.length > 0;
 
-  // 5. Check registered groups in v2 central DB (agent_groups + messaging_group_agents)
+  // 5. Check registered groups in central DB (agent_groups + messaging_group_agents).
+  // Verify runs as part of the setup flow which can fire before the first host
+  // boot has run migrateCentralDbLocation; check the new path first, fall back
+  // to the legacy in-tree path so a pre-migration setup verify still works.
   let registeredGroups = 0;
-  const dbPath = path.join(DATA_DIR, 'v2.db');
+  const dbPath = fs.existsSync(CENTRAL_DB_PATH) ? CENTRAL_DB_PATH : LEGACY_CENTRAL_DB_PATH;
   if (fs.existsSync(dbPath)) {
     try {
       const db = new Database(dbPath, { readonly: true });

@@ -4,11 +4,9 @@
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
  */
-import path from 'path';
-
-import { DATA_DIR } from './config.js';
+import { CENTRAL_DB_PATH } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
-import { initDb } from './db/connection.js';
+import { initDb, migrateCentralDbLocation } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
@@ -58,11 +56,13 @@ import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from 
 async function main(): Promise<void> {
   log.info('Paraclaw starting');
 
-  // 1. Init central DB
-  const dbPath = path.join(DATA_DIR, 'v2.db');
-  const db = initDb(dbPath);
+  // 1. Init central DB. One-shot relocation runs before open: legacy
+  // <PROJECT_ROOT>/data/v2.db moves to ~/.parachute/claw/paraclaw.db. After
+  // that, every host process (including the web server) opens the new path.
+  migrateCentralDbLocation();
+  const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db);
-  log.info('Central DB ready', { path: dbPath });
+  log.info('Central DB ready', { path: CENTRAL_DB_PATH });
 
   // 1b. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();

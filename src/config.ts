@@ -23,6 +23,19 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
+// Central DB lives outside the project tree so that:
+//   1. `git clean` / fresh checkouts can never wipe operator-owned state.
+//   2. Multiple project checkouts on the same host share one source of truth.
+//   3. The DB sits next to `master.key` under `~/.parachute/claw/` so a single
+//      backup of that directory captures both crypto material and DB state.
+//
+// The legacy location was `<PROJECT_ROOT>/data/v2.db`. We migrate-on-startup
+// (see `migrateCentralDbLocation` in src/db/connection.ts) so existing installs
+// pick up the new path without manual intervention.
+export const CENTRAL_DB_DIR = path.join(HOME_DIR, '.parachute', 'claw');
+export const CENTRAL_DB_PATH = process.env.PARACLAW_CENTRAL_DB_PATH || path.join(CENTRAL_DB_DIR, 'paraclaw.db');
+export const LEGACY_CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
+
 // Per-checkout image tag so two installs on the same host don't share
 // `nanoclaw-agent:latest` and clobber each other on rebuild.
 export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);

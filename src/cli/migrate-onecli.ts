@@ -24,8 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { DATA_DIR } from '../config.js';
-import { initDb } from '../db/connection.js';
+import { CENTRAL_DB_PATH } from '../config.js';
+import { initDb, migrateCentralDbLocation } from '../db/connection.js';
 import { runMigrations } from '../db/migrations/index.js';
 import { type SecretKind, putSecret } from '../secrets/index.js';
 
@@ -72,7 +72,8 @@ function main(): void {
   }
   if (!Array.isArray(parsed)) exitWith(1, `${abs} must contain a JSON array of secrets`);
 
-  const db = initDb(path.join(DATA_DIR, 'v2.db'));
+  migrateCentralDbLocation();
+  const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db);
 
   let imported = 0;
