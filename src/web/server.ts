@@ -78,7 +78,7 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // hub#83) sets this from `module.json` `paths[0]` automatically. Empty
 // string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.14-rc.6';
+const SERVICE_VERSION = '0.0.14-rc.7';
 
 interface AgentGroupRow {
   id: string;

@@ -42,6 +42,7 @@ import {
   type ContainerState,
 } from './db/session-db.js';
 import { log } from './log.js';
+import { sweepExpiredStates } from './oauth/state-store.js';
 import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
@@ -127,6 +128,16 @@ async function sweep(): Promise<void> {
     }
   } catch (err) {
     log.error('Host sweep error', { err });
+  }
+
+  // Global (non-per-session) maintenance: drop expired OAuth CSRF state rows.
+  // DB-backed state store grows by ~1 row per failed authorize attempt
+  // otherwise.
+  try {
+    const removed = sweepExpiredStates();
+    if (removed > 0) log.info('Swept expired oauth states', { removed });
+  } catch (err) {
+    log.warn('sweepExpiredStates failed', { err: err instanceof Error ? err.message : String(err) });
   }
 
   setTimeout(sweep, SWEEP_INTERVAL_MS);
