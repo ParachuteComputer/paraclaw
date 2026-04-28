@@ -16,7 +16,9 @@
  * `src/modules/self-mod/` in PR #7 — they now register delivery actions
  * + approval handlers via this module's public API.
  */
+import { ONECLI_URL } from '../../config.js';
 import { onDeliveryAdapterReady } from '../../delivery.js';
+import { log } from '../../log.js';
 import { registerResponseHandler, onShutdown } from '../../response-registry.js';
 import { handleApprovalsResponse } from './response-handler.js';
 import { startOneCLIApprovalHandler, stopOneCLIApprovalHandler } from './onecli-approvals.js';
@@ -27,7 +29,15 @@ export type { ApprovalHandler, ApprovalHandlerContext, RequestApprovalOptions } 
 
 registerResponseHandler(handleApprovalsResponse);
 
+// OneCLI bridge is now optional. Paraclaw's native secret store is the
+// default credential surface; the OneCLI long-poll only starts when the
+// install still has a OneCLI gateway configured. Without ONECLI_URL set
+// the handler would hammer a dead address forever and leak warn-logs.
 onDeliveryAdapterReady((adapter) => {
+  if (!ONECLI_URL) {
+    log.info('Approvals: skipping OneCLI bridge (ONECLI_URL not set)');
+    return;
+  }
   startOneCLIApprovalHandler(adapter);
 });
 

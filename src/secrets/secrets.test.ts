@@ -3,13 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeDb, initTestDb, runMigrations } from '../db/index.js';
 import { _setMasterKeyForTest } from './master-key.js';
-import {
-  deleteSecret,
-  getSecret,
-  listSecrets,
-  putSecret,
-  resolveInjectableSecrets,
-} from './index.js';
+import { deleteSecret, getSecret, listSecrets, putSecret, resolveInjectableSecrets } from './index.js';
 
 beforeEach(() => {
   const db = initTestDb();

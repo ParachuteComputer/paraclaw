@@ -211,12 +211,7 @@ function bashTimeoutMs(state: ContainerState | null): number | null {
   return typeof state.tool_declared_timeout_ms === 'number' ? state.tool_declared_timeout_ms : null;
 }
 
-function enforceRunningContainerSla(
-  inDb: Database,
-  outDb: Database,
-  session: Session,
-  agentGroupId: string,
-): void {
+function enforceRunningContainerSla(inDb: Database, outDb: Database, session: Session, agentGroupId: string): void {
   const decision = decideStuckAction({
     now: Date.now(),
     heartbeatMtimeMs: heartbeatMtimeMs(agentGroupId, session.id),
@@ -247,12 +242,7 @@ function enforceRunningContainerSla(
   resetStuckProcessingRows(inDb, outDb, session, 'claim-stuck');
 }
 
-function resetStuckProcessingRows(
-  inDb: Database,
-  outDb: Database,
-  session: Session,
-  reason: string,
-): void {
+function resetStuckProcessingRows(inDb: Database, outDb: Database, session: Session, reason: string): void {
   const claims = getProcessingClaims(outDb);
   const now = Date.now();
   for (const { message_id } of claims) {

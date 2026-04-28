@@ -125,12 +125,7 @@ export function getCompletedRecurring(db: Database): RecurringMessage[] {
     .all() as RecurringMessage[];
 }
 
-export function insertRecurrence(
-  db: Database,
-  msg: RecurringMessage,
-  newId: string,
-  nextRun: string | null,
-): void {
+export function insertRecurrence(db: Database, msg: RecurringMessage, newId: string, nextRun: string | null): void {
   db.prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, process_after, recurrence, platform_id, channel_type, thread_id, content, series_id)
      VALUES (?, ?, ?, datetime('now'), 'pending', ?, ?, ?, ?, ?, ?, ?)`,

@@ -122,10 +122,7 @@ export function getSecret(name: string, agentGroupId?: string | null): string | 
         .get({ name, agent_group_id: agentGroupId })
     : undefined;
   const row =
-    scoped ??
-    db()
-      .prepare<RawRow>(`SELECT * FROM secrets WHERE name = @name AND agent_group_id IS NULL`)
-      .get({ name });
+    scoped ?? db().prepare<RawRow>(`SELECT * FROM secrets WHERE name = @name AND agent_group_id IS NULL`).get({ name });
   if (!row) return undefined;
   return decryptSecret(row.value_encrypted, key);
 }
