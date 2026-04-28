@@ -53,7 +53,6 @@ interface PutBody {
   agent_group_id?: string | null;
   agentGroupId?: string | null;
   assigned_mode?: string;
-  host_pattern?: string | null;
 }
 
 const json = (res: http.ServerResponse, status: number, body: unknown): void => {
@@ -127,7 +126,6 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
       kind,
       agent_group_id: agentGroupId,
       assigned_mode: mode,
-      host_pattern: body.host_pattern ?? null,
     });
     // Re-read so the response carries the canonical timestamps the upsert
     // wrote (rather than guessing). Same scope filter — listSecrets returns

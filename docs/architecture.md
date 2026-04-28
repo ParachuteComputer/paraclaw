@@ -181,17 +181,13 @@ the schema is summarized here.
 | `value_encrypted` | AES-256-GCM, key from `~/.parachute/claw/master.key` |
 | `kind` | `channel-token` · `api-key` · `generic` |
 | `agent_group_id` | nullable; null = global |
-| `assigned_mode` | `all` · `selective` (mirrors OneCLI's per-agent mode) |
-| `host_pattern` | optional URL/host pattern for selective injection |
+| `assigned_mode` | `all` · `selective` (per-agent injection scope) |
 | `created_at`, `updated_at` | ISO-8601 |
 
 The master key lives at `~/.parachute/claw/master.key` (32 bytes, mode
 0600, generated on first start). Secrets are decrypted in-process at
 session spawn and injected into the container as environment variables —
-never as chat context, never in URL params. A migration command,
-`POST /api/secrets/migrate-onecli`, pulls existing OneCLI secrets and
-re-encrypts them under the paraclaw key, so users on the prior stack can
-move without losing credentials.
+never as chat context, never in URL params.
 
 ### Approval
 
@@ -587,7 +583,6 @@ POST   /api/channels/:type/test
 GET    /api/secrets
 POST   /api/secrets
 DELETE /api/secrets/:id
-POST   /api/secrets/migrate-onecli
 
 # approvals
 GET    /api/approvals
@@ -687,12 +682,12 @@ registers in the hub's services catalog. Start runs `bun src/index.ts`.
 | Message-as-IO discipline | NanoClaw | Same `messages_in` / `messages_out` columns; one file per session instead of two |
 | Cross-mount DELETE-mode invariant | NanoClaw | Preserved — load-bearing for the host↔container DB seam |
 | Approval primitive | OneCLI | Rewritten in-process; `pickApprover` resolves from `user_roles`; no gateway daemon |
-| Per-agent secret modes | OneCLI | Concept preserved (`assigned_mode`, `host_pattern`); storage replaced with native AES-256-GCM |
+| Per-agent secret scoping | OneCLI heritage | `assigned_mode` concept preserved; storage replaced with native AES-256-GCM |
 | Trust zones (infra/core/perimeter) | borg | Vocabulary adopted; v1 enforces at JWT + container/DB-mount + approval boundaries |
 | Single-process collapse | tinyclaw, borg | Bun-everywhere *host*; per-session DB still mounted — collapse is single-process state, not the IPC seam |
 | File-queue option | borg | Considered, rejected — SQLite-with-DELETE-mode is already proven across the mount |
 | Skills system | NanoClaw | Retired in favour of UI; channel install moves into `/api/channels/install` |
-| Setup wizard's credential-capture | NanoClaw | Replaced by `/api/secrets` + `/api/secrets/migrate-onecli` |
+| Setup wizard's credential-capture | NanoClaw | Replaced by `/api/secrets` native page |
 | Entity model (4-table) | NanoClaw | Flattened — only `users`, `user_roles`, no `agent_group_members` |
 | Two-file session split (`inbound.db` + `outbound.db`) | NanoClaw | Preserved verbatim — load-bearing for one-writer-per-file across the bind mount |
 | Heartbeat-via-file | NanoClaw | Kept; `/workspace/.heartbeat` mtime |

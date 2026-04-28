@@ -1,8 +1,6 @@
 /**
  * /api/setup/status — readiness probe consumed by the setup wizard.
  *
- * Replaces the legacy onecli-gateway probe with a paraclaw-native check
- * tree:
  *   - `secrets`        — AES-GCM master key file is present + readable
  *   - `hub`            — hub origin reachable; JWKS endpoint resolves
  *   - `vaultAttached`  — at least one agent group has a vault attached

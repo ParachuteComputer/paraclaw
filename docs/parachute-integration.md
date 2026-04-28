@@ -77,19 +77,15 @@ The container reads `container.json` and uses the new entry as part of its norma
 ## What the integration deliberately does NOT impose
 
 - **No vault note path layout.** The agent group has access to vault; what it writes (and where) is the agent's business. We don't bake in a `claws/<name>` tree, we don't auto-mirror runs to vault, we don't auto-sync CLAUDE.md to a note. Those would impose a vault organization on every user; we don't.
-- **No replacement of OneCLI.** Third-party API credentials (Telegram, Slack, OpenAI, etc.) keep flowing through OneCLI's gateway exactly as in upstream NanoClaw. Vault is for the user's knowledge graph; OneCLI is for outbound credential injection. They're complementary.
+- **No new credential surface.** Third-party API credentials (Telegram, Slack, OpenAI, etc.) live in paraclaw's local AES-GCM secret store and get injected as container env vars at spawn time. Vault is for the user's knowledge graph; the secret store is for outbound credentials. They're complementary.
 - **No replacement of the SQLite session-DB pattern.** Per-session `inbound.db` / `outbound.db` are right for transient message handling. Vault is for durable, queryable, user-facing state — different concern.
 - **No web UI yet.** That's the next layer (a real Phase B add); see the top-level README's roadmap.
 
 ## Threat model
 
 - **Token scope is the boundary.** A `vault:read` claw physically cannot create or delete vault notes. A `vault:write` claw cannot delete the vault itself or revoke other tokens. A `vault:admin` claw is fully trusted; use sparingly.
-- **Token is in the container's `container.json`.** Container-side it lives in `/workspace/agent/container.json` (read-only mount). Anyone with shell access to the container can read it. That's the same posture as any other MCP credential NanoClaw handles — OneCLI gives you a stronger "credentials never enter the container" guarantee for third-party APIs but vault MCP itself uses standard Bearer auth.
+- **Token is in the container's `container.json`.** Container-side it lives in `/workspace/agent/container.json` (read-only mount). Anyone with shell access to the container can read it. That's the same posture as any other MCP credential paraclaw handles — credentials are decrypted only at injection time, but once inside the container they're plaintext env vars, same as any standard process environment.
 - **Revocation is per-token.** `parachute vault tokens revoke <label>` invalidates the claw's access immediately. Claw will start getting 401s from vault on the next request.
-
-## Upstream-merge stance
-
-Everything here is additive except the `McpServerConfig` widening, which is a back-compat-preserving union. Pulling upstream NanoClaw changes should produce zero merge conflicts in the parachute layer. The McpServerConfig edit could be contributed back upstream as a stand-alone improvement (HTTP MCP support is generally useful, not Parachute-specific) — that would shrink our diff to zero NanoClaw-source edits.
 
 ## Where this is heading
 

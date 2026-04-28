@@ -104,20 +104,9 @@ Surfaces:
 - **HTTP API** — `/api/secrets` (GET / POST / PATCH / DELETE) is the same code path the UI uses; scope-gated by `claw:admin`.
 - **Per-agent assignment** — every secret carries `assigned_mode` (`all` = injected into every group; `selective` = injected only into groups in `secret_assignments`).
 
-### Migrating from OneCLI
-
-Pre-paraclaw installs that used the OneCLI Agent Vault have a one-shot migration:
-
-```bash
-onecli secrets list --json > /tmp/onecli-secrets.json     # operator's shell
-bun src/cli/migrate-onecli.ts /tmp/onecli-secrets.json    # encrypts with master key + upserts into central DB
-```
-
-The migration is idempotent (`putSecret` is upsert-by `(name, agent_group_id)`) and re-runnable. After it lands, OneCLI is no longer reachable from paraclaw at runtime — the gateway URL/API key env vars are gone, the SDK is uninstalled, and the long-poll bridge is deleted. Operators are free to shut OneCLI down.
-
 ### Approval-gated credential use
 
-Approval flows for credential use are now paraclaw-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`. There's no external gateway in the loop and no in-memory promise bridge to time out.
+Approval flows for credential use are paraclaw-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`.
 
 ## Skills
 
@@ -146,7 +135,7 @@ Run commands directly — don't tell the user to run them.
 # Host (Node + pnpm)
 pnpm run dev          # Host with hot reload
 pnpm run build        # Compile host TypeScript (src/)
-./container/build.sh  # Rebuild agent container image (nanoclaw-agent:latest)
+./container/build.sh  # Rebuild agent container image (paraclaw-agent-<slug>:latest)
 pnpm test             # Host tests (vitest)
 
 # Agent-runner (Bun — separate package tree under container/agent-runner/)
@@ -156,18 +145,18 @@ cd container/agent-runner && bun test      # Container tests (bun:test)
 
 Container typecheck is a separate tsconfig — if you edit `container/agent-runner/src/`, run `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` from root (or `bun run typecheck` from `container/agent-runner/`).
 
-Service management:
+Service management (substitute `<slug>` with the 8-char hash from `getInstallSlug()` — each checkout gets its own service so two installs on one host don't collide):
 ```bash
-# macOS (launchd)
-launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
+# macOS (launchd) — Label is computer.parachute.claw-<slug>
+launchctl load   ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist
+launchctl unload ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist
+launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>  # restart
 
-# Linux (systemd)
-systemctl --user start|stop|restart nanoclaw
+# Linux (systemd) — unit is paraclaw-<slug>.service
+systemctl --user start|stop|restart paraclaw-<slug>
 ```
 
-Host logs: `logs/nanoclaw.log` (normal) and `logs/nanoclaw.error.log` (errors only — some delivery/approval failures only show up here).
+Host logs: `logs/paraclaw.log` (normal) and `logs/paraclaw.error.log` (errors only — some delivery/approval failures only show up here).
 
 ## Supply Chain Security (pnpm)
 
@@ -237,8 +226,8 @@ grep -q '^INSTALL_CJK_FONTS=' .env && sed -i.bak 's/^INSTALL_CJK_FONTS=.*/INSTAL
 
 # Rebuild and restart so new sessions pick up the new image
 ./container/build.sh
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
-# systemctl --user restart nanoclaw                # Linux
+launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>   # macOS
+# systemctl --user restart paraclaw-<slug>                            # Linux
 ```
 
 `container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through as a Docker build-arg. Without CJK fonts, Chromium-rendered screenshots and PDFs containing CJK text show tofu (empty rectangles) instead of characters.
