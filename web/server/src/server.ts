@@ -59,6 +59,7 @@ import {
   type ClawScope,
 } from './auth.js';
 import { fetchHubVaults } from './hub-discovery.js';
+import { handleSecretsRoute } from './routes/secrets.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 
@@ -244,6 +245,20 @@ async function handleApi(
   if (pathname === '/api/discovery' && method === 'GET') {
     json(res, 200, { hubOrigin: getHubOrigin() });
     return;
+  }
+
+  // /api/secrets — local AES-GCM secret store. Read-gated for list,
+  // write-gated for put/delete. Plaintext values are never returned.
+  if (pathname === '/api/secrets' || pathname.startsWith('/api/secrets/')) {
+    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    if (!(await gate(req, res, required))) return;
+    try {
+      const handled = await handleSecretsRoute({ pathname, method, url, req, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
   }
 
   if (pathname === '/api/groups' && method === 'GET') {
