@@ -17,7 +17,7 @@
  *   - sender_scope: 'known' when response_scope was 'allowlisted', 'all' otherwise
  *   - ignored_message_policy: 'drop' (conservative default; no old-schema analog)
  */
-import type Database from 'better-sqlite3';
+import type { Database } from '../connection.js';
 import type { Migration } from './index.js';
 
 import { log } from '../../log.js';
@@ -64,7 +64,7 @@ function backfill(row: LegacyRow): {
 export const migration010: Migration = {
   version: 10,
   name: 'engage-modes',
-  up: (db: Database.Database) => {
+  up: (db: Database) => {
     // Add the four new columns alongside the existing two. SQLite ALTER ADD
     // is cheap and non-rewriting.
     db.exec(`

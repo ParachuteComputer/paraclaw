@@ -26,7 +26,7 @@
  *        → kill + reset this message + tries++. Semantics: "container
  *        claimed a message and went quiet past tolerance since the claim."
  */
-import type Database from 'better-sqlite3';
+import type { Database } from './db/connection.js';
 import fs from 'fs';
 
 import { getActiveSessions } from './db/sessions.js';
@@ -139,8 +139,8 @@ async function sweepSession(session: Session): Promise<void> {
   const inPath = inboundDbPath(agentGroup.id, session.id);
   if (!fs.existsSync(inPath)) return;
 
-  let inDb: Database.Database;
-  let outDb: Database.Database | null = null;
+  let inDb: Database;
+  let outDb: Database | null = null;
   try {
     inDb = openInboundDb(agentGroup.id, session.id);
   } catch {
@@ -212,8 +212,8 @@ function bashTimeoutMs(state: ContainerState | null): number | null {
 }
 
 function enforceRunningContainerSla(
-  inDb: Database.Database,
-  outDb: Database.Database,
+  inDb: Database,
+  outDb: Database,
   session: Session,
   agentGroupId: string,
 ): void {
@@ -248,8 +248,8 @@ function enforceRunningContainerSla(
 }
 
 function resetStuckProcessingRows(
-  inDb: Database.Database,
-  outDb: Database.Database,
+  inDb: Database,
+  outDb: Database,
   session: Session,
   reason: string,
 ): void {

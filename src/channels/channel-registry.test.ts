@@ -2,7 +2,7 @@
  * Tests for the v2 channel adapter registry and integration with host.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { openDb } from '../db/connection.js';
 import fs from 'fs';
 
 import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
@@ -188,7 +188,7 @@ describe('channel + router integration', () => {
     expect(session).toBeDefined();
 
     const dbPath = inboundDbPath('ag-1', session!.id);
-    const db = new Database(dbPath);
+    const db = openDb(dbPath);
     const rows = db.prepare('SELECT * FROM messages_in').all() as Array<{ id: string; content: string }>;
     db.close();
 

@@ -30,10 +30,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import Database from 'better-sqlite3';
-
 import { DATA_DIR, GROUPS_DIR } from '../../../src/config.js';
-import { initDb } from '../../../src/db/connection.js';
+import { initDb, openDb, type Database } from '../../../src/db/connection.js';
 import { runMigrations } from '../../../src/db/migrations/index.js';
 import {
   attachVaultToGroup,
@@ -102,17 +100,17 @@ interface AgentGroupView extends AgentGroupRow {
   status: GroupStatus | null;
 }
 
-function getDb(): Database.Database {
+function getReadonlyDb(): Database {
   if (!fs.existsSync(CENTRAL_DB_PATH)) {
     throw new Error(
-      `central db not found at ${CENTRAL_DB_PATH} — has NanoClaw been initialized? Run \`pnpm setup\` or \`pnpm dev\` first.`,
+      `central db not found at ${CENTRAL_DB_PATH} — has paraclaw been initialized? Run \`bun src/index.ts\` first.`,
     );
   }
-  return new Database(CENTRAL_DB_PATH, { readonly: true });
+  return openDb(CENTRAL_DB_PATH, { readonly: true });
 }
 
 function listAgentGroups(): AgentGroupView[] {
-  const db = getDb();
+  const db = getReadonlyDb();
   try {
     const rows = db
       .prepare('SELECT id, name, folder, agent_provider, created_at FROM agent_groups ORDER BY created_at DESC')
@@ -128,7 +126,7 @@ function listAgentGroups(): AgentGroupView[] {
 }
 
 function getAgentGroup(folder: string): AgentGroupView | null {
-  const db = getDb();
+  const db = getReadonlyDb();
   try {
     const row = db
       .prepare('SELECT id, name, folder, agent_provider, created_at FROM agent_groups WHERE folder = ?')

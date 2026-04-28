@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { Database } from '../connection.js';
 
 import type { Migration } from './index.js';
 
@@ -21,7 +21,7 @@ import type { Migration } from './index.js';
 export const moduleAgentToAgentDestinations: Migration = {
   version: 4,
   name: 'agent-destinations',
-  up(db: Database.Database) {
+  up(db: Database) {
     db.exec(`
       CREATE TABLE agent_destinations (
         agent_group_id  TEXT NOT NULL REFERENCES agent_groups(id),

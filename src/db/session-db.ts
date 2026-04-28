@@ -5,35 +5,34 @@
  * shared between host and container. Callers own the connection lifecycle
  * (open-write-close per op). See session-manager.ts header for invariants.
  */
-import Database from 'better-sqlite3';
-
+import { type Database, openDb } from './connection.js';
 import { INBOUND_SCHEMA, OUTBOUND_SCHEMA } from './schema.js';
 
 /** Apply the inbound or outbound schema to a DB file. Idempotent. */
 export function ensureSchema(dbPath: string, schema: 'inbound' | 'outbound'): void {
-  const db = new Database(dbPath);
+  const db = openDb(dbPath);
   db.pragma('journal_mode = DELETE');
   db.exec(schema === 'inbound' ? INBOUND_SCHEMA : OUTBOUND_SCHEMA);
   db.close();
 }
 
 /** Open the inbound DB for a session (host reads/writes). */
-export function openInboundDb(dbPath: string): Database.Database {
-  const db = new Database(dbPath);
+export function openInboundDb(dbPath: string): Database {
+  const db = openDb(dbPath);
   db.pragma('journal_mode = DELETE');
   db.pragma('busy_timeout = 5000');
   return db;
 }
 
 /** Open the outbound DB for a session (host reads only). */
-export function openOutboundDb(dbPath: string): Database.Database {
-  const db = new Database(dbPath, { readonly: true });
+export function openOutboundDb(dbPath: string): Database {
+  const db = openDb(dbPath, { readonly: true });
   db.pragma('busy_timeout = 5000');
   return db;
 }
 
 export function upsertSessionRouting(
-  db: Database.Database,
+  db: Database,
   routing: { channel_type: string | null; platform_id: string | null; thread_id: string | null },
 ): void {
   db.prepare(
@@ -55,7 +54,7 @@ export interface DestinationRow {
   agent_group_id: string | null;
 }
 
-export function replaceDestinations(db: Database.Database, entries: DestinationRow[]): void {
+export function replaceDestinations(db: Database, entries: DestinationRow[]): void {
   const tx = db.transaction((rows: DestinationRow[]) => {
     db.prepare('DELETE FROM destinations').run();
     const stmt = db.prepare(
@@ -78,13 +77,13 @@ export function replaceDestinations(db: Database.Database, entries: DestinationR
  * host-writes-even-seq invariant without duplicating the logic. Not part of
  * the general public API — imported by `src/modules/scheduling/db.ts` only.
  */
-export function nextEvenSeq(db: Database.Database): number {
+export function nextEvenSeq(db: Database): number {
   const maxSeq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
   return maxSeq < 2 ? 2 : maxSeq + 2 - (maxSeq % 2);
 }
 
 export function insertMessage(
-  db: Database.Database,
+  db: Database,
   message: {
     id: string;
     kind: string;
@@ -112,7 +111,7 @@ export function insertMessage(
   });
 }
 
-export function countDueMessages(db: Database.Database): number {
+export function countDueMessages(db: Database): number {
   return (
     db
       .prepare(
@@ -125,18 +124,18 @@ export function countDueMessages(db: Database.Database): number {
   ).count;
 }
 
-export function markMessageFailed(db: Database.Database, messageId: string): void {
+export function markMessageFailed(db: Database, messageId: string): void {
   db.prepare("UPDATE messages_in SET status = 'failed' WHERE id = ?").run(messageId);
 }
 
-export function retryWithBackoff(db: Database.Database, messageId: string, backoffSec: number): void {
+export function retryWithBackoff(db: Database, messageId: string, backoffSec: number): void {
   db.prepare(
     `UPDATE messages_in SET tries = tries + 1, process_after = datetime('now', '+${backoffSec} seconds') WHERE id = ?`,
   ).run(messageId);
 }
 
 export function getMessageForRetry(
-  db: Database.Database,
+  db: Database,
   messageId: string,
   status: string,
 ): { id: string; tries: number; processAfter: string | null } | undefined {
@@ -145,7 +144,7 @@ export function getMessageForRetry(
     .get(messageId, status) as { id: string; tries: number; processAfter: string | null } | undefined;
 }
 
-export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Database): void {
+export function syncProcessingAcks(inDb: Database, outDb: Database): void {
   const completed = outDb
     .prepare("SELECT message_id FROM processing_ack WHERE status IN ('completed', 'failed')")
     .all() as Array<{ message_id: string }>;
@@ -160,7 +159,7 @@ export function syncProcessingAcks(inDb: Database.Database, outDb: Database.Data
   })();
 }
 
-export function getStuckProcessingIds(outDb: Database.Database): string[] {
+export function getStuckProcessingIds(outDb: Database): string[] {
   return (
     outDb.prepare("SELECT message_id FROM processing_ack WHERE status = 'processing'").all() as Array<{
       message_id: string;
@@ -174,7 +173,7 @@ export interface ProcessingClaim {
 }
 
 /** Return processing_ack rows still in 'processing' with their claim timestamps. */
-export function getProcessingClaims(outDb: Database.Database): ProcessingClaim[] {
+export function getProcessingClaims(outDb: Database): ProcessingClaim[] {
   return outDb
     .prepare("SELECT message_id, status_changed FROM processing_ack WHERE status = 'processing'")
     .all() as ProcessingClaim[];
@@ -192,7 +191,7 @@ export interface ContainerState {
  * active. Host sweep reads this to widen stuck-detection tolerance while
  * Bash is running with a long declared timeout.
  */
-export function getContainerState(outDb: Database.Database): ContainerState | null {
+export function getContainerState(outDb: Database): ContainerState | null {
   try {
     const row = outDb
       .prepare(
@@ -220,7 +219,7 @@ export interface OutboundMessage {
   content: string;
 }
 
-export function getDueOutboundMessages(db: Database.Database): OutboundMessage[] {
+export function getDueOutboundMessages(db: Database): OutboundMessage[] {
   return db
     .prepare(
       `SELECT * FROM messages_out
@@ -234,7 +233,7 @@ export function getDueOutboundMessages(db: Database.Database): OutboundMessage[]
 // delivered
 // ---------------------------------------------------------------------------
 
-export function getDeliveredIds(db: Database.Database): Set<string> {
+export function getDeliveredIds(db: Database): Set<string> {
   return new Set(
     (db.prepare('SELECT message_out_id FROM delivered').all() as Array<{ message_out_id: string }>).map(
       (r) => r.message_out_id,
@@ -242,20 +241,20 @@ export function getDeliveredIds(db: Database.Database): Set<string> {
   );
 }
 
-export function markDelivered(db: Database.Database, messageOutId: string, platformMessageId: string | null): void {
+export function markDelivered(db: Database, messageOutId: string, platformMessageId: string | null): void {
   db.prepare(
     "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, ?, 'delivered', datetime('now'))",
   ).run(messageOutId, platformMessageId ?? null);
 }
 
-export function markDeliveryFailed(db: Database.Database, messageOutId: string): void {
+export function markDeliveryFailed(db: Database, messageOutId: string): void {
   db.prepare(
     "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', datetime('now'))",
   ).run(messageOutId);
 }
 
 /** Ensure the delivered table has columns added after initial schema. */
-export function migrateDeliveredTable(db: Database.Database): void {
+export function migrateDeliveredTable(db: Database): void {
   const cols = new Set(
     (db.prepare("PRAGMA table_info('delivered')").all() as Array<{ name: string }>).map((c) => c.name),
   );
@@ -270,7 +269,7 @@ export function migrateDeliveredTable(db: Database.Database): void {
 // Adds columns added to messages_in after the initial v2 schema to
 // pre-existing session DBs. No-op on fresh installs where the columns are
 // in the baseline schema. Backfills existing rows so invariants hold.
-export function migrateMessagesInTable(db: Database.Database): void {
+export function migrateMessagesInTable(db: Database): void {
   const cols = new Set(
     (db.prepare("PRAGMA table_info('messages_in')").all() as Array<{ name: string }>).map((c) => c.name),
   );
