@@ -323,6 +323,104 @@ export async function listGroupActivity(
   return r.activity;
 }
 
+// --- Apps (OAuth integrations: per-provider OAuth configs + user grants) ---
+
+/**
+ * Three-table OneCLI model surfaced through `/api/apps/*`:
+ *   1. app_configs      — per-provider OAuth client (paste client_id/secret)
+ *   2. app_connections  — user grants (the rows GET /api/apps returns)
+ *   3. assignments      — which agent groups see which connection (drawer; not yet wired in this PR)
+ *
+ * The brief locks the wire to one config per (paraclaw-instance, provider).
+ * A connection's `agentGroupCount` is the only assignment hint surfaced in
+ * this PR; full per-connection assignment editing comes with the cross-page
+ * pivot follow-up.
+ */
+export type AppConnectionStatus = 'active' | 'expired' | 'revoked';
+
+export interface AppConnectionView {
+  id: string;
+  provider: string;
+  /** From userinfo at OAuth completion. May be null for providers that don't expose it. */
+  account_email: string | null;
+  /** Auto-populated label (typically `<email> @ <provider>`). User-overridable in a future PR. */
+  label: string;
+  scopes_granted: string[];
+  /** ISO8601 — null when refresh tokens never expire (some providers). */
+  expires_at: string | null;
+  status: AppConnectionStatus;
+  /** Count only — the assignment list isn't returned here. */
+  agentGroupCount: number;
+}
+
+export interface AppConfigView {
+  provider: string;
+  client_id: string;
+  scopes_default: string[];
+  /**
+   * The server NEVER returns the secret; only an existence flag. The UI uses
+   * this to choose between "Add config" and "Replace secret" in the form.
+   */
+  hasSecret: boolean;
+}
+
+export async function listAppConnections(): Promise<AppConnectionView[]> {
+  // Server returns the list directly per the brief (no envelope), but we
+  // accept either shape so a future envelope migration doesn't break here.
+  const r = await request<AppConnectionView[] | { apps: AppConnectionView[] }>('/apps');
+  return Array.isArray(r) ? r : r.apps;
+}
+
+export async function getAppConfig(provider: string): Promise<AppConfigView | null> {
+  // 404 is the documented "no config yet" signal — distinguish that from a
+  // real error so the UI can render the "Add config" CTA instead of a banner.
+  try {
+    return await request<AppConfigView>(`/apps/${encodeURIComponent(provider)}/config`);
+  } catch (err) {
+    if (err instanceof Error && /404|not\s*found/i.test(err.message)) return null;
+    throw err;
+  }
+}
+
+export interface PutAppConfigInput {
+  client_id: string;
+  client_secret: string;
+  scopes_default?: string[];
+}
+
+export async function putAppConfig(provider: string, input: PutAppConfigInput): Promise<AppConfigView> {
+  return request<AppConfigView>(`/apps/${encodeURIComponent(provider)}/config`, {
+    method: 'POST',
+    json: input,
+  });
+}
+
+export interface AuthorizeAppOptions {
+  /** Bind the resulting connection to a specific agent group on creation. */
+  agentGroupId?: string;
+}
+
+export interface AuthorizeAppResult {
+  redirectUrl: string;
+  state: string;
+}
+
+/**
+ * Kick off the OAuth dance — the caller is expected to navigate the browser
+ * to `redirectUrl`. The server completes the exchange on its callback and
+ * redirects back to `/claw/apps?connected=:id`.
+ */
+export async function authorizeApp(provider: string, options: AuthorizeAppOptions = {}): Promise<AuthorizeAppResult> {
+  return request<AuthorizeAppResult>(`/apps/${encodeURIComponent(provider)}/authorize`, {
+    method: 'POST',
+    json: options,
+  });
+}
+
+export async function deleteAppConnection(id: string): Promise<void> {
+  return request<void>(`/apps/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 // --- Secrets (paraclaw-native, replaces OneCLI proxy) ---
 
 /** Per PRIMITIVES.md §"Secret": kinds keyed by purpose. */
