@@ -1,12 +1,13 @@
 # Paraclaw Architecture
 
 > Paraclaw is a single-process Bun service that runs an AI agent companion
-> across many channels — Telegram, Discord, CLI, web. State lives in one
-> SQLite file; per-session Docker containers sandbox agent execution; secrets
-> are managed natively at rest in AES-256-GCM. Paraclaw is a first-class
-> Parachute module: it discovers the hub, accepts hub-issued JWTs, and
-> attaches Parachute vaults so agents can read and write the user's
-> knowledge graph.
+> across many channels — Telegram, Discord, CLI, web. State lives in
+> SQLite — one central DB on the host plus a small per-session DB mounted
+> into each container. Per-session Docker containers sandbox agent
+> execution; secrets are managed natively at rest in AES-256-GCM.
+> Paraclaw is a first-class Parachute module: it discovers the hub,
+> accepts hub-issued JWTs, and attaches Parachute vaults so agents can
+> read and write the user's knowledge graph.
 
 This document is the canonical architecture reference for paraclaw. It
 defines the primitives every other doc references, the runtime shape, the
@@ -24,27 +25,31 @@ dependencies of paraclaw v1; paraclaw owns its surface end to end.
 ## Shape at a glance
 
 ```
-                ┌─────────────────────────────────────────┐
-                │  paraclaw  (single Bun process, port 1944)
-                │                                         │
+                ┌──────────────────────────────────────────────┐
+                │  paraclaw  (single Bun process, port 1944)   │
+                │                                              │
    inbound ─────▶  channel adapters  ──▶  router  ──▶  session manager
-   (telegram,    │  (telegram,           │            │
-    discord,     │   discord,            │            ▼
-    cli, web)    │   cli)                │      sessions table
-                │            ▲            │            │
-                │            │            │            ▼
-                │       outbound          │      container-runner
-                │       delivery   ◀──┐   │            │
-                │                     │   │            ▼
-                │       host sweep    │   │      docker container
-                │         (60s)       │   │      (per session)
-                │                     │   │            │
-                │            ▲────────┴───┴────────────▼
-                │                paraclaw.db
-                │     agent_groups · sessions · messages_in
-                │     messages_out · channel_wires · vault_attachments
-                │     secrets · approvals · users · user_roles
-                └─────────────────────────────────────────┘
+   (telegram,    │  (telegram,            │             │      │
+    discord,     │   discord,             │             ▼      │
+    cli, web)    │   cli)                 │       sessions row │
+                 │            ▲           │             │      │
+                 │            │           │             ▼      │
+                 │       outbound         │       container-runner
+                 │       delivery ◀──┐    │             │      │
+                 │                   │    │             ▼      │
+                 │       host sweep  │    │       docker container
+                 │         (60s)     │    │             │      │
+                 │                   │    │      mounts session.db
+                 │            ▲──────┴────┴─────────────▼      │
+                 │       central paraclaw.db    per-session db │
+                 │       (host-only writer)     (one writer    │
+                 │                               at a time)    │
+                 │   agent_groups · sessions      messages_in  │
+                 │   messaging_groups · channels  messages_out │
+                 │   secrets · approvals          session_state│
+                 │   vault_attachments                         │
+                 │   users · user_roles                        │
+                 └──────────────────────────────────────────────┘
                             ▲                 ▲
                             │ JWT             │ MCP
                             │                 │
@@ -52,16 +57,20 @@ dependencies of paraclaw v1; paraclaw owns its surface end to end.
                        (OAuth issuer)     (knowledge graph)
 ```
 
-Everything is a message. The host writes inbound rows into `messages_in`;
-the agent-runner inside a container reads them, calls Claude, and writes
-`messages_out`. The host sweeps `messages_out` and delivers via the same
-adapter that received the inbound. There is no IPC, no stdin piping, no
-file watcher — only rows in SQLite and a heartbeat file.
+Everything is a message. The host writes inbound rows into the session's
+`messages_in`; the agent-runner inside the container reads them, calls
+Claude, and writes `messages_out`. The host sweeps `messages_out` and
+delivers via the same adapter that received the inbound. There is no
+IPC, no stdin piping, no file watcher — only rows in SQLite and a
+heartbeat file.
 
 ## Primitives
 
-The schema is the contract. Every primitive below corresponds to a table
-in `data/paraclaw.db` and a TypeScript type in `src/db/`.
+The schema is the contract. Most primitives below correspond to a table
+in the **central** `~/.parachute/claw/paraclaw.db`. The two exceptions —
+`messages_in` and `messages_out` — live in **per-session**
+`data/v2-sessions/<session_id>/session.db` files. The §Schema section
+explains why; the TypeScript types are in `src/db/`.
 
 ### Agent group
 
@@ -75,7 +84,7 @@ group.
 | `name` | human-facing display name |
 | `folder` | filesystem slug under `groups/<folder>/` (CLAUDE.md, skills, mounts) |
 | `instructions` | agent CLAUDE.md content (composed at container spawn) |
-| `agent_provider` | `claude` (default), `opencode`, `codex` |
+| `agent_provider` | `claude` (default), `opencode` |
 | `container_config_json` | mounts, env, image base, install_packages, mcp servers |
 | `created_at`, `updated_at` | ISO-8601 |
 
@@ -217,19 +226,24 @@ Three named tiers, with explicit cross-zone rules:
   through documented MCP tools. Code in `src/` outside `src/modules/`
   generally lives here.
 - **core** — agent groups and their sessions doing user work with
-  credentials. The container is the boundary. Per-session Docker isolation
-  is the primary enforcement; `infra` cannot read a session's
-  `messages_in` table by default — it does so only through the documented
-  router/delivery seams.
+  credentials. The container is the boundary. Per-session Docker
+  isolation is the primary enforcement: each container mounts only its
+  own `session.db`, so cleartext message rows are visible only to that
+  session's container — one core actor cannot read another's queue. The
+  central `paraclaw.db` is *never* mounted into a container; it is
+  host-only state.
 - **perimeter** — exposed surfaces. The web UI's `/api/*` endpoints, the
   channel inbound webhooks, anything an external actor can reach. Every
   perimeter entry point authenticates (hub-issued JWT for `/api/*`,
   signature-verified webhooks for channels) before crossing into infra.
 
 Cross-zone actions require approval; same-zone actions are direct. In v1
-this is vocabulary plus the load-bearing checks (mount allowlist, JWT
-validation, approval-on-credentialed-action). Full enforcement is
-deferred to v2 — see [OPEN: trust zones in v1] below.
+this is vocabulary plus three load-bearing checks: hub-issued JWT on
+every perimeter route, the per-session container/DB mount on every core
+action, and approval-on-credentialed-action wherever core asks infra to
+do something irreversible (install a package, attach a vault, mount a
+new path). A richer enforcement matrix is deferred to v2; this is the
+v1 contract.
 
 ## Runtime model
 
@@ -255,21 +269,19 @@ no separate web server. The process owns:
 The Bun-everywhere choice is deliberate. NanoClaw ran the host on Node
 and the agent-runner on Bun, which works but leaves two lockfiles and two
 test-runner conventions. Paraclaw collapses to Bun: `bun:sqlite` on both
-sides, one `bun.lock`, one `bun test`.
-
-[OPEN: parachute lifecycle uses `pnpm exec tsx web/server/src/server.ts`
-in the current `.parachute/module.json` — the Bun migration must update
-`startCmd` to `["bun", "src/index.ts"]` and confirm the hub spawn path is
-runtime-agnostic.]
+sides, one `bun.lock`, one `bun test`. `.parachute/module.json` therefore
+sets `startCmd: ["bun", "src/index.ts"]` — the legacy
+`pnpm exec tsx web/server/src/server.ts` path is dropped once the web
+server folds into the same process.
 
 ### Per-session Docker containers
 
 Each session gets a container. The image (`paraclaw-agent:latest`) is
 built once by `./container/build.sh`; the runtime mounts the agent
-group's folder, the session's row-window of `messages_in` / `messages_out`
-(via SQLite-over-mount; see below), and a writable workspace. Secrets
-land as env vars at container start, decrypted in-process by the
-container-runner from the central DB.
+group's folder, the session's own `session.db` (and nothing else from
+the host's data tree), and a writable workspace. Secrets land as env
+vars at container start, decrypted in-process by the container-runner
+from the central DB.
 
 The container is the trust boundary. It runs as an unprivileged user
 inside the container, has only the mounts the agent group config grants,
@@ -287,27 +299,64 @@ lifecycles — containers are not.
 
 ### How the host and container talk
 
-Through the database. Period. The container mounts `paraclaw.db`
-read-write at `/workspace/.paraclaw.db` and uses bun:sqlite to read
-`messages_in` rows where `session_id = ?` and write `messages_out` rows.
-The host's sweep and active-poll loops watch the same table from outside.
+Through SQLite — but **not** through the central DB. The container
+mounts only its own per-session file at `/workspace/.session.db` and
+uses bun:sqlite to read `messages_in` and write `messages_out`. The
+central `paraclaw.db` stays on the host filesystem; the host writes new
+inbound rows directly into the session DB before it spawns or wakes the
+container. The host's sweep and active-poll loops open and close the
+same session file to read outbound rows.
+
+Three cross-mount invariants are load-bearing on the per-session file
+(`src/session-manager.ts:5–11`):
+
+1. `journal_mode=DELETE` — WAL's mmapped `-shm` file does not refresh
+   from host writes to guest reads across a Docker bind mount. The
+   container would silently miss every new message. DELETE-mode rollback
+   journals work; WAL does not.
+2. The host opens, writes, and **closes** the session DB on every
+   operation. A long-lived host connection freezes the container's page
+   cache at first read, so closing is what invalidates the guest view.
+3. Exactly one writer per file at a time. DELETE-mode journal-unlink is
+   not atomic across the mount, so concurrent writers corrupt the DB.
+   The router and the agent-runner coordinate by phase: the host writes
+   new inbound rows only when the container is not running, or by
+   waking the container after each write.
 
 Session liveness is signalled by a heartbeat file at
 `/workspace/.heartbeat` — touched by the agent-runner on every loop tick.
-The host reads its mtime to detect stale containers without polling the
-DB. The DB has no `last_heartbeat` column.
+The host reads its mtime to detect stale containers without touching the
+DB. There is no `last_heartbeat` column.
 
-This was the single biggest pattern decision in the rebuild. NanoClaw
-split into `inbound.db` and `outbound.db` to avoid cross-mount lock
-contention when host=Node and container=Bun. With Bun on both sides and
-the right pragmas (`journal_mode=WAL`, `synchronous=NORMAL`), one DB is
-enough — and tinyclaw and borg both validated this independently.
+This is why the v1 schema is **split**, not unified. Both tinyclaw and
+borg pointed at "drop the two-DB session model" as a NanoClaw simplification
+target — but neither validated single-DB across a Docker bind mount.
+tinyclaw is single-process (no mount in the IPC path); borg uses a JSONL
+file-queue (no SQLite at all). Their single-DB collapse applies to
+single-process state, not to container-mounted message queues. Paraclaw
+keeps the cross-mount split for the same reason NanoClaw did, and folds
+NanoClaw's two-file split (`inbound.db` + `outbound.db`) into one file
+per session — a single DELETE-mode SQLite with both message tables —
+because the with-Bun-on-both-sides simplification *is* available there.
 
 ## Schema
 
-One SQLite file: `data/paraclaw.db`. Migrations live at
-`src/db/migrations/` and run on host start. The central tables — and
-why each exists.
+State splits across two SQLite surfaces, by *who can write to what*:
+
+- **Central** `~/.parachute/claw/paraclaw.db` — host-only writer. Never
+  mounted into a container. Holds every primitive that isn't a live
+  message queue.
+- **Per-session** `data/v2-sessions/<session_id>/session.db` — mounted
+  at `/workspace/.session.db` inside that session's container. Holds
+  only `messages_in`, `messages_out`, and `session_state`. Runs in
+  `journal_mode=DELETE` (see "How the host and container talk" above
+  for why).
+
+Migrations for both surfaces live under `src/db/migrations/` and run
+on host start. The central migrations apply once; the per-session
+schema is created on session spawn.
+
+### Central `paraclaw.db`
 
 ```sql
 -- the unit a user creates
@@ -322,7 +371,9 @@ CREATE TABLE agent_groups (
   updated_at            TEXT NOT NULL
 );
 
--- a live conversation; one container per row
+-- a live conversation; one container per row.
+-- Lifecycle metadata only — the live message queue lives in the
+-- per-session session.db, never here.
 CREATE TABLE sessions (
   id                    TEXT PRIMARY KEY,
   agent_group_id        TEXT NOT NULL REFERENCES agent_groups(id) ON DELETE CASCADE,
@@ -412,10 +463,6 @@ CREATE TABLE user_roles (
   agent_group_id TEXT REFERENCES agent_groups(id) ON DELETE CASCADE,
   PRIMARY KEY (user_id, role, agent_group_id)
 );
-
--- the message bus
-CREATE TABLE messages_in  ( /* see "Message bus" below */ );
-CREATE TABLE messages_out ( /* see "Message bus" below */ );
 ```
 
 The user/user_roles pair is intentionally minimal compared to NanoClaw's
@@ -426,17 +473,15 @@ recipient, and roles only because owner-vs-admin is load-bearing for
 those approvals. Membership-as-access-gate (NanoClaw's
 `agent_group_members`) is dropped; perimeter auth is JWT-on-every-route.
 
-## Message bus
+### Per-session `session.db`
 
-Two tables, one DB, one host process, one container per session. The
-column shapes are the same as NanoClaw's session DB — that contract was
-worth preserving — but they live in the central DB now, scoped by
-`session_id`.
+One file per session under `data/v2-sessions/<session_id>/session.db`,
+opened with `journal_mode=DELETE`. Three tables, no foreign keys to the
+central DB (a session.db cannot reference a row it cannot see):
 
 ```sql
 CREATE TABLE messages_in (
   id              TEXT PRIMARY KEY,
-  session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   kind            TEXT NOT NULL,        -- 'chat' | 'chat-sdk' | 'task' | 'webhook' | 'system'
   timestamp       TEXT NOT NULL,
   status          TEXT NOT NULL DEFAULT 'pending',
@@ -452,8 +497,7 @@ CREATE TABLE messages_in (
 
 CREATE TABLE messages_out (
   id              TEXT PRIMARY KEY,
-  session_id      TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  in_reply_to     TEXT REFERENCES messages_in(id) ON DELETE SET NULL,
+  in_reply_to     TEXT,                 -- references messages_in.id within this file
   timestamp       TEXT NOT NULL,
   delivered       INTEGER NOT NULL DEFAULT 0,
   deliver_after   TEXT,
@@ -464,20 +508,31 @@ CREATE TABLE messages_out (
   thread_id       TEXT,
   content         TEXT NOT NULL
 );
+
+CREATE TABLE session_state (
+  key    TEXT PRIMARY KEY,
+  value  TEXT NOT NULL
+);
 ```
 
-Five kinds: `chat`, `chat-sdk`, `task`, `webhook`, `system`. The agent
-sees `chat` and `chat-sdk` as user-facing turns; `task` is a scheduled
-firing; `webhook` is an arbitrary HTTP-triggered event; `system` is the
-host's response to a system action the agent requested. `system`-out is
-how the agent asks the host to do things — register a group, reset a
-session, install a package, attach a vault — and `system`-in is how the
-host answers.
+Five message kinds: `chat`, `chat-sdk`, `task`, `webhook`, `system`. The
+agent sees `chat` and `chat-sdk` as user-facing turns; `task` is a
+scheduled firing; `webhook` is an arbitrary HTTP-triggered event;
+`system` is the host's response to a system action the agent requested.
+`system`-out is how the agent asks the host to do things — register a
+group, reset a session, install a package, attach a vault — and
+`system`-in is how the host answers.
+
+`session_state` is a small key/value scratchpad — last-seen Claude
+session id, last formatter mode, in-progress streaming context. It's
+not a long-term store; durable per-agent state belongs in the central
+DB (and crosses the boundary as a `system` message).
 
 Scheduling is *not* a separate subsystem. `process_after` and
 `deliver_after` columns plus `recurrence` give one-shot and cron-style
-firing on the same tables. The 60-second host sweep handles every
-condition in one query family.
+firing on the same tables. The 60-second host sweep visits every
+session DB in turn — it's the one place that crosses the per-session
+file boundary in bulk — and handles every condition in one query family.
 
 ## API surface
 
@@ -607,16 +662,17 @@ registers in the hub's services catalog. Start runs `bun src/index.ts`.
 | Per-session containers | NanoClaw | Image renamed `paraclaw-agent`; runtime stays Docker/Apple-container |
 | Channel adapter shape | NanoClaw | Telegram + Discord + CLI live in `src/channels/` permanently; rest become plugins |
 | Chat SDK bridge | NanoClaw | Kept as-is in `src/channels/chat-sdk-bridge.ts` |
-| Message-as-IO discipline | NanoClaw | Same `messages_in` / `messages_out` columns; central DB instead of split files |
+| Message-as-IO discipline | NanoClaw | Same `messages_in` / `messages_out` columns; one file per session instead of two |
+| Cross-mount DELETE-mode invariant | NanoClaw | Preserved — load-bearing for the host↔container DB seam |
 | Approval primitive | OneCLI | Rewritten in-process; `pickApprover` resolves from `user_roles`; no gateway daemon |
 | Per-agent secret modes | OneCLI | Concept preserved (`assigned_mode`, `host_pattern`); storage replaced with native AES-256-GCM |
-| Trust zones (infra/core/perimeter) | borg | Vocabulary adopted; v1 enforces at JWT + container + approval boundaries |
-| Single-process collapse | tinyclaw, borg | Bun-everywhere host; no Node/Bun split |
-| File-queue option | borg | Considered, rejected — SQLite was already enough with WAL on a single mount |
+| Trust zones (infra/core/perimeter) | borg | Vocabulary adopted; v1 enforces at JWT + container/DB-mount + approval boundaries |
+| Single-process collapse | tinyclaw, borg | Bun-everywhere *host*; per-session DB still mounted — collapse is single-process state, not the IPC seam |
+| File-queue option | borg | Considered, rejected — SQLite-with-DELETE-mode is already proven across the mount |
 | Skills system | NanoClaw | Retired in favour of UI; channel install moves into `/api/channels/install` |
 | Setup wizard's credential-capture | NanoClaw | Replaced by `/api/secrets` + `/api/secrets/migrate-onecli` |
 | Entity model (4-table) | NanoClaw | Flattened — only `users`, `user_roles`, no `agent_group_members` |
-| Two-DB session split | NanoClaw | Dropped; one `paraclaw.db` |
+| Two-file session split | NanoClaw | Folded into one `session.db` per session (Bun on both sides allows it) |
 | Heartbeat-via-file | NanoClaw | Kept; `/workspace/.heartbeat` mtime |
 
 ## Self-tests
@@ -624,7 +680,7 @@ registers in the hub's services catalog. Start runs `bun src/index.ts`.
 The morning smoke (run by team-lead before declaring the rebuild done):
 
 1. `parachute install ~/ParachuteComputer/paraclaw` → installs from night branch.
-2. `parachute start claw` → paraclaw boots; logs show Bun, single SQLite, Telegram adapter loaded.
+2. `parachute start claw` → paraclaw boots; logs show Bun, central + per-session SQLite ready, Telegram adapter loaded.
 3. `curl /claw/api/setup/status` → `ready=true`.
 4. Browser load `/claw/` → control panel renders.
 5. Create agent group via UI.
@@ -634,34 +690,29 @@ The morning smoke (run by team-lead before declaring the rebuild done):
 9. `parachute restart claw` → clean restart, no error.
 10. Tests pass: `bun test` 100%, typecheck clean, biome clean.
 
-## Open issues
+## Decisions resolved in v1
 
-These were surfaced during the rebirth and need team-lead resolution
-before the night completes. They are not architectural drift — they are
-genuine seams the seed didn't fully resolve.
+A few seams the seed left implicit, captured here so other tentacles
+share one contract:
 
-- **[OPEN: trust zones in v1]** PRIMITIVES.md says zone *implementation*
-  is deferred to v2 unless trivial, but the doc names cross-zone approval
-  as a rule. This doc captures the vocabulary and the load-bearing v1
-  enforcement points (JWT on perimeter, container on core,
-  approval-on-credentialed-action across infra↔core). If team-lead wants
-  zones to *do more* than that in v1, the matrix needs to be specified —
-  otherwise this is the contract.
-- **[OPEN: parachute startCmd]** `.parachute/module.json` currently runs
-  the web server via `pnpm exec tsx web/server/src/server.ts` because the
-  legacy host loaded `better-sqlite3`. The Bun migration must replace
-  this with `["bun", "src/index.ts"]` and absorb the web server into the
-  same process — there is no longer a separate "web server" surface.
-- **[OPEN: messaging_groups uniqueness]** Channel adapters that don't
-  expose a stable `thread_id` (CLI, single-DM Telegram) need a
-  conventional null/sentinel value for `messaging_groups.thread_id` so
-  the unique constraint behaves. The schema as written allows NULLs and
-  SQLite treats NULLs as distinct in unique indexes — fine for now, but
-  the routing layer needs to pick a sentinel deliberately.
-- **[OPEN: vault attachment token refresh]** Hub-issued tokens have an
-  expiry. `vault_attachments` does not yet carry refresh tokens or
-  expiry metadata. v1 assumes long-lived bearers; v2 needs a refresh
-  loop. Out of scope for tonight, but the schema has room.
+- **Trust zones in v1 = three checks, not a matrix.** Hub-issued JWT on
+  every perimeter route; per-session container/DB-mount on every core
+  action; approval-on-credentialed-action on infra↔core crossings
+  (install_packages, add_mcp_server, attach-vault, mount). The richer
+  enforcement matrix (read/write/delete per primitive per zone) is v2.
+- **`startCmd` is `["bun", "src/index.ts"]`.** The legacy
+  `pnpm exec tsx web/server/src/server.ts` path is dropped; the web
+  server is part of the host process post-migration.
+- **`messaging_groups.thread_id` allows NULL.** Adapters without a
+  stable thread (CLI, single-DM Telegram) write NULL. SQLite treats
+  NULLs as distinct in unique indexes, which is the desired behaviour
+  here — different DM sessions for the same `(channel_type, platform_id)`
+  pair stay distinct rows. The routing layer matches on the
+  three-tuple and falls back to the NULL row when no thread is given.
+- **Vault token refresh is deferred to v2.** Hub-issued tokens have an
+  expiry; `vault_attachments` does not yet carry refresh tokens or
+  expiry metadata. v1 assumes long-lived bearers. The schema has room
+  for an additive migration when the refresh loop lands.
 
 ## Reference: key files
 
@@ -671,8 +722,8 @@ genuine seams the seed didn't fully resolve.
 | `src/router.ts` | Inbound routing: messaging group → agent group → session → `messages_in` → wake |
 | `src/delivery.ts` | Polls `messages_out`, delivers via adapter, handles system actions |
 | `src/host-sweep.ts` | 60s sweep: stale detection, due-message wake, recurrence |
-| `src/session-manager.ts` | Resolves sessions; opens central DB scoped views; manages heartbeat path |
-| `src/container-runner.ts` | Spawns per-session containers with central DB + outbox mounts and secret env injection |
+| `src/session-manager.ts` | Resolves sessions; opens/closes the per-session DB; documents the cross-mount invariants |
+| `src/container-runner.ts` | Spawns per-session containers with the session's `session.db` mount and secret env injection |
 | `src/container-runtime.ts` | Runtime selection (Docker vs Apple containers), orphan cleanup |
 | `src/channels/` | Channel adapter infra (registry, Chat SDK bridge) and the inlined Telegram/Discord/CLI adapters |
 | `src/parachute/` | Hub discovery, vault attach helpers, `module.json`/`well-known` plumbing |
