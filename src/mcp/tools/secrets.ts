@@ -5,18 +5,16 @@
  * carries the row id + metadata — the value flows in once over the
  * transport, lands in the encrypted DB column, and is read back only by
  * the container-runner at session-spawn time.
- *
- * `assign-secret` is advertised but disabled until paraclaw-server lands
- * the matching `/api/secrets/:id/assignments` endpoints + `secret_assignments`
- * table on this branch. See PENDING_REASON below.
  */
 import {
   type AssignedMode,
   type SecretKind,
   type SecretRow,
   deleteSecret,
+  listAssignments,
   listSecrets,
   putSecret,
+  replaceAssignments,
 } from '../../secrets/index.js';
 import type { ToolDef } from '../types.js';
 
@@ -44,9 +42,6 @@ function toView(r: SecretRow): SecretView {
     updatedAt: r.updated_at,
   };
 }
-
-const ASSIGN_PENDING =
-  'awaiting paraclaw-server: /api/secrets/:id/assignments + secret_assignments table not yet on this branch';
 
 export const secretTools: ToolDef[] = [
   {
@@ -131,9 +126,8 @@ export const secretTools: ToolDef[] = [
   {
     name: 'assign-secret',
     description:
-      "Assign a 'selective' secret to one or more agent groups. STUB — disabled until paraclaw-server's secret_assignments endpoints land on this branch.",
+      "Replace the agent-group assignment list for a 'selective' secret. Empty array revokes everything. Atomic; throws on unknown secret id. Returns the new assignment list.",
     scope: 'claw:admin',
-    disabled: { reason: ASSIGN_PENDING },
     inputSchema: {
       type: 'object',
       properties: {
@@ -141,14 +135,21 @@ export const secretTools: ToolDef[] = [
         agentGroupIds: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Agent group ids to inject the secret into.',
+          description: 'Agent group ids to inject the secret into. Empty array revokes all assignments.',
         },
       },
       required: ['id', 'agentGroupIds'],
       additionalProperties: false,
     },
-    handler: async () => {
-      throw new Error(`assign-secret disabled: ${ASSIGN_PENDING}`);
+    handler: async (args) => {
+      const id = String(args.id ?? '').trim();
+      if (!id) throw new Error('id is required');
+      const groupIds = Array.isArray(args.agentGroupIds) ? args.agentGroupIds : null;
+      if (!groupIds || !groupIds.every((x) => typeof x === 'string')) {
+        throw new Error('agentGroupIds must be a string[]');
+      }
+      replaceAssignments(id, groupIds as string[]);
+      return { secretId: id, agentGroupIds: listAssignments(id) };
     },
   },
 ];
