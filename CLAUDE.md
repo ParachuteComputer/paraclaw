@@ -123,6 +123,27 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream updates into a customized install |
 
+## MCP server
+
+Paraclaw exposes its host-side admin surface (the things `/api/*` and `/claw/*` mediate from the web UI: agent-groups, sessions, channel wires, secrets metadata, approvals) as MCP tools. The same registry serves both transports — handlers call internal helpers directly, not back through HTTP, so there's no extra round-trip and no second auth seam to keep in sync.
+
+| Transport | Endpoint | Auth | Effective scope |
+|-----------|----------|------|-----------------|
+| stdio | `bun src/mcp/stdio.ts` | ambient (filesystem trust) | `claw:admin` |
+| HTTP  | `POST /mcp` on port 1944 | hub-issued JWT (`Authorization: Bearer …`) | strongest `claw:*` scope on the JWT grant |
+
+Wire stdio into Claude Code:
+
+```bash
+claude mcp add paraclaw bun /absolute/path/to/paraclaw/src/mcp/stdio.ts
+```
+
+Tools advertise as `mcp__paraclaw__<verb>-<noun>` client-side: `list-agent-groups`, `create-agent-group`, `attach-vault`, `detach-vault`, `list-sessions`, `close-session`, `list-channels`, `update-channel-wire`, `delete-channel-wire`, `list-secrets`, `put-secret`, `delete-secret`, `list-approvals`, `decide-approval`. A handful (`assign-secret`, `start-oauth`, `revoke-integration`, `get-activity`) are advertised but `disabled` until the matching paraclaw-server endpoints land — they're filtered out of `tools/list` and refused on `tools/call`.
+
+Secret values **never** traverse MCP. `list-secrets` and `put-secret` return row metadata only; the plaintext flows in once on `put-secret` and lands in the encrypted DB column. Container injection happens at session-spawn time, not over the tool surface.
+
+Stdio gotcha: paraclaw's `log.ts` writes info-level messages to `process.stdout`, which corrupts JSON-RPC frames. `src/mcp/stdio.ts` promotes `LOG_LEVEL` to `warn` before any log-using import. Don't move that block below the dynamic imports.
+
 ## Contributing
 
 Before creating a PR, adding a skill, or preparing any contribution, you MUST read [CONTRIBUTING.md](CONTRIBUTING.md). It covers accepted change types, the four skill types and their guidelines, `SKILL.md` format rules, and the pre-submission checklist.
