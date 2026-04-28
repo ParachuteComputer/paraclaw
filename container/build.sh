@@ -3,7 +3,6 @@
 #
 # Reads one optional build flag from ../.env:
 #   INSTALL_CJK_FONTS=true   — add Chinese/Japanese/Korean fonts (~200MB)
-# setup/container.ts reads the same file, so both build paths stay in sync.
 # Callers can also override by exporting INSTALL_CJK_FONTS directly.
 
 set -e
@@ -13,11 +12,15 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # Derive the image name from the project root so two Paraclaw installs on the
-# same host don't overwrite each other's `paraclaw-agent:latest` tag. Matches
-# setup/lib/install-slug.sh + src/install-slug.ts.
-# shellcheck source=../setup/lib/install-slug.sh
-source "$PROJECT_ROOT/setup/lib/install-slug.sh"
-IMAGE_NAME="$(container_image_base)"
+# same host don't overwrite each other's `paraclaw-agent:latest` tag. Mirrors
+# src/install-slug.ts (sha1(projectRoot)[:8]) — kept inline here so this
+# script has no source-time dependency on the JS/TS toolchain.
+if command -v shasum >/dev/null 2>&1; then
+    INSTALL_SLUG="$(printf '%s' "$PROJECT_ROOT" | shasum -a 1 | cut -c1-8)"
+else
+    INSTALL_SLUG="$(printf '%s' "$PROJECT_ROOT" | sha1sum | cut -c1-8)"
+fi
+IMAGE_NAME="paraclaw-agent-${INSTALL_SLUG}"
 TAG="${1:-latest}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 
