@@ -3,6 +3,7 @@ import { GroupList } from "./routes/GroupList.tsx";
 import { GroupDetail } from "./routes/GroupDetail.tsx";
 import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 import { OAuthCallback } from "./routes/OAuthCallback.tsx";
+import { SecretsList } from "./routes/SecretsList.tsx";
 import { SetupWizard } from "./routes/SetupWizard.tsx";
 
 export function App() {
@@ -28,6 +29,7 @@ export function App() {
           Paraclaw <span className="sub">claws &amp; vaults</span>
         </Link>
         <Link to="/">Agent groups</Link>
+        <Link to="/secrets">Secrets</Link>
         <Link to="/setup">Setup</Link>
         <a
           href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
@@ -40,6 +42,7 @@ export function App() {
 
       <Routes>
         <Route path="/" element={<GroupList />} />
+        <Route path="/secrets" element={<SecretsList />} />
         <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />
         <Route path="/groups/:folder" element={<GroupDetail />} />
