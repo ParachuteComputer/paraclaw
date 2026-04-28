@@ -53,6 +53,7 @@ import {
   type ClawScope,
 } from './auth.js';
 import { fetchHubVaults } from './hub-discovery.js';
+import { handleMcpHttp } from '../mcp/http.js';
 import { handleAppsRoute } from './routes/apps.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleChannelsRoute } from './routes/channels.js';
@@ -600,6 +601,13 @@ export function startWebServer(): http.Server {
         await handleApi(req, res, url, dispatchPath);
         return;
       }
+      // MCP transport — same auth seam as /api/* routes (hub JWT, claw:read
+      // minimum). Mount-aware: hits `/mcp` whether the install lives at
+      // origin root or behind PARACLAW_WEB_MOUNT.
+      if (dispatchPath === '/mcp' || dispatchPath.startsWith('/mcp/')) {
+        await handleMcpHttp(req, res);
+        return;
+      }
       // Capability card per parachute-patterns/well-known-discovery-rfc.
       // Lives at the origin root regardless of MOUNT — peer modules and the
       // hub's services catalog hit `/.well-known/parachute.json` directly.
@@ -619,6 +627,7 @@ export function startWebServer(): http.Server {
               paths: manifest.paths,
               health: manifest.health,
               scopes: manifest.scopes,
+              mcp: { http: '/mcp', stdio: true },
             }),
           );
         } catch (err) {
