@@ -45,20 +45,21 @@ serial-train cost (waiting your turn) is cheaper than the parallel-merge cost
 without losing the human review at the outer loop.** Aaron didn't have to
 remember which tentacle was on which PR; the dashboard showed it. Tentacles
 didn't have to ask permission to read files or run tests; they just did. The
-moments Aaron *did* show up — the merge clicks, the redirect on PR #5 about
-the OAuth callback URL — were the moments where his judgment was actually
-load-bearing. That ratio is the right one.
+moments Aaron *did* show up — the merge clicks, the redirect on PR #7 about
+the mount-aware OAuth callback URI — were the moments where his judgment was
+actually load-bearing. That ratio is the right one.
 
 ## B. Friction worth fixing
 
 **The localhost-translation bug (#16) is the most interesting friction
-point, because it landed *after* PR #6 — the host-side MCP server — even
-though PR #6 was logically downstream of it.** The architectural gap (a
-`url: http://localhost:1939/mcp` baked into `container.json` is unreachable
-from inside the container, because container-loopback is not host-loopback)
-existed for as long as paraclaw had attached an MCP server with a localhost
-URL. Nobody caught it until a real techne agent tried to call its vault and
-got a connection refused. The fix in `src/parachute/vault-mcp.ts:65–81` is
+point — not because of when it landed, but because of how it was found.**
+#16 landed just before #6, so the host-side MCP server got the fix on
+landing; that part of the sequencing was clean. The friction is that the
+architectural gap (a `url: http://localhost:1939/mcp` baked into
+`container.json` is unreachable from inside the container, because
+container-loopback is not host-loopback) was latent through every prior
+MCP-server attach paraclaw had ever done, and would still be latent today
+if a real techne agent hadn't tripped over it trying to call its vault. The fix in `src/parachute/vault-mcp.ts:65–81` is
 clean — translate at spawn time, leave the on-disk URL operator-facing — but
 the *detection* came late.
 
@@ -129,7 +130,8 @@ the second provider sooner rather than later is the cheapest way to find
 out.
 
 **Pre-1.0 structural simplifications already flagged in
-`docs/fresh-start-thinking.md` are the right size for this window.** Move
+`docs/fresh-start-thinking.md` (drafted on `research/fresh-start-thinking`,
+not yet merged) are the right size for this window.** Move
 `assigned_mode` from `secrets` to `agent_groups` (so the assignment lives
 where the consumer is, not where the producer is). Drop `secrets.host_pattern`
 — it was an OneCLI-era idea that paraclaw never used. Consolidate
@@ -140,9 +142,9 @@ paraclaw. None of these are urgent; all of them get more expensive the
 longer we wait.
 
 **The single thing I would not do next is add another channel adapter.**
-We have eleven on the `channels` branch, the install skills are stable, and
-the marginal value of the twelfth is low compared to closing the
-self-modification loop or proving the OAuth abstraction. The temptation is
+We have over a dozen on the `channels` branch, the install skills are
+stable, and the marginal value of the next one is low compared to closing
+the self-modification loop or proving the OAuth abstraction. The temptation is
 strong because new channels are crowd-pleasers, but the right move is to
 deepen what's there.
 
