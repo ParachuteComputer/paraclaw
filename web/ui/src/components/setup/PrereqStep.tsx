@@ -1,20 +1,24 @@
 /**
- * Step 1 — Prereqs.
+ * Step 1 — Prereqs (post-rebirth: navigator).
  *
- * Calls GET /api/setup/status, renders one row per check (onecli, hub,
- * vault attached) with the {ok, detail, fix} the server returns.
+ * Calls GET /api/setup/status, renders one row per check (secrets backend,
+ * hub discovery, vault attached, channel-token presence) with the {ok,
+ * detail, fix} the server returns. Each blocker links out to the right
+ * fix surface — credential issues route to /secrets (paraclaw-native),
+ * vault issues route to the agent group create flow, hub issues link to
+ * the parachute hub docs.
  *
- * Why we render `fix` verbatim: the server's hint is canonical (it knows
- * which env var is missing, which subcommand to run); inventing a UI-side
- * version would drift over time. The hint is plain text — we render it
- * inside <code> when it looks command-shaped, otherwise as prose.
+ * The wizard's credential-capture step is gone (night/ui rebirth) — this
+ * page is now the navigator. If the operator needs to add a token, the
+ * "Add credential" button takes them to /secrets pre-filled with the
+ * pinned secret name; they come back to /setup and click "Re-check".
  *
- * Channel-discord is NOT shown here even though /setup/status reports
- * `channels.discord.installed` — the install step is its own card, and
- * surfacing both would suggest the user has to fix it before proceeding,
- * when in fact they install it later in the flow.
+ * Why we render `fix` verbatim from the server: the hint is canonical (it
+ * knows which env var is missing, which subcommand to run); inventing a
+ * UI-side version would drift over time.
  */
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { getSetupStatus, type SetupStatus } from '../../lib/api.ts';
 import type { StepProps } from './types.ts';
 
@@ -59,31 +63,58 @@ export function PrereqStep({ next }: StepProps) {
     );
   }
 
-  const checks: { label: string; check: { ok: boolean; detail: string; fix: string | null } }[] = [
-    { label: 'OneCLI gateway', check: state.status.onecli },
-    { label: 'Hub discovery', check: state.status.hub },
-    { label: 'Vault attached', check: state.status.vaultAttached },
+  type Check = { ok: boolean; detail: string; fix: string | null };
+  type Row = { label: string; check: Check; fixHref?: string; fixLabel?: string };
+
+  const rows: Row[] = [
+    {
+      label: 'Secrets backend',
+      check: state.status.secrets,
+      // No deep-link — this is paraclaw's own backend; if it's broken the
+      // server log is the right place to look.
+    },
+    {
+      label: 'Hub discovery',
+      check: state.status.hub,
+    },
+    {
+      label: 'Vault attached',
+      check: state.status.vaultAttached,
+      fixHref: '/groups/new',
+      fixLabel: 'Create an agent group with a vault',
+    },
   ];
-  const blockers = checks.filter((c) => !c.check.ok);
+  const blockers = rows.filter((r) => !r.check.ok);
 
   return (
     <>
       <h3>Prerequisites</h3>
       <p className="muted">paraclaw needs these in place before we can wire a channel.</p>
       <ul style={{ listStyle: 'none', padding: 0, marginTop: '0.75rem' }}>
-        {checks.map(({ label, check }) => (
+        {rows.map(({ label, check, fixHref, fixLabel }) => (
           <li key={label} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <span aria-hidden style={{ fontSize: '1.1rem' }}>{check.ok ? '✓' : '✗'}</span>
               <strong>{label}</strong>
               <span className="dim" style={{ marginLeft: 'auto' }}>{check.detail}</span>
             </div>
-            {!check.ok && check.fix && (
-              <p className="dim" style={{ margin: '0.4rem 0 0 1.6rem' }}>{check.fix}</p>
+            {!check.ok && (check.fix || fixHref) && (
+              <div style={{ margin: '0.4rem 0 0 1.6rem', display: 'flex', gap: '0.75rem', alignItems: 'baseline' }}>
+                {check.fix && <span className="dim">{check.fix}</span>}
+                {fixHref && (
+                  <Link to={fixHref} className="muted">{fixLabel ?? 'Fix →'}</Link>
+                )}
+              </div>
             )}
           </li>
         ))}
       </ul>
+
+      <p className="dim" style={{ marginTop: '1rem' }}>
+        Channel tokens (Discord / Telegram bot tokens, API keys) live on the{' '}
+        <Link to="/secrets">/secrets</Link> page now — add them there, come back, and click <em>Re-check</em>. The wizard
+        no longer captures credentials inline.
+      </p>
 
       <div className="actions" style={{ marginTop: '1rem' }}>
         <button onClick={() => setReloadKey((k) => k + 1)} className="secondary">

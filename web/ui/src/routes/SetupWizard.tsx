@@ -23,7 +23,6 @@ import { Link } from 'react-router-dom';
 import { AdapterInstallStep } from '../components/setup/AdapterInstallStep.tsx';
 import { AgentGroupStep } from '../components/setup/AgentGroupStep.tsx';
 import { ChannelPickStep } from '../components/setup/ChannelPickStep.tsx';
-import { CredentialFormStep } from '../components/setup/CredentialFormStep.tsx';
 import { DoneStep } from '../components/setup/DoneStep.tsx';
 import { PrereqStep } from '../components/setup/PrereqStep.tsx';
 import { TestConnectionStep } from '../components/setup/TestConnectionStep.tsx';
@@ -119,7 +118,7 @@ export function SetupWizard() {
   const onReset = () => {
     if (
       !confirm(
-        'Reset wizard state? This clears local progress (bot user id, agent group folder, etc.) but does NOT undo backend changes (installed adapters, agent groups, OneCLI secrets).',
+        'Reset wizard state? This clears local progress (bot user id, agent group folder, etc.) but does NOT undo backend changes (installed adapters, agent groups, saved secrets).',
       )
     )
       return;
@@ -162,8 +161,6 @@ function renderStep(step: SetupStepKey, props: StepProps): ReactElement {
       return <PrereqStep {...props} />;
     case 'channel-pick':
       return <ChannelPickStep {...props} />;
-    case 'credentials':
-      return <CredentialFormStep {...props} />;
     case 'install':
       return <AdapterInstallStep {...props} />;
     case 'test-connection':

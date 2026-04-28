@@ -1,15 +1,16 @@
 /**
- * Step 5 — Test connection.
+ * Step 4 — Test connection.
  *
- * Re-validates the bot token (in case OneCLI's stored token has rotated)
- * by hitting POST /channels/<adapter>/test. We need the operator to paste
- * the token again here — we never read it back from OneCLI (its API is
- * write-only by design). If they kept the token in their clipboard from
- * the credentials step, this is a 5-second copy-paste-confirm.
+ * Validates the bot token by hitting POST /channels/<adapter>/test and
+ * captures the bot's identity (id + username) for the wire-channel step.
+ * The operator pastes the token here once — paraclaw's secrets store is
+ * write-only by design (values are encrypted at rest and never returned
+ * to the UI), so we can't pull the token back from /api/secrets.
  *
- * If we already captured a botUserId from the credentials step's
- * validation, surface it here so the operator sees we know which bot
- * we're talking to before they re-test.
+ * Since the night/ui rebirth dropped the wizard's credential-capture
+ * step, this is the first place the wizard sees the actual token bytes.
+ * The operator should have already added the secret via /secrets — we
+ * use this paste only to fetch the live identity, not to save anything.
  */
 import { useState } from 'react';
 import { testDiscordToken, testTelegramToken } from '../../lib/api.ts';
@@ -66,8 +67,8 @@ export function TestConnectionStep({ state, patchState, next, back }: StepProps)
     <>
       <h3>Test connection</h3>
       <p className="muted">
-        Confirm {adapterLabel} accepts the token by hitting <code>{apiPath}</code>. Paste the token again — we don't
-        read it back from OneCLI.
+        Confirm {adapterLabel} accepts the token by hitting <code>{apiPath}</code>. Paste the token once — paraclaw's
+        secrets store is write-only by design, so we can't read it back from <code>/api/secrets</code>.
       </p>
 
       {result && (

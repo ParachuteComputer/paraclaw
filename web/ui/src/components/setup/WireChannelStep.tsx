@@ -35,15 +35,21 @@ export function WireChannelStep({ state, patchState, next, back }: StepProps) {
   const wireId =
     adapter === 'telegram' ? state.operatorUserId : adapter === 'discord' ? state.botUserId : null;
 
+  // Telegram needs the OPERATOR's user id (DMs are chat-routed). Captured
+  // inline here since the rebirth dropped the credentials step that used
+  // to ask for it. Discord doesn't need this — its botUserId comes from
+  // test-connection's getMe call.
+  const [operatorIdInput, setOperatorIdInput] = useState(state.operatorUserId ?? '');
+
   useEffect(() => {
     if (!adapter) {
       setMissingPrereq('channel (re-run step 2)');
       return;
     }
     const missing: string[] = [];
-    if (adapter === 'discord' && !state.botUserId) missing.push('bot user id (re-run step 5)');
-    if (adapter === 'telegram' && !state.operatorUserId) missing.push('your Telegram user id (re-run step 3)');
-    if (!state.agentGroupFolder) missing.push('agent group (re-run step 6)');
+    if (adapter === 'discord' && !state.botUserId) missing.push('bot user id (re-run test-connection)');
+    if (adapter === 'telegram' && !state.operatorUserId) missing.push('your Telegram user id (paste below)');
+    if (!state.agentGroupFolder) missing.push('agent group (re-run step 5)');
     setMissingPrereq(missing.length > 0 ? missing.join(', ') : null);
   }, [adapter, state.botUserId, state.operatorUserId, state.agentGroupFolder]);
 
@@ -93,6 +99,34 @@ export function WireChannelStep({ state, patchState, next, back }: StepProps) {
         messaging_group_agents rows. After this, the {adapterLabel === 'Telegram' ? "operator's first DM" : "bot's first DM"}{' '}
         lands in your group instead of being silently dropped by the unwired-channel guard.
       </p>
+
+      {adapter === 'telegram' && !state.operatorUserId && (
+        <div className="row" style={{ marginTop: '0.75rem' }}>
+          <label htmlFor="operatorUserId">Your Telegram user id</label>
+          <input
+            id="operatorUserId"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]+"
+            value={operatorIdInput}
+            onChange={(e) => setOperatorIdInput(e.target.value)}
+            placeholder="123456789  (from @userinfobot)"
+          />
+          <p className="dim" style={{ marginTop: '0.25rem', fontSize: '0.8rem' }}>
+            Telegram routes DMs by chat id (= your user id). Get yours by DMing{' '}
+            <a href="https://t.me/userinfobot" target="_blank" rel="noreferrer">@userinfobot</a>.
+          </p>
+          <button
+            type="button"
+            className="secondary"
+            disabled={!/^[0-9]+$/.test(operatorIdInput.trim())}
+            onClick={() => patchState({ operatorUserId: operatorIdInput.trim() })}
+            style={{ marginTop: '0.5rem' }}
+          >
+            Save user id
+          </button>
+        </div>
+      )}
 
       {missingPrereq && (
         <div className="error-banner">

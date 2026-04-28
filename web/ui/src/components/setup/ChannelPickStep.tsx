@@ -66,7 +66,7 @@ export function ChannelPickStep({ state, patchState, next, back }: StepProps) {
       <div className="actions" style={{ marginTop: '1rem' }}>
         <button className="secondary" onClick={back}>Back</button>
         <button onClick={next} disabled={state.adapter !== 'discord' && state.adapter !== 'telegram'}>
-          Next: credentials
+          Next: install adapter
         </button>
       </div>
     </>

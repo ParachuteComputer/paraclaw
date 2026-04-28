@@ -2,29 +2,25 @@
  * Shared types for the setup wizard step components.
  *
  * The wizard's state is the union of:
- *   - what we've collected from the operator (botToken, agent group folder,
- *     bot user id from /channels/discord/test, messaging_group_id from
- *     wire-channel)
+ *   - what we've collected from the operator (agent group folder, bot user
+ *     id from /channels/discord/test, messaging_group_id from wire-channel)
  *   - which steps have been confirmed done (so a refresh resumes mid-flow
  *     rather than restarting at step 1)
  *
  * We persist `SetupState` to localStorage under SETUP_STORAGE_KEY so a tab
  * close mid-install survives. The state is intentionally NOT durable on the
- * server — the server's state is the canonical filesystem (.env, groups/,
- * data/v2.db) and the wizard re-derives readiness from the seven backend
- * endpoints on every load. localStorage is purely a UX aid for the
- * in-flight session.
+ * server — the server's state is the canonical filesystem and DB, and the
+ * wizard re-derives readiness from /api/setup/status on every load.
+ * localStorage is purely a UX aid for the in-flight session.
  *
- * NEVER persist the bot token to localStorage. We hand it straight to
- * OneCLI via POST /api/onecli/secrets and forget it. Keeping it in
- * sessionStorage during the session is fine — there's a one-tab window
- * where the user pastes it, validates it, then submits — but it's gone
- * the moment they close the tab.
+ * Tokens are NEVER persisted here. Credential capture moved out of the
+ * wizard to the /secrets page (night/ui rebirth) — the wizard now reads
+ * names of saved secrets via /api/setup/status to decide whether to
+ * prompt the operator to add one.
  */
 export type SetupStepKey =
   | 'prereqs'
   | 'channel-pick'
-  | 'credentials'
   | 'install'
   | 'test-connection'
   | 'agent-group'
@@ -35,13 +31,12 @@ export type SetupStepKey =
 export const SETUP_STEPS: { key: SetupStepKey; label: string }[] = [
   { key: 'prereqs', label: '1. Prerequisites' },
   { key: 'channel-pick', label: '2. Pick channel' },
-  { key: 'credentials', label: '3. Credentials' },
-  { key: 'install', label: '4. Install adapter' },
-  { key: 'test-connection', label: '5. Test connection' },
-  { key: 'agent-group', label: '6. Agent group' },
-  { key: 'wire-channel', label: '7. Wire channel' },
-  { key: 'test-message', label: '8. Test message' },
-  { key: 'done', label: '9. Done' },
+  { key: 'install', label: '3. Install adapter' },
+  { key: 'test-connection', label: '4. Test connection' },
+  { key: 'agent-group', label: '5. Agent group' },
+  { key: 'wire-channel', label: '6. Wire channel' },
+  { key: 'test-message', label: '7. Test message' },
+  { key: 'done', label: '8. Done' },
 ];
 
 export type ChannelAdapter = 'discord' | 'telegram';

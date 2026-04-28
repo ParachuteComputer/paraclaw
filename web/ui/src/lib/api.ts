@@ -8,6 +8,10 @@
  * hub-OAuth flow in `./auth.ts`. On a 401 we refresh once; if the refresh
  * fails the wrapper hard-redirects to login. /api/discovery is the one
  * exception — it's the bootstrap and is fetched directly by auth.ts.
+ *
+ * Endpoint surface follows /tmp/paraclaw-night/PRIMITIVES.md — the night
+ * rebirth replaces OneCLI proxying with paraclaw-native /api/secrets,
+ * /api/approvals, /api/sessions, /api/channels.
  */
 import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from './auth.ts';
 
@@ -139,63 +143,15 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
   return (await res.json()) as T;
 }
 
+// --- Agent groups ---
+
 export async function listGroups(): Promise<AgentGroupView[]> {
   const r = await request<{ groups: AgentGroupView[] }>('/groups');
   return r.groups;
 }
 
-export interface VaultListing {
-  /** Vault display name from the hub's well-known discovery doc, e.g. `default`. */
-  name: string;
-  /** Public-routable URL the agent will reach the vault at, e.g. `https://parachute.taildf9ce2.ts.net/vault/default`. */
-  url: string;
-  /** Vault version the hub reports for this entry. */
-  version: string;
-}
-
-export async function listVaults(): Promise<VaultListing[]> {
-  const r = await request<{ vaults: VaultListing[] }>('/vaults');
-  return r.vaults;
-}
-
 export async function getGroup(folder: string): Promise<AgentGroupView> {
   const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}`);
-  return r.group;
-}
-
-export async function attachVault(
-  folder: string,
-  input: {
-    scope: VaultScope;
-    vaultBaseUrl?: string;
-    tokenLabel?: string;
-    token?: string;
-    mcpName?: string;
-  },
-): Promise<{ group: AgentGroupView; mintedToken: boolean }> {
-  return request<{ group: AgentGroupView; mintedToken: boolean }>(
-    `/groups/${encodeURIComponent(folder)}/attach-vault`,
-    { method: 'POST', json: input },
-  );
-}
-
-export interface SpawnSessionResult {
-  sessionId: string;
-  created: boolean;
-}
-
-export async function spawnSession(folder: string): Promise<SpawnSessionResult> {
-  return request<SpawnSessionResult>(`/groups/${encodeURIComponent(folder)}/sessions`, {
-    method: "POST",
-    json: {},
-  });
-}
-
-export async function detachVault(folder: string, mcpName?: string): Promise<AgentGroupView> {
-  const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
-    method: 'POST',
-    json: { mcpName },
-  });
   return r.group;
 }
 
@@ -235,7 +191,227 @@ export async function createGroup(input: CreateGroupInput): Promise<{
   return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(`/groups`, { method: 'POST', json: input });
 }
 
-// --- Setup wizard endpoints (paraclaw#27 PR A backend) ---
+// --- Vaults ---
+
+export interface VaultListing {
+  /** Vault display name from the hub's well-known discovery doc, e.g. `default`. */
+  name: string;
+  /** Public-routable URL the agent will reach the vault at. */
+  url: string;
+  /** Vault version the hub reports for this entry. */
+  version: string;
+}
+
+export async function listVaults(): Promise<VaultListing[]> {
+  const r = await request<{ vaults: VaultListing[] }>('/vaults');
+  return r.vaults;
+}
+
+export async function attachVault(
+  folder: string,
+  input: {
+    scope: VaultScope;
+    vaultBaseUrl?: string;
+    tokenLabel?: string;
+    token?: string;
+    mcpName?: string;
+  },
+): Promise<{ group: AgentGroupView; mintedToken: boolean }> {
+  return request<{ group: AgentGroupView; mintedToken: boolean }>(
+    `/groups/${encodeURIComponent(folder)}/attach-vault`,
+    { method: 'POST', json: input },
+  );
+}
+
+export async function detachVault(folder: string, mcpName?: string): Promise<AgentGroupView> {
+  const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
+    method: 'POST',
+    json: { mcpName },
+  });
+  return r.group;
+}
+
+// --- Sessions ---
+
+export interface SpawnSessionResult {
+  sessionId: string;
+  created: boolean;
+}
+
+export async function spawnSession(folder: string): Promise<SpawnSessionResult> {
+  return request<SpawnSessionResult>(`/groups/${encodeURIComponent(folder)}/sessions`, {
+    method: 'POST',
+    json: {},
+  });
+}
+
+/**
+ * Top-level session listing — flat across all agent groups. Per
+ * PRIMITIVES.md §"API surface": GET /api/sessions returns the global view
+ * the /sessions page surfaces (vs. the per-group view embedded in
+ * GroupStatus.sessions).
+ */
+export interface SessionView {
+  id: string;
+  agentGroupId: string;
+  agentGroupFolder: string;
+  agentGroupName: string;
+  messagingGroupId: string | null;
+  status: 'active' | 'closed';
+  containerStatus: 'running' | 'idle' | 'stopped';
+  alive: boolean;
+  createdAt: string;
+  lastActiveAt: string | null;
+  lastHeartbeatAt: string | null;
+}
+
+export async function listSessions(): Promise<SessionView[]> {
+  const r = await request<{ sessions: SessionView[] }>('/sessions');
+  return r.sessions;
+}
+
+export async function closeSession(sessionId: string): Promise<{ id: string; status: 'closed' }> {
+  return request<{ id: string; status: 'closed' }>(`/sessions/${encodeURIComponent(sessionId)}/close`, {
+    method: 'POST',
+    json: {},
+  });
+}
+
+// --- Secrets (paraclaw-native, replaces OneCLI proxy) ---
+
+/** Per PRIMITIVES.md §"Secret": kinds keyed by purpose. */
+export type SecretKind = 'channel-token' | 'api-key' | 'generic';
+
+export interface SecretView {
+  id: string;
+  name: string;
+  kind: SecretKind;
+  /** null when the secret is global (not bound to a single agent group). */
+  agentGroupId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  // Values are NEVER returned — they exist only to be injected into
+  // session containers at spawn time. The list page only ever shows names.
+}
+
+export async function listSecrets(): Promise<SecretView[]> {
+  const r = await request<{ secrets: SecretView[] }>('/secrets');
+  return r.secrets;
+}
+
+export interface PutSecretInput {
+  name: string;
+  value: string;
+  kind?: SecretKind;
+  /** Bind to a specific agent group. Omit for a global secret. */
+  agentGroupId?: string | null;
+}
+
+/**
+ * Create or replace a secret. The server upserts on `name` (+ agentGroupId
+ * scope) and returns the public view — no value, just the metadata. The
+ * raw value is dropped from memory the moment the request resolves.
+ */
+export async function putSecret(input: PutSecretInput): Promise<SecretView> {
+  const r = await request<{ secret: SecretView }>('/secrets', {
+    method: 'POST',
+    json: input,
+  });
+  return r.secret;
+}
+
+export async function deleteSecret(id: string): Promise<void> {
+  return request<void>(`/secrets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// --- Approvals ---
+
+export type ApprovalKind = 'install_packages' | 'add_mcp_server' | 'access-new-credential' | string;
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+
+export interface ApprovalView {
+  id: string;
+  agentGroupId: string;
+  agentGroupName: string | null;
+  kind: ApprovalKind;
+  /** Free-form payload — UI renders kind-specific summaries; falls back to JSON. */
+  actionPayload: Record<string, unknown>;
+  status: ApprovalStatus;
+  requestedAt: string;
+  decidedAt: string | null;
+  /** Session id that triggered the request, for traceability. */
+  requestedBy: string;
+}
+
+export async function listApprovals(): Promise<ApprovalView[]> {
+  const r = await request<{ approvals: ApprovalView[] }>('/approvals');
+  return r.approvals;
+}
+
+export type ApprovalDecision = 'approve' | 'reject';
+
+export async function decideApproval(id: string, decision: ApprovalDecision): Promise<ApprovalView> {
+  const r = await request<{ approval: ApprovalView }>(`/approvals/${encodeURIComponent(id)}/decide`, {
+    method: 'POST',
+    json: { decision },
+  });
+  return r.approval;
+}
+
+// --- Channel wirings (global view) ---
+
+export type ChannelKind = 'discord' | 'telegram' | 'cli';
+
+export type EngageMode = 'mention' | 'pattern' | 'all';
+export type SenderScope = 'allowlist' | 'all';
+export type IgnoredMessagePolicy = 'drop' | 'silent';
+
+export interface ChannelWireView {
+  id: string;
+  channelType: ChannelKind;
+  /** paraclaw-internal id for the platform thread (DM, channel, etc.). */
+  messagingGroupId: string;
+  /** Platform-side id (snowflake / chat id / etc.) — for display. */
+  platformId: string;
+  /** Human-friendly hint shown alongside platformId; can be null. */
+  displayName: string | null;
+  agentGroupId: string;
+  agentGroupFolder: string;
+  agentGroupName: string;
+  engageMode: EngageMode;
+  engagePattern: string | null;
+  senderScope: SenderScope;
+  ignoredMessagePolicy: IgnoredMessagePolicy;
+  priority: number;
+  createdAt: string;
+}
+
+export async function listChannelWires(): Promise<ChannelWireView[]> {
+  const r = await request<{ wires: ChannelWireView[] }>('/channels');
+  return r.wires;
+}
+
+export async function deleteChannelWire(id: string): Promise<void> {
+  return request<void>(`/channels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export interface UpdateChannelWireInput {
+  engageMode?: EngageMode;
+  engagePattern?: string | null;
+  senderScope?: SenderScope;
+  ignoredMessagePolicy?: IgnoredMessagePolicy;
+  priority?: number;
+}
+
+export async function updateChannelWire(id: string, input: UpdateChannelWireInput): Promise<ChannelWireView> {
+  const r = await request<{ wire: ChannelWireView }>(`/channels/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    json: input,
+  });
+  return r.wire;
+}
+
+// --- Setup wizard endpoints (status + adapter install) ---
 
 export interface SetupCheck {
   ok: boolean;
@@ -243,7 +419,8 @@ export interface SetupCheck {
   fix: string | null;
 }
 export interface SetupStatus {
-  onecli: SetupCheck;
+  /** Native paraclaw secrets backend; replaces the OneCLI gateway probe. */
+  secrets: SetupCheck;
   hub: SetupCheck;
   vaultAttached: SetupCheck;
   channels: {
@@ -252,8 +429,6 @@ export interface SetupStatus {
   };
   ready: boolean;
 }
-
-export type ChannelKind = 'discord' | 'telegram';
 
 export async function getSetupStatus(): Promise<SetupStatus> {
   return request<SetupStatus>(`/setup/status`);
@@ -294,6 +469,8 @@ export async function getTask(id: string): Promise<TaskRecord> {
   return request<TaskRecord>(`/tasks/${encodeURIComponent(id)}`);
 }
 
+// --- Channel credential validators (used by both wizard + /secrets form) ---
+
 export interface DiscordIdentity {
   id: string;
   username: string;
@@ -320,16 +497,7 @@ export async function testTelegramToken(token: string): Promise<{ identity: Tele
   });
 }
 
-export async function listOnecliSecrets(): Promise<{ secrets: { name: string }[] }> {
-  return request<{ secrets: { name: string }[] }>(`/onecli/secrets`);
-}
-
-export async function putOnecliSecret(name: string, value: string): Promise<{ name: string }> {
-  return request<{ name: string }>(`/onecli/secrets`, {
-    method: 'POST',
-    json: { name, value },
-  });
-}
+// --- Channel wiring (per-group, used by wizard step 7) ---
 
 export interface WireChannelResult {
   messagingGroupId: string;
@@ -341,7 +509,7 @@ export interface WireChannelResult {
 /**
  * Wire a DM channel to an agent group.
  *
- * `botUserId` semantics differ by channel — see web/server/src/wire-channel.ts:40-78:
+ * `botUserId` semantics differ by channel — see web/server/src/wire-channel.ts:
  *   - discord  : the BOT's snowflake (DMs are addressee-routed; ANY DM lands on the bot's @me)
  *   - telegram : the OPERATOR's user id (DMs are chat-routed; only that user's DMs match)
  */
