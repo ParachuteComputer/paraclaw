@@ -1,10 +1,10 @@
 # src/parachute/
 
-Parachute integration for Paraclaw — additive on top of NanoClaw's trunk.
+Parachute Vault integration for Paraclaw.
 
 ## What this brings
 
-Each NanoClaw agent-group gets optional access to a [Parachute Vault](https://github.com/ParachuteComputer/parachute-vault). The vault is the user's open knowledge graph — notes, tags, links, structured metadata — already running on their machine and already used by every other AI client they've connected (Claude Code, Notes, etc.).
+Each Paraclaw agent group gets optional access to a [Parachute Vault](https://github.com/ParachuteComputer/parachute-vault). The vault is the user's open knowledge graph — notes, tags, links, structured metadata — already running on their machine and already used by every other AI client they've connected (Claude Code, Notes, etc.).
 
 Composing the two:
 
@@ -16,15 +16,12 @@ Composing the two:
 
 - **`vault-mcp.ts`** — pure helpers: `buildVaultMcpServer(opts)` constructs the `McpServerConfig` for a vault attach, `attachVaultToGroup(folder, opts)` upserts that entry into the group's `container.json`, `detachVaultFromGroup(folder, name)` removes it.
 - **`types.ts`** — narrow types for vault attachments + scope strings.
+- **`create-agent.ts`** — single-call agent group creation used by the web wizard.
+- **`group-status.ts`** — heartbeat-based liveness probe for the UI.
 
 The matching CLI surface lives in [`scripts/parachute.ts`](../../scripts/parachute.ts) (`pnpm run parachute attach-vault <group>` etc.).
 
 ## What we deliberately do NOT do here
 
 - **No vault note path conventions.** No `claws/<name>` tree, no auto-mirroring of agent runs to vault, no auto-CLAUDE.md sync. Those would impose a vault layout on every user; we don't.
-- **No replacement of OneCLI.** Third-party API credentials (Telegram bot tokens, OpenAI keys, etc.) keep flowing through OneCLI's gateway exactly as in upstream NanoClaw. Vault is for the user's knowledge graph; OneCLI is for outbound credential injection. They're complementary, not competing.
-- **No replacement of NanoClaw's SQLite session queues.** Per-session inbound.db / outbound.db are the right pattern for transient message handling. Vault is for durable, queryable, user-facing state — different concern.
-
-## Upstream-merge stance
-
-Everything in this directory is **additive** — new files, no edits to existing NanoClaw source files. The one exception is the type widening in [`src/container-config.ts`](../container-config.ts) that adds `HttpMcpServerConfig` to the `McpServerConfig` union (back-compat preserved via the `LegacyMcpServerConfig` variant). That edit is small enough to merge upstream cleanly, and could be contributed back to qwibitai/nanoclaw as a stand-alone improvement (HTTP MCP support is generally useful, not Parachute-specific).
+- **No replacement of the SQLite session queues.** Per-session `inbound.db` / `outbound.db` are the right pattern for transient message handling. Vault is for durable, queryable, user-facing state — different concern.

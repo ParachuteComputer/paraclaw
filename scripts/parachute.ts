@@ -112,7 +112,7 @@ function main(): void {
     console.log(`  mcp name: ${mcpName ?? DEFAULT_VAULT_MCP_NAME}`);
     console.log('');
     console.log('Next: restart the agent\'s container so it picks up the new MCP entry.');
-    console.log(`  (or just send the next message — NanoClaw spawns lazily on wake.)`);
+    console.log(`  (or just send the next message — Paraclaw spawns lazily on wake.)`);
     return;
   }
 

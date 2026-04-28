@@ -1,7 +1,7 @@
 /**
  * v2 Channel Adapter interface.
  *
- * Channel adapters bridge NanoClaw with messaging platforms (Discord, Slack, etc.).
+ * Channel adapters bridge Paraclaw with messaging platforms (Discord, Slack, etc.).
  * Two patterns: native adapters (implement directly) or Chat SDK bridge (wrap a Chat SDK adapter).
  */
 

@@ -1,5 +1,5 @@
 /**
- * Per-checkout install identifiers. Lets two NanoClaw installs coexist on
+ * Per-checkout install identifiers. Lets two Paraclaw installs coexist on
  * one host without clobbering each other's service registration or the
  * shared `nanoclaw-agent:latest` docker image tag.
  *

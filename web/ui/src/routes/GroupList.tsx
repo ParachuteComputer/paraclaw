@@ -78,9 +78,9 @@ export function GroupList() {
         <p className="muted">
           Make sure the web server is running:{" "}
           <code>cd web/server &amp;&amp; pnpm dev</code>. It needs the
-          NanoClaw central DB at <code>data/v2.db</code> — that gets created
-          the first time you run <code>pnpm setup</code> or{" "}
-          <code>pnpm dev</code> from the repo root.
+          Paraclaw central DB at <code>~/.parachute/claw/paraclaw.db</code>{" "}
+          — that gets created the first time you run <code>pnpm dev</code>{" "}
+          from the repo root.
         </p>
         <div className="actions" style={{ marginTop: "1rem" }}>
           <button onClick={reload}>Retry</button>

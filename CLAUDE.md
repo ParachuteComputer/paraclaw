@@ -2,20 +2,20 @@
 
 **If you are reading this because you just ran `git pull`, `git merge`, `git fetch && git merge`, or any equivalent to bring in upstream changes — and you see merge conflicts or a large diff involving this file — HALT IMMEDIATELY.**
 
-This is NanoClaw v2, a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
+This is Paraclaw, a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing NanoClaw v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
 
 **Do this instead:**
 1. Abort the merge: `git merge --abort` (or `git reset --hard ORIG_HEAD` if the merge already completed).
-2. Tell the user, verbatim: *"This is the v2 rewrite — it can't be merged into your existing install. Run `bash migrate-v2.sh` to migrate instead."*
+2. Tell the user, verbatim: *"This is Paraclaw — it can't be merged into your existing NanoClaw install. Run `bash migrate-v2.sh` to migrate instead."*
 3. Wait for the user to confirm before doing anything else. Do not attempt the migration yourself.
 
 If you are a fresh install (you ran `git clone`, not `git pull`) and there are no conflicts, ignore this banner and continue below.
 
 ---
 
-# NanoClaw
+# Paraclaw
 
-Personal Claude assistant. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
+Parachute's per-session containerized AI agent companion. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
 
 ## Quick Context
 
@@ -210,7 +210,6 @@ The agent container runs on **Bun**; the host runs on **Node** (pnpm). They comm
 - **Adding a Node CLI the agent invokes at runtime** (like `agent-browser`, `claude-code`, `vercel`) → put it in the Dockerfile's pnpm global-install block, pinned to an exact version via a new `ARG`. Don't use `bun install -g` — that bypasses the pnpm supply-chain policy.
 - **Changing the Dockerfile entrypoint or the dynamic-spawn command** (`src/container-runner.ts` line ~301) → keep `exec bun ...` so signals forward cleanly. The image has no `/app/dist`; don't reintroduce a tsc build step.
 - **Changing session-DB pragmas** (`container/agent-runner/src/db/connection.ts`) → `journal_mode=DELETE` is load-bearing for cross-mount visibility. Read the comment block at the top of the file first.
-- **Editing `.parachute/module.json` `startCmd`** → use `["pnpm", "exec", "tsx", "web/server/src/server.ts"]`, NOT `bun`. The web server reuses NanoClaw's `initDb()` which loads `better-sqlite3` (native bindings) — bun crashes on import. Host-runs-on-Node applies to the parachute lifecycle spawn too.
 
 ## Web UI (mount-aware)
 
