@@ -3,7 +3,7 @@
  * Tests routing, session creation, message writing, and delivery
  * without spawning actual containers.
  */
-import Database from 'better-sqlite3';
+import { openDb } from './db/connection.js';
 import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -38,14 +38,14 @@ vi.mock('./container-runner.js', () => ({
 // Override DATA_DIR for tests
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual('./config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-host' };
+  return { ...actual, DATA_DIR: '/tmp/paraclaw-test-host' };
 });
 
 function now() {
   return new Date().toISOString();
 }
 
-const TEST_DIR = '/tmp/nanoclaw-test-host';
+const TEST_DIR = '/tmp/paraclaw-test-host';
 
 beforeEach(() => {
   // Clean test directory
@@ -90,7 +90,7 @@ describe('session manager', () => {
     // Verify inbound.db
     const inPath = inboundDbPath('ag-1', 'sess-test');
     expect(fs.existsSync(inPath)).toBe(true);
-    const inDb = new Database(inPath);
+    const inDb = openDb(inPath);
     const inTables = inDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
     expect(inTables.map((t) => t.name)).toContain('messages_in');
     expect(inTables.map((t) => t.name)).toContain('delivered');
@@ -99,7 +99,7 @@ describe('session manager', () => {
     // Verify outbound.db
     const outPath = outboundDbPath('ag-1', 'sess-test');
     expect(fs.existsSync(outPath)).toBe(true);
-    const outDb = new Database(outPath);
+    const outDb = openDb(outPath);
     const outTables = outDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
       name: string;
     }>;
@@ -145,7 +145,7 @@ describe('session manager', () => {
 
     // Read from the inbound DB
     const dbPath = inboundDbPath('ag-1', session.id);
-    const db = new Database(dbPath);
+    const db = openDb(dbPath);
     const rows = db.prepare('SELECT * FROM messages_in').all() as Array<{
       id: string;
       kind: string;
@@ -233,7 +233,7 @@ describe('router', () => {
 
     // Verify message was written to inbound DB
     const dbPath = inboundDbPath('ag-1', session!.id);
-    const db = new Database(dbPath);
+    const db = openDb(dbPath);
     const rows = db.prepare('SELECT * FROM messages_in').all() as Array<{ id: string; content: string }>;
     db.close();
 
@@ -307,7 +307,7 @@ describe('router', () => {
     // Both should be in the same session
     const session = findSession('mg-1', null);
     const dbPath = inboundDbPath('ag-1', session!.id);
-    const db = new Database(dbPath);
+    const db = openDb(dbPath);
     const rows = db.prepare('SELECT * FROM messages_in ORDER BY timestamp').all();
     db.close();
 
@@ -384,7 +384,7 @@ describe('router', () => {
 
     const session = findSession('mg-1', null);
     expect(session).toBeDefined();
-    const db = new Database(inboundDbPath('ag-1', session!.id));
+    const db = openDb(inboundDbPath('ag-1', session!.id));
     const rows = db.prepare('SELECT id, trigger FROM messages_in').all() as Array<{
       id: string;
       trigger: number;
@@ -438,7 +438,7 @@ describe('delivery', () => {
 
     // Write a response to the outbound DB (simulating what the agent-runner does)
     const dbPath = outboundDbPath('ag-1', session.id);
-    const db = new Database(dbPath);
+    const db = openDb(dbPath);
     db.prepare(
       `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
        VALUES ('out-1', datetime('now'), 'chat', 'chan-123', 'discord', ?)`,

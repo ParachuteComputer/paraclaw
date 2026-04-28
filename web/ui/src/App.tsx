@@ -1,8 +1,14 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { GroupList } from "./routes/GroupList.tsx";
+import { Apps } from "./routes/Apps.tsx";
+import { ApprovalsList } from "./routes/ApprovalsList.tsx";
+import { ChannelsList } from "./routes/ChannelsList.tsx";
 import { GroupDetail } from "./routes/GroupDetail.tsx";
+import { GroupList } from "./routes/GroupList.tsx";
 import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 import { OAuthCallback } from "./routes/OAuthCallback.tsx";
+import { SecretsList } from "./routes/SecretsList.tsx";
+import { SessionsList } from "./routes/SessionsList.tsx";
+import { SetupWizard } from "./routes/SetupWizard.tsx";
 
 export function App() {
   // The OAuth callback page is intentionally chrome-free — the user is
@@ -27,6 +33,12 @@ export function App() {
           Paraclaw <span className="sub">claws &amp; vaults</span>
         </Link>
         <Link to="/">Agent groups</Link>
+        <Link to="/sessions">Sessions</Link>
+        <Link to="/channels">Channels</Link>
+        <Link to="/secrets">Secrets</Link>
+        <Link to="/apps">Apps</Link>
+        <Link to="/approvals">Approvals</Link>
+        <Link to="/setup">Setup</Link>
         <a
           href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
           target="_blank"
@@ -38,6 +50,12 @@ export function App() {
 
       <Routes>
         <Route path="/" element={<GroupList />} />
+        <Route path="/secrets" element={<SecretsList />} />
+        <Route path="/sessions" element={<SessionsList />} />
+        <Route path="/channels" element={<ChannelsList />} />
+        <Route path="/apps" element={<Apps />} />
+        <Route path="/approvals" element={<ApprovalsList />} />
+        <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />
         <Route path="/groups/:folder" element={<GroupDetail />} />
         <Route path="*" element={<div className="empty">404 — back to <Link to="/">groups</Link>.</div>} />

@@ -1,4 +1,4 @@
-# NanoClaw Security Model
+# Paraclaw Security Model
 
 ## Trust Model
 
@@ -64,18 +64,17 @@ Messages and task operations are verified against group identity:
 | View all tasks | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
 
-### 5. Credential Isolation (OneCLI Agent Vault)
+### 5. Credential Isolation (Local Secret Store)
 
-Real API credentials **never enter containers**. NanoClaw uses [OneCLI's Agent Vault](https://github.com/onecli/onecli) to proxy outbound requests and inject credentials at the gateway level.
+Paraclaw stores third-party credentials (API keys, OAuth tokens) in a local AES-GCM-encrypted store and injects them into per-agent containers as environment variables at spawn time. There is no proxy in the request path — the credential is plaintext inside the container at runtime, the same posture as any standard process environment.
 
 **How it works:**
-1. Credentials are registered once with `onecli secrets create`, stored and managed by OneCLI
-2. When NanoClaw spawns a container, it calls `applyContainerConfig()` to route outbound HTTPS through the OneCLI gateway
-3. The gateway matches requests by host and path, injects the real credential, and forwards
-4. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+1. Credentials are written via the `/secrets` page in the paraclaw web UI (or the `secrets` table directly). Ciphertext lives in the central DB; the master key is at `~/.parachute/claw/master.key` on the host (mode 0600).
+2. When paraclaw spawns a container, it resolves the secrets assigned to that agent group, decrypts them on the host, and passes them as `-e KEY=VAL` Docker flags.
+3. Agents see the credentials as ordinary env vars. The host process is the only thing that ever holds the master key — containers cannot decrypt the ciphertext on their own.
 
-**Per-agent policies:**
-Each NanoClaw group gets its own OneCLI agent identity. This allows different credential policies per group (e.g. your sales agent vs. support agent). OneCLI supports rate limits, and time-bound access and approval flows are on the roadmap.
+**Per-agent assignment:**
+Each agent group has its own assignment list. A "sales" group and a "support" group can hold disjoint sets of credentials. Rotation is a write to the secret row; the next container spawn picks up the new value.
 
 **NOT Mounted:**
 - Channel auth sessions (`store/auth/`) — host only
@@ -110,23 +109,23 @@ Each NanoClaw group gets its own OneCLI agent identity. This allows different cr
 │  • IPC authorization                                              │
 │  • Mount validation (external allowlist)                          │
 │  • Container lifecycle                                            │
-│  • OneCLI Agent Vault (injects credentials, enforces policies)   │
+│  • Local AES-GCM secret store (decrypts + injects as env vars)   │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Explicit mounts only, no secrets
+                                 ▼ Explicit mounts + assigned secrets as env vars
 ┌──────────────────────────────────────────────────────────────────┐
 │                CONTAINER (ISOLATED/SANDBOXED)                     │
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
-│  • API calls routed through OneCLI Agent Vault                   │
-│  • No real credentials in environment or filesystem              │
+│  • Assigned credentials available as env vars (plaintext)        │
+│  • Master key + unassigned credentials never enter the container │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Supply Chain Security (pnpm)
 
-NanoClaw uses pnpm with two supply chain defenses configured in `pnpm-workspace.yaml`:
+Paraclaw uses pnpm with two supply chain defenses configured in `pnpm-workspace.yaml`:
 
 ### Minimum Release Age
 

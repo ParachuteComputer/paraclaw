@@ -1,6 +1,6 @@
 /**
  * Types for the Parachute integration. Narrow on purpose — the broader
- * NanoClaw types live unchanged in `src/types.ts` and `src/container-config.ts`.
+ * Paraclaw types live in `src/types.ts` and `src/container-config.ts`.
  */
 
 /**

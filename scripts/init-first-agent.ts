@@ -1,5 +1,5 @@
 /**
- * Init the first (or Nth) NanoClaw v2 agent for a DM channel.
+ * Init the first (or Nth) Paraclaw agent for a DM channel.
  *
  * Wires a real DM channel (discord, telegram, etc.) to a new agent group,
  * then hands a welcome message to the running service via the CLI socket
@@ -33,9 +33,9 @@
 import net from 'net';
 import path from 'path';
 
-import { DATA_DIR } from '../src/config.js';
+import { CENTRAL_DB_PATH, DATA_DIR } from '../src/config.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { initDb } from '../src/db/connection.js';
+import { initDb, migrateCentralDbLocation } from '../src/db/connection.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
@@ -169,7 +169,8 @@ function wireIfMissing(mg: MessagingGroup, ag: AgentGroup, now: string, label: s
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const db = initDb(path.join(DATA_DIR, 'v2.db'));
+  migrateCentralDbLocation();
+  const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db); // idempotent
 
   const now = new Date().toISOString();
@@ -206,7 +207,7 @@ async function main(): Promise<void> {
   initGroupFilesystem(ag, {
     instructions:
       `# ${args.agentName}\n\n` +
-      `You are ${args.agentName}, a personal NanoClaw agent for ${args.displayName}. ` +
+      `You are ${args.agentName}, a personal Paraclaw agent for ${args.displayName}. ` +
       'When the user first reaches out (or you receive a system welcome prompt), introduce yourself briefly and invite them to chat. Keep replies concise.',
   });
 
@@ -341,7 +342,7 @@ async function sendWelcomeViaCliSocket(
     socket.once('error', (err) =>
       settle(
         new Error(
-          `CLI socket at ${sockPath} not reachable: ${err.message}. Is the NanoClaw service running?`,
+          `CLI socket at ${sockPath} not reachable: ${err.message}. Is the Paraclaw service running?`,
         ),
       ),
     );

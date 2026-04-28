@@ -15,7 +15,7 @@ import { insertTask } from './db.js';
 import { handleRecurrence } from './recurrence.js';
 import type { Session } from '../../types.js';
 
-const TEST_DIR = '/tmp/nanoclaw-recurrence-test';
+const TEST_DIR = '/tmp/paraclaw-recurrence-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
 
 function freshDb() {

@@ -19,9 +19,9 @@
  */
 import path from 'path';
 
-import { DATA_DIR } from '../src/config.js';
+import { CENTRAL_DB_PATH } from '../src/config.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { initDb } from '../src/db/connection.js';
+import { initDb, migrateCentralDbLocation } from '../src/db/connection.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
@@ -77,7 +77,8 @@ function generateId(prefix: string): string {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const db = initDb(path.join(DATA_DIR, 'v2.db'));
+  migrateCentralDbLocation();
+  const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db);
 
   const now = new Date().toISOString();
@@ -114,7 +115,7 @@ async function main(): Promise<void> {
   initGroupFilesystem(ag, {
     instructions:
       `# ${args.agentName}\n\n` +
-      `You are ${args.agentName}, a personal NanoClaw agent for ${args.displayName}. ` +
+      `You are ${args.agentName}, a personal Paraclaw agent for ${args.displayName}. ` +
       'When the user first reaches out, introduce yourself briefly and invite them to chat. Keep replies concise.',
   });
 

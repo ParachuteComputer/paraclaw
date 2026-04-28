@@ -394,3 +394,215 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
   padding: 0.5rem 0.7rem;
   border-radius: 6px;
 }
+
+/* Detail tabs (Overview / Activity on group detail page) */
+.detail-tabs {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.25rem;
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.detail-tab button {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0.5rem 1rem;
+  border-radius: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.detail-tab button:hover {
+  background: transparent;
+  color: var(--fg);
+}
+.detail-tab.active button {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Activity feed */
+.activity-feed {
+  padding: 0;
+}
+.activity-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.activity-row {
+  display: flex;
+  gap: 0.85rem;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.activity-row:last-child {
+  border-bottom: 0;
+}
+.activity-icon {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  color: var(--fg-muted);
+}
+.activity-icon-secret { color: var(--warn); }
+.activity-icon-mcp    { color: var(--accent); }
+.activity-icon-cmd    { color: var(--fg-muted); }
+.activity-body {
+  flex: 1;
+  min-width: 0;
+}
+.activity-headline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+}
+.activity-kind-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+.activity-cmd {
+  /* The command can be long — let it wrap rather than scroll horizontally. */
+  word-break: break-all;
+}
+.activity-cmd-output {
+  margin: 0.4rem 0 0;
+  padding: 0.55rem 0.75rem;
+  background: var(--bg-soft);
+  border-left: 2px solid var(--border);
+  border-radius: 4px;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 6em;
+  overflow: hidden;
+}
+.activity-summary {
+  margin-top: 0.25rem;
+  font-size: 0.88rem;
+  color: var(--fg-muted);
+}
+.activity-meta {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+}
+.activity-more {
+  padding: 0.85rem 1.5rem;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+/* Apps page — App configs section */
+.app-config-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.app-config-row {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+.app-config-row-editing {
+  background: white;
+  border-color: var(--accent);
+}
+.app-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.app-config-blurb {
+  margin: 0.4rem 0 0.6rem;
+  font-size: 0.86rem;
+}
+.app-config-kv {
+  margin-top: 0.5rem;
+  font-size: 0.88rem;
+  grid-template-columns: 6.5rem 1fr;
+}
+.app-config-clientid {
+  word-break: break-all;
+  font-size: 0.78rem;
+}
+.app-scope-tag {
+  display: inline-block;
+  margin: 0 0.25rem 0.25rem 0;
+  padding: 0.05em 0.35em;
+  background: white;
+  border: 1px solid var(--border);
+  font-size: 0.74rem;
+}
+.app-config-form .row { margin-bottom: 0.85rem; }
+.app-config-form .actions { margin-top: 1rem; }
+
+/* Apps page — Connections section */
+.connections-list {
+  display: grid;
+  gap: 1.25rem;
+}
+.connections-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+.connections-rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.connection-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.95rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: background 0.4s ease, border-color 0.4s ease;
+}
+.connection-row-flash {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.connection-row-main { flex: 1; min-width: 0; }
+.connection-label {
+  font-size: 0.98rem;
+  font-weight: 500;
+}
+.connection-meta {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+.connection-scopes {
+  margin-top: 0.4rem;
+}
+.connect-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}

@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { Database } from '../connection.js';
 
 import { log } from '../../log.js';
 import { migration001 } from './001-initial.js';
@@ -10,13 +10,22 @@ import { migration010 } from './010-engage-modes.js';
 import { migration011 } from './011-pending-sender-approvals.js';
 import { migration012 } from './012-channel-registration.js';
 import { migration013 } from './013-approval-render-metadata.js';
+import { migration014 } from './014-secrets.js';
+import { migration015 } from './015-secrets-drop-host-pattern.js';
+import { migration016 } from './016-secret-assignments.js';
+import { migration017 } from './017-agent-activity.js';
+import { migration018 } from './018-oauth-app-configs.js';
+import { migration019 } from './019-oauth-app-connections.js';
+import { migration020 } from './020-agent-app-connections.js';
+import { migration021 } from './021-pending-oauth-states.js';
+import { migration022 } from './022-app-connections-provider.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 
 export interface Migration {
   version: number;
   name: string;
-  up: (db: Database.Database) => void;
+  up: (db: Database) => void;
 }
 
 const migrations: Migration[] = [
@@ -31,9 +40,18 @@ const migrations: Migration[] = [
   migration011,
   migration012,
   migration013,
+  migration014,
+  migration015,
+  migration016,
+  migration017,
+  migration018,
+  migration019,
+  migration020,
+  migration021,
+  migration022,
 ];
 
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,

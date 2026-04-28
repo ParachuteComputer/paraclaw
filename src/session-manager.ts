@@ -10,7 +10,7 @@
  *   3. One writer per file — DELETE-mode journal-unlink isn't atomic across
  *      the mount; concurrent writers corrupt the DB.
  */
-import type Database from 'better-sqlite3';
+import type { Database } from './db/connection.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -268,14 +268,14 @@ function extractAttachmentFiles(
 }
 
 /** Open the inbound DB for a session (host reads/writes). */
-export function openInboundDb(agentGroupId: string, sessionId: string): Database.Database {
+export function openInboundDb(agentGroupId: string, sessionId: string): Database {
   const db = openInboundDbRaw(inboundDbPath(agentGroupId, sessionId));
   migrateMessagesInTable(db);
   return db;
 }
 
 /** Open the outbound DB for a session (host reads only). */
-export function openOutboundDb(agentGroupId: string, sessionId: string): Database.Database {
+export function openOutboundDb(agentGroupId: string, sessionId: string): Database {
   return openOutboundDbRaw(outboundDbPath(agentGroupId, sessionId));
 }
 
@@ -310,7 +310,7 @@ export function writeOutboundDirect(
 /**
  * @deprecated Use openInboundDb / openOutboundDb instead.
  */
-export function openSessionDb(agentGroupId: string, sessionId: string): Database.Database {
+export function openSessionDb(agentGroupId: string, sessionId: string): Database {
   return openInboundDb(agentGroupId, sessionId);
 }
 

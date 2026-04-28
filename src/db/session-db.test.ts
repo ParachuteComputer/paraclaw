@@ -5,14 +5,14 @@
  * insertRecurrence) live in `src/modules/scheduling/db.test.ts` with the
  * rest of the scheduling module.
  */
-import Database from 'better-sqlite3';
+import { openDb } from './connection.js';
 import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
 import { migrateMessagesInTable } from './session-db.js';
 
-const TEST_DIR = '/tmp/nanoclaw-session-db-test';
+const TEST_DIR = '/tmp/paraclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
 
 afterEach(() => {
@@ -25,7 +25,7 @@ describe('migrateMessagesInTable', () => {
     fs.mkdirSync(TEST_DIR, { recursive: true });
 
     // Build a legacy inbound.db WITHOUT series_id to simulate a pre-fix install.
-    const db = new Database(DB_PATH);
+    const db = openDb(DB_PATH);
     db.exec(`
       CREATE TABLE messages_in (
         id             TEXT PRIMARY KEY,

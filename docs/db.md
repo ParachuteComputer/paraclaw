@@ -1,4 +1,4 @@
-# NanoClaw Database Architecture — Overview
+# Paraclaw Database Architecture — Overview
 
 Orientation for the data model: the three databases, how they fit together, and the invariants that hold across them. For table-level schemas, follow the links below.
 
@@ -11,7 +11,7 @@ Related: [architecture.md](architecture.md) for the high-level design; [api-deta
 
 ## 1. The three databases
 
-NanoClaw uses **three kinds of SQLite database**, all on the host filesystem:
+Paraclaw uses **three kinds of SQLite database**, all on the host filesystem:
 
 | DB | Location | Writer | Readers | Purpose |
 |----|----------|--------|---------|---------|
@@ -106,7 +106,7 @@ These rules are enforced by convention in `src/session-manager.ts` and `containe
 | `sessions` | central | `src/db/sessions.ts`, `src/session-manager.ts` | delivery, sweep, container runner |
 | `pending_questions` | central | `src/db/sessions.ts` (via `ask_user_question`) | container response matcher |
 | `agent_destinations` | central | `src/db/agent-destinations.ts`, migration 004 backfill | `writeDestinations()`, delivery ACL |
-| `pending_approvals` | central | `src/db/sessions.ts`, `src/onecli-approvals.ts` | admin-card delivery, sweep |
+| `pending_approvals` | central | `src/db/sessions.ts`, `src/modules/approvals/` | admin-card delivery, sweep |
 | `unregistered_senders` | central | `src/db/dropped-messages.ts` | ops tooling |
 | `chat_sdk_*` | central | `src/state-sqlite.ts` | Chat SDK bridge |
 | `schema_version` | central | `src/db/migrations/index.ts` | migration runner |

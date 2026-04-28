@@ -3,7 +3,7 @@
  * "is this agent group's container alive?" without depending on
  * container-runner.ts's in-memory map (different process from web server).
  */
-import Database from 'better-sqlite3';
+import { openDb } from '../db/connection.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -79,7 +79,7 @@ function writeHeartbeat(sessionId: string, mtimeMs: number) {
 
 function seedInboundDb(sessionId: string, lastTimestamp: string) {
   const dbPath = inboundDbPath('ag-1', sessionId);
-  const db = new Database(dbPath);
+  const db = openDb(dbPath);
   db.exec(INBOUND_SCHEMA);
   db.prepare("INSERT INTO messages_in (id, kind, timestamp, content) VALUES ('m1', 'msg', ?, '{}')").run(lastTimestamp);
   db.close();
@@ -87,7 +87,7 @@ function seedInboundDb(sessionId: string, lastTimestamp: string) {
 
 function seedOutboundDb(sessionId: string, lastTimestamp: string) {
   const dbPath = outboundDbPath('ag-1', sessionId);
-  const db = new Database(dbPath);
+  const db = openDb(dbPath);
   db.exec(OUTBOUND_SCHEMA);
   db.prepare("INSERT INTO messages_out (id, kind, timestamp, content) VALUES ('o1', 'msg', ?, '{}')").run(
     lastTimestamp,

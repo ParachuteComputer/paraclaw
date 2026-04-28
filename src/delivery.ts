@@ -7,8 +7,9 @@
  *   - Tracks delivery in inbound.db's `delivered` table (host-owned)
  *   - Never writes to outbound.db — preserves single-writer-per-file invariant
  */
-import type Database from 'better-sqlite3';
+import type { Database } from './db/connection.js';
 
+import { getActivitySyncedSeq, mergeActivityBatch } from './db/agent-activity.js';
 import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -16,6 +17,7 @@ import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import {
   getDueOutboundMessages,
   getDeliveredIds,
+  getOutboundActivity,
   markDelivered,
   markDeliveryFailed,
   migrateDeliveredTable,
@@ -67,8 +69,8 @@ let sweepPolling = false;
 
 /**
  * Callbacks fired when the delivery adapter is first set (and again if it's
- * replaced). Lets modules that need the adapter at boot (e.g. approvals →
- * OneCLI handler) hook in without core calling into the module directly.
+ * replaced). Lets modules that need the adapter at boot hook in without core
+ * calling into the module directly.
  *
  * Not a general-purpose registry — narrow lifecycle hook only.
  */
@@ -165,8 +167,8 @@ async function drainSession(session: Session): Promise<void> {
   const agentGroup = getAgentGroup(session.agent_group_id);
   if (!agentGroup) return;
 
-  let outDb: Database.Database;
-  let inDb: Database.Database;
+  let outDb: Database;
+  let inDb: Database;
   try {
     outDb = openOutboundDb(agentGroup.id, session.id);
     inDb = openInboundDb(agentGroup.id, session.id);
@@ -175,6 +177,20 @@ async function drainSession(session: Session): Promise<void> {
   }
 
   try {
+    // Drain any new activity rows from outbound.db into central agent_activity.
+    // Independent of message delivery — activity should be visible even when
+    // there are no outbound messages. Cheap on idle sessions: a single indexed
+    // SELECT > cursor returning zero rows.
+    try {
+      const sinceSeq = getActivitySyncedSeq(session.id);
+      const activityRows = getOutboundActivity(outDb, sinceSeq);
+      if (activityRows.length > 0) {
+        mergeActivityBatch(session.agent_group_id, session.id, activityRows);
+      }
+    } catch (err) {
+      log.warn('activity merge failed', { sessionId: session.id, err });
+    }
+
     // Read all due messages from outbound.db (read-only)
     const allDue = getDueOutboundMessages(outDb);
     if (allDue.length === 0) return;
@@ -241,7 +257,7 @@ async function deliverMessage(
     content: string;
   },
   session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ): Promise<string | undefined> {
   if (!deliveryAdapter) {
     log.warn('No delivery adapter configured, dropping message', { id: msg.id });
@@ -389,7 +405,7 @@ async function deliverMessage(
 export type DeliveryActionHandler = (
   content: Record<string, unknown>,
   session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ) => Promise<void>;
 
 const actionHandlers = new Map<string, DeliveryActionHandler>();
@@ -406,11 +422,7 @@ export function registerDeliveryAction(action: string, handler: DeliveryActionHa
  * These are written to messages_out because the container can't write to inbound.db.
  * The host applies them to inbound.db here.
  */
-async function handleSystemAction(
-  content: Record<string, unknown>,
-  session: Session,
-  inDb: Database.Database,
-): Promise<void> {
+async function handleSystemAction(content: Record<string, unknown>, session: Session, inDb: Database): Promise<void> {
   const action = content.action as string;
   log.info('System action from agent', { sessionId: session.id, action });
 

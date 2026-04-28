@@ -10,12 +10,12 @@
  * sharing series_id. Matching by id alone would only hit the completed row
  * the agent remembers, missing the live next occurrence.
  */
-import type Database from 'better-sqlite3';
+import type { Database } from '../../db/connection.js';
 
 import { nextEvenSeq } from '../../db/session-db.js';
 
 export function insertTask(
-  db: Database.Database,
+  db: Database,
   task: {
     id: string;
     processAfter: string;
@@ -35,19 +35,19 @@ export function insertTask(
   });
 }
 
-export function cancelTask(db: Database.Database, taskId: string): void {
+export function cancelTask(db: Database, taskId: string): void {
   db.prepare(
     "UPDATE messages_in SET status = 'completed', recurrence = NULL WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status IN ('pending', 'paused')",
   ).run(taskId, taskId);
 }
 
-export function pauseTask(db: Database.Database, taskId: string): void {
+export function pauseTask(db: Database, taskId: string): void {
   db.prepare(
     "UPDATE messages_in SET status = 'paused' WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status = 'pending'",
   ).run(taskId, taskId);
 }
 
-export function resumeTask(db: Database.Database, taskId: string): void {
+export function resumeTask(db: Database, taskId: string): void {
   db.prepare(
     "UPDATE messages_in SET status = 'pending' WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status = 'paused'",
   ).run(taskId, taskId);
@@ -64,7 +64,7 @@ export interface TaskUpdate {
 // clobbering other fields. Matches by id OR series_id so the live next
 // occurrence of a recurring task is updated, not just the completed row the
 // agent last saw. Returns the number of rows touched.
-export function updateTask(db: Database.Database, taskId: string, update: TaskUpdate): number {
+export function updateTask(db: Database, taskId: string, update: TaskUpdate): number {
   const rows = db
     .prepare(
       "SELECT id, content FROM messages_in WHERE (id = ? OR series_id = ?) AND kind = 'task' AND status IN ('pending', 'paused')",
@@ -119,18 +119,13 @@ export interface RecurringMessage {
   series_id: string;
 }
 
-export function getCompletedRecurring(db: Database.Database): RecurringMessage[] {
+export function getCompletedRecurring(db: Database): RecurringMessage[] {
   return db
     .prepare("SELECT * FROM messages_in WHERE status = 'completed' AND recurrence IS NOT NULL")
     .all() as RecurringMessage[];
 }
 
-export function insertRecurrence(
-  db: Database.Database,
-  msg: RecurringMessage,
-  newId: string,
-  nextRun: string | null,
-): void {
+export function insertRecurrence(db: Database, msg: RecurringMessage, newId: string, nextRun: string | null): void {
   db.prepare(
     `INSERT INTO messages_in (id, seq, kind, timestamp, status, process_after, recurrence, platform_id, channel_type, thread_id, content, series_id)
      VALUES (?, ?, ?, datetime('now'), 'pending', ?, ?, ?, ?, ?, ?, ?)`,
@@ -148,6 +143,6 @@ export function insertRecurrence(
   );
 }
 
-export function clearRecurrence(db: Database.Database, messageId: string): void {
+export function clearRecurrence(db: Database, messageId: string): void {
   db.prepare('UPDATE messages_in SET recurrence = NULL WHERE id = ?').run(messageId);
 }

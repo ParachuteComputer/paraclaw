@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>NanoClaw Architecture</title>
+    <title>Paraclaw Architecture</title>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <style>
       :root {
@@ -128,8 +128,8 @@
   </head>
   <body>
     <header>
-      <h1>NanoClaw Architecture</h1>
-      <div class="sub">Session-DB messaging model · Chat SDK bridge · OneCLI credential gateway · per-session containers</div>
+      <h1>Paraclaw Architecture</h1>
+      <div class="sub">Session-DB messaging model · Chat SDK bridge · local AES-GCM secret store · per-session containers</div>
       <nav>
         <a href="#overview">1 · Overview</a>
         <a href="#flow">2 · Message Flow</a>
@@ -146,7 +146,8 @@
           Inbound messages land at the Chat SDK bridge, which hands off to the
           router. The router resolves the messaging group → agent group → session
           and writes to the session's <code>inbound.db</code>. The container runner
-          spawns a per-session container (auth via OneCLI), and the agent-runner
+          spawns a per-session container (with secrets injected as env vars from
+          paraclaw's local AES-GCM secret store), and the agent-runner
           polls its DB, calls Claude, and writes responses to <code>outbound.db</code>.
           Delivery polls the outbound DB, re-validates destinations, and ships
           messages back through the same bridge.
@@ -167,15 +168,15 @@ flowchart TB
     Bridge["Chat SDK Bridge<br/>src/channels/chat-sdk-bridge.ts"]
     Router["Router<br/>src/router.ts<br/>platformId + threadId → session"]
     SessMgr["Session Manager<br/>src/session-manager.ts"]
-    Runner["Container Runner<br/>src/container-runner.ts<br/>OneCLI ensureAgent + spawn"]
+    Runner["Container Runner<br/>src/container-runner.ts<br/>spawn + secret env injection"]
     Delivery["Delivery Poller<br/>src/delivery.ts<br/>1s active / 60s sweep"]
     Sweep["Host Sweep<br/>src/host-sweep.ts"]
     Central[("Central DB · data/v2.db<br/>agent_groups · messaging_groups<br/>messaging_group_agents · sessions<br/>pending_approvals")]
   end
 
-  subgraph OneCLI["OneCLI Gateway (0.3.1)"]
-    Vault["Agent Vault<br/>secrets + OAuth"]
-    Approvals["configureManualApproval"]
+  subgraph Secrets["Local Secret Store"]
+    Vault["AES-GCM ciphertext<br/>(central DB)<br/>master key on host"]
+    Approvals["pending_approvals (self-mod)"]
   end
 
   subgraph Session["Per-Session Container"]
@@ -195,7 +196,7 @@ flowchart TB
   Router --> SessMgr
   SessMgr --> InDB
   SessMgr --> Runner
-  Runner --> OneCLI
+  Runner --> Vault
   Runner --> PollLoop
   PollLoop --> InDB
   PollLoop --> Provider
@@ -211,7 +212,7 @@ flowchart TB
   Runner -.mounts.-> Folder
   MCP -.approval.-> Approvals
   Approvals --> Central
-  Provider -.API calls.-> Vault
+  Vault -.env vars.-> Provider
 </pre>
         </div>
       </section>
@@ -396,7 +397,7 @@ flowchart LR
         </div>
       </section>
 
-      <footer>NanoClaw · generated from docs/checklist.md, architecture.md, isolation-model.md, setup-wiring.md</footer>
+      <footer>Paraclaw · generated from docs/architecture.md, isolation-model.md</footer>
     </main>
 
     <script>

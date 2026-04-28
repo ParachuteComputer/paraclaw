@@ -1,0 +1,710 @@
+/**
+ * /secrets — paraclaw-native secrets management view.
+ *
+ * Replaces the previous primitive list with an actual management surface:
+ *   - search/filter (name + kind + group scope),
+ *   - collapsible groups by kind (channel-token / api-key / generic),
+ *   - mode badge (all | selective) with tooltip,
+ *   - edit drawer for inject-mode + assignments + value rotation,
+ *   - empty states with CTAs,
+ *   - relative timestamps with absolute on hover.
+ *
+ * Wire surface:
+ *   GET    /api/secrets
+ *   POST   /api/secrets                          (create / rotate / mode-switch)
+ *   DELETE /api/secrets/:id
+ *   GET    /api/secrets/:id/assignments
+ *   PUT    /api/secrets/:id/assignments
+ *
+ * Selective mode: secret only injects into agent groups listed in
+ * secret_assignments (migration 016). Switching mode requires re-pasting
+ * the value because the server's POST upsert wire requires `value`.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { CredentialForm } from '../components/CredentialForm.tsx';
+import { formatRelative } from '../components/StatusDot.tsx';
+import {
+  deleteSecret,
+  listGroups,
+  listSecretAssignments,
+  listSecrets,
+  putSecret,
+  setSecretAssignments,
+  type AgentGroupView,
+  type AssignedMode,
+  type SecretKind,
+  type SecretView,
+} from '../lib/api.ts';
+
+// Kind display order — channel-tokens first since they're the most common
+// reason to open this page in the early-life of an install.
+const KIND_ORDER: SecretKind[] = ['channel-token', 'api-key', 'generic'];
+
+const KIND_LABEL: Record<SecretKind, string> = {
+  'channel-token': 'Channel tokens',
+  'api-key': 'API keys',
+  generic: 'Other',
+};
+
+const KIND_HINT: Record<SecretKind, string> = {
+  'channel-token': 'Bot tokens for chat platforms (Discord, Telegram, …).',
+  'api-key': 'Long-lived API keys (OpenAI, Anthropic, vendor APIs).',
+  generic: 'Anything else — env-var style key/values.',
+};
+
+interface LoadedState {
+  kind: 'ok';
+  secrets: SecretView[];
+  groups: AgentGroupView[];
+}
+
+type State =
+  | { kind: 'loading' }
+  | LoadedState
+  | { kind: 'error'; message: string };
+
+export function SecretsList() {
+  const [state, setState] = useState<State>({ kind: 'loading' });
+  const [reloadKey, setReloadKey] = useState(0);
+  const [showCreate, setShowCreate] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<SecretKind>>(new Set());
+  const [editing, setEditing] = useState<SecretView | null>(null);
+
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listSecrets(), listGroups()])
+      .then(([secrets, groups]) => {
+        if (!cancelled) setState({ kind: 'ok', secrets, groups });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  const onDelete = async (s: SecretView) => {
+    if (!confirm(`Delete secret "${s.name}"? Containers using it will start failing on next session spawn.`)) return;
+    setBusyId(s.id);
+    setActionError(null);
+    try {
+      await deleteSecret(s.id);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleCollapsed = (k: SecretKind) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+
+  if (state.kind === 'loading') {
+    return (
+      <div>
+        <h2>Secrets</h2>
+        <ul className="skeleton-list" aria-busy="true">
+          <li className="skeleton skeleton-row" />
+          <li className="skeleton skeleton-row" />
+          <li className="skeleton skeleton-row" />
+        </ul>
+      </div>
+    );
+  }
+
+  if (state.kind === 'error') {
+    return (
+      <div>
+        <h2>Secrets</h2>
+        <div className="error-banner">
+          Couldn't load secrets: <code>{state.message}</code>
+        </div>
+        <div className="actions" style={{ marginTop: '1rem' }}>
+          <button onClick={reload}>Retry</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <LoadedView
+      state={state}
+      query={query}
+      setQuery={setQuery}
+      collapsed={collapsed}
+      toggleCollapsed={toggleCollapsed}
+      showCreate={showCreate}
+      setShowCreate={setShowCreate}
+      busyId={busyId}
+      onDelete={onDelete}
+      actionError={actionError}
+      onEdit={setEditing}
+      editing={editing}
+      onCloseEditor={(changed) => {
+        setEditing(null);
+        if (changed) reload();
+      }}
+      reload={reload}
+    />
+  );
+}
+
+interface LoadedProps {
+  state: LoadedState;
+  query: string;
+  setQuery: (q: string) => void;
+  collapsed: Set<SecretKind>;
+  toggleCollapsed: (k: SecretKind) => void;
+  showCreate: boolean;
+  setShowCreate: (v: boolean) => void;
+  busyId: string | null;
+  onDelete: (s: SecretView) => void;
+  actionError: string | null;
+  onEdit: (s: SecretView) => void;
+  editing: SecretView | null;
+  onCloseEditor: (changed: boolean) => void;
+  reload: () => void;
+}
+
+function LoadedView(props: LoadedProps) {
+  const {
+    state,
+    query,
+    setQuery,
+    collapsed,
+    toggleCollapsed,
+    showCreate,
+    setShowCreate,
+    busyId,
+    onDelete,
+    actionError,
+    onEdit,
+    editing,
+    onCloseEditor,
+    reload,
+  } = props;
+
+  const groupName = (id: string | null): string => {
+    if (!id) return 'global';
+    const g = state.groups.find((x) => x.id === id);
+    return g ? g.name : `(unknown ${id.slice(0, 8)})`;
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return state.secrets;
+    return state.secrets.filter((s) => {
+      if (s.name.toLowerCase().includes(q)) return true;
+      if (s.kind.toLowerCase().includes(q)) return true;
+      if (KIND_LABEL[s.kind].toLowerCase().includes(q)) return true;
+      const scope = groupName(s.agentGroupId).toLowerCase();
+      if (scope.includes(q)) return true;
+      if (s.assignedMode.toLowerCase().includes(q)) return true;
+      return false;
+    });
+    // groupName depends on state.groups; lint will see state.secrets/state.groups.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, state.secrets, state.groups]);
+
+  const byKind = useMemo(() => {
+    const m = new Map<SecretKind, SecretView[]>();
+    for (const k of KIND_ORDER) m.set(k, []);
+    for (const s of filtered) {
+      const list = m.get(s.kind) ?? [];
+      list.push(s);
+      m.set(s.kind, list);
+    }
+    for (const list of m.values()) list.sort((a, b) => a.name.localeCompare(b.name));
+    return m;
+  }, [filtered]);
+
+  const totalShown = filtered.length;
+
+  return (
+    <div>
+      <div className="list-header">
+        <h2>Secrets ({state.secrets.length})</h2>
+        <button onClick={() => setShowCreate(!showCreate)}>{showCreate ? 'Cancel' : '+ New secret'}</button>
+      </div>
+
+      <p className="muted">
+        Encrypted at rest under <code>~/.parachute/claw/master.key</code>. Injected into agent containers at session
+        spawn — values are never read back over the API. To rotate, edit a row.
+      </p>
+
+      {showCreate && (
+        <div className="section" style={{ marginTop: '1rem' }}>
+          <h3>New secret</h3>
+          <CredentialForm
+            mode="free"
+            onCancel={() => setShowCreate(false)}
+            onCreated={() => {
+              setShowCreate(false);
+              reload();
+            }}
+          />
+        </div>
+      )}
+
+      {actionError && <div className="error-banner">{actionError}</div>}
+
+      {state.secrets.length === 0 && !showCreate && (
+        <div className="empty empty-rich">
+          <p className="empty-headline">No secrets yet.</p>
+          <p className="muted">
+            Add a channel token (Discord, Telegram) or an arbitrary API key. The setup wizard at{' '}
+            <Link to="/setup">/setup</Link> walks you through wiring channel tokens.
+          </p>
+          <div className="actions" style={{ marginTop: '1rem' }}>
+            <button onClick={() => setShowCreate(true)}>+ Add your first secret</button>
+          </div>
+        </div>
+      )}
+
+      {state.secrets.length > 0 && (
+        <div className="row" style={{ marginTop: '1.25rem' }}>
+          <input
+            type="search"
+            placeholder="Filter by name, kind, or scope…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ width: '100%' }}
+            aria-label="Filter secrets"
+          />
+        </div>
+      )}
+
+      {state.secrets.length > 0 && totalShown === 0 && (
+        <div className="empty">No secrets match <code>{query}</code>.</div>
+      )}
+
+      {KIND_ORDER.map((k) => {
+        const list = byKind.get(k) ?? [];
+        if (list.length === 0) return null;
+        const isCollapsed = collapsed.has(k);
+        return (
+          <SecretKindGroup
+            key={k}
+            kind={k}
+            secrets={list}
+            collapsed={isCollapsed}
+            onToggle={() => toggleCollapsed(k)}
+            groupName={groupName}
+            busyId={busyId}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        );
+      })}
+
+      {editing && <SecretEditor secret={editing} groups={state.groups} onClose={onCloseEditor} />}
+    </div>
+  );
+}
+
+interface KindGroupProps {
+  kind: SecretKind;
+  secrets: SecretView[];
+  collapsed: boolean;
+  onToggle: () => void;
+  groupName: (id: string | null) => string;
+  busyId: string | null;
+  onEdit: (s: SecretView) => void;
+  onDelete: (s: SecretView) => void;
+}
+
+function SecretKindGroup({ kind, secrets, collapsed, onToggle, groupName, busyId, onEdit, onDelete }: KindGroupProps) {
+  return (
+    <div style={{ marginTop: '1.5rem' }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        style={{
+          background: 'transparent',
+          color: 'var(--fg)',
+          border: 0,
+          padding: 0,
+          margin: '0 0 0.25rem',
+          fontSize: '0.85rem',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          fontWeight: 500,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.4rem',
+        }}
+      >
+        <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>{collapsed ? '▸' : '▾'}</span>
+        <span style={{ color: 'var(--fg-muted)' }}>{KIND_LABEL[kind]}</span>
+        <span style={{ color: 'var(--fg-dim)', fontSize: '0.78rem', textTransform: 'none', letterSpacing: 0 }}>
+          ({secrets.length})
+        </span>
+      </button>
+      {!collapsed && (
+        <>
+          <p className="dim" style={{ margin: '0 0 0.5rem' }}>{KIND_HINT[kind]}</p>
+          <div>
+            {secrets.map((s) => (
+              <SecretRow
+                key={s.id}
+                s={s}
+                groupName={groupName}
+                busy={busyId === s.id}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface RowProps {
+  s: SecretView;
+  groupName: (id: string | null) => string;
+  busy: boolean;
+  onEdit: (s: SecretView) => void;
+  onDelete: (s: SecretView) => void;
+}
+
+function SecretRow({ s, groupName, busy, onEdit, onDelete }: RowProps) {
+  const updatedAbs = new Date(s.updatedAt).toLocaleString();
+  const modeTitle =
+    s.assignedMode === 'all'
+      ? 'Mode: all — injected into every agent container that resolves this name (subject to scope).'
+      : 'Mode: selective — injected only into agent groups explicitly assigned (see Edit).';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem',
+        padding: '0.75rem 1rem',
+        background: 'white',
+        border: '1px solid var(--border)',
+        borderRadius: '8px',
+        marginBottom: '0.5rem',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <code style={{ fontSize: '0.95em' }}>{s.name}</code>
+          <span className={`tag ${s.assignedMode === 'selective' ? 'warn' : ''}`} title={modeTitle}>
+            {s.assignedMode}
+          </span>
+          {s.agentGroupId ? (
+            <span className="tag muted" title={`Scoped to agent group ${groupName(s.agentGroupId)}`}>
+              {groupName(s.agentGroupId)}
+            </span>
+          ) : (
+            <span className="tag muted" title="Global — available to every agent group">
+              global
+            </span>
+          )}
+        </div>
+        <div className="dim" style={{ marginTop: '0.25rem' }} title={updatedAbs}>
+          updated {formatRelative(s.updatedAt)}
+        </div>
+      </div>
+      <button type="button" className="secondary" onClick={() => onEdit(s)} disabled={busy}>
+        Edit
+      </button>
+      <button
+        type="button"
+        className="secondary danger"
+        onClick={() => onDelete(s)}
+        disabled={busy}
+        style={{ background: 'white', borderColor: 'var(--error)', color: 'var(--error)' }}
+      >
+        {busy ? 'Deleting…' : 'Delete'}
+      </button>
+    </div>
+  );
+}
+
+interface EditorProps {
+  secret: SecretView;
+  groups: AgentGroupView[];
+  onClose: (changed: boolean) => void;
+}
+
+/**
+ * Edit drawer rendered as a native <dialog>. Three concurrent edits in scope:
+ *   1. Inject mode (all|selective)
+ *   2. Selective assignments (multi-select agent groups)
+ *   3. Value rotation
+ *
+ * Mode flips and kind changes both require value re-paste because the server's
+ * POST upsert wire requires `value`. Assignment-only edits go straight to the
+ * /assignments PUT and don't touch the secret value at all.
+ */
+function SecretEditor({ secret, groups, onClose }: EditorProps) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+
+  const [mode, setMode] = useState<AssignedMode>(secret.assignedMode);
+  const [assignments, setAssignments] = useState<Set<string>>(new Set());
+  const [assignmentsLoaded, setAssignmentsLoaded] = useState(false);
+  const initialAssignmentsRef = useRef<Set<string> | null>(null);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Open the dialog on mount, close imperatively on unmount. Native <dialog>
+  // gives us focus-trap + ESC-to-close for free.
+  useEffect(() => {
+    const d = dialogRef.current;
+    if (d && !d.open) d.showModal();
+    return () => {
+      if (d?.open) d.close();
+    };
+  }, []);
+
+  // Initial assignments fetch — fires once. Snapshot initial set into a ref
+  // so assignmentsChanged can compare against the pristine state, not the
+  // running edits.
+  useEffect(() => {
+    let cancelled = false;
+    listSecretAssignments(secret.id)
+      .then((ids) => {
+        if (cancelled) return;
+        const set = new Set(ids);
+        setAssignments(set);
+        initialAssignmentsRef.current = new Set(set);
+        setAssignmentsLoaded(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(`Couldn't load assignments: ${err instanceof Error ? err.message : String(err)}`);
+        initialAssignmentsRef.current = new Set();
+        setAssignmentsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret.id]);
+
+  const toggleAssignment = (groupId: string) =>
+    setAssignments((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+
+  const modeChanged = mode !== secret.assignedMode;
+  const assignmentsChanged = (() => {
+    if (!assignmentsLoaded || !initialAssignmentsRef.current) return false;
+    const init = initialAssignmentsRef.current;
+    if (init.size !== assignments.size) return true;
+    for (const id of assignments) if (!init.has(id)) return true;
+    return false;
+  })();
+  const valueProvided = value.trim().length > 0;
+
+  const save = async () => {
+    setError(null);
+    if (modeChanged && !valueProvided) {
+      setError('Switching inject mode requires re-pasting the secret value (the server upsert wire requires it).');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (valueProvided) {
+        await putSecret({
+          name: secret.name,
+          value: value.trim(),
+          kind: secret.kind,
+          agentGroupId: secret.agentGroupId,
+          assignedMode: mode,
+        });
+      }
+      // Push assignments whenever they changed, OR whenever we just upserted
+      // the secret with selective mode (so the join-table reflects intent
+      // even on first switch).
+      if (mode === 'selective' && (assignmentsChanged || (modeChanged && valueProvided))) {
+        await setSecretAssignments(secret.id, Array.from(assignments));
+      }
+      onClose(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const noAssignmentsWarn = mode === 'selective' && assignmentsLoaded && assignments.size === 0;
+  const scopeLabel = secret.agentGroupId
+    ? (groups.find((g) => g.id === secret.agentGroupId)?.name ?? secret.agentGroupId.slice(0, 8))
+    : 'global';
+
+  return (
+    <dialog
+      ref={dialogRef}
+      onClose={() => onClose(false)}
+      className="secret-editor"
+      style={{
+        width: 'min(560px, 92vw)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        padding: 0,
+        background: 'white',
+      }}
+    >
+      <form method="dialog" onSubmit={(e) => e.preventDefault()}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.05rem' }}>
+              <code>{secret.name}</code>
+            </h3>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onClose(false)}
+              style={{ padding: '0.3rem 0.7rem' }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+            <span className="tag muted">{secret.kind}</span>
+            <span className="tag muted">{scopeLabel}</span>
+          </div>
+          <div className="dim" style={{ marginTop: '0.5rem' }}>
+            created <span title={new Date(secret.createdAt).toLocaleString()}>{formatRelative(secret.createdAt)}</span>
+            {' • '}updated <span title={new Date(secret.updatedAt).toLocaleString()}>{formatRelative(secret.updatedAt)}</span>
+          </div>
+        </div>
+
+        <div style={{ padding: '1.25rem 1.5rem' }}>
+          {error && <div className="error-banner">{error}</div>}
+
+          <div className="row">
+            <label>Inject mode</label>
+            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', fontWeight: 400 }}>
+                <input
+                  type="radio"
+                  name="mode"
+                  value="all"
+                  checked={mode === 'all'}
+                  onChange={() => setMode('all')}
+                  disabled={busy}
+                />
+                <span>all</span>
+              </label>
+              <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', fontWeight: 400 }}>
+                <input
+                  type="radio"
+                  name="mode"
+                  value="selective"
+                  checked={mode === 'selective'}
+                  onChange={() => setMode('selective')}
+                  disabled={busy}
+                />
+                <span>selective</span>
+              </label>
+            </div>
+            <p className="dim" style={{ marginTop: '0.4rem' }}>
+              {mode === 'all'
+                ? 'Injected into every agent container whose scope matches.'
+                : 'Injected only into the agent groups you check below.'}
+            </p>
+          </div>
+
+          {mode === 'selective' && (
+            <div className="row">
+              <label>Assigned to ({assignments.size})</label>
+              {!assignmentsLoaded && <p className="dim">Loading current assignments…</p>}
+              {assignmentsLoaded && groups.length === 0 && (
+                <p className="dim">No agent groups exist yet — create one to assign this secret.</p>
+              )}
+              {assignmentsLoaded && groups.length > 0 && (
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: '0.35rem',
+                    maxHeight: '14rem',
+                    overflowY: 'auto',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    padding: '0.5rem 0.75rem',
+                  }}
+                >
+                  {groups.map((g) => (
+                    <label key={g.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontWeight: 400 }}>
+                      <input
+                        type="checkbox"
+                        checked={assignments.has(g.id)}
+                        onChange={() => toggleAssignment(g.id)}
+                        disabled={busy}
+                      />
+                      <span>{g.name}</span>
+                      <code style={{ fontSize: '0.78rem', color: 'var(--fg-dim)' }}>{g.folder}</code>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {noAssignmentsWarn && (
+                <div className="warn-banner" style={{ marginTop: '0.5rem' }}>
+                  Selective mode with zero assignments — this secret will inject into nothing. OK if intentional, but
+                  containers that read this name will see it as unset.
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="row">
+            <label htmlFor="rotateValue">
+              {modeChanged ? 'Value (required to apply mode change)' : 'Rotate value (optional)'}
+            </label>
+            <input
+              id="rotateValue"
+              type="password"
+              autoComplete="off"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              disabled={busy}
+              placeholder={modeChanged ? 'paste current value' : 'leave blank to keep current value'}
+            />
+            <p className="dim" style={{ marginTop: '0.25rem' }}>
+              Value is never read back over the API; rotating writes a new ciphertext under the same name.
+            </p>
+          </div>
+
+          <div className="actions" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
+            <button type="button" className="secondary" onClick={() => onClose(false)} disabled={busy}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy || (!modeChanged && !assignmentsChanged && !valueProvided)}
+            >
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+  );
+}

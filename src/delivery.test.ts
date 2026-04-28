@@ -8,7 +8,7 @@
  * INSERT OR IGNORE in markDelivered makes the DB write idempotent, but
  * the channel API has already fired twice → user sees the message twice.
  */
-import Database from 'better-sqlite3';
+import { openDb } from './db/connection.js';
 import fs from 'fs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -21,10 +21,10 @@ vi.mock('./container-runner.js', () => ({
 
 vi.mock('./config.js', async () => {
   const actual = await vi.importActual<typeof import('./config.js')>('./config.js');
-  return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-delivery' };
+  return { ...actual, DATA_DIR: '/tmp/paraclaw-test-delivery' };
 });
 
-const TEST_DIR = '/tmp/nanoclaw-test-delivery';
+const TEST_DIR = '/tmp/paraclaw-test-delivery';
 
 import { initTestDb, closeDb, runMigrations, createAgentGroup, createMessagingGroup } from './db/index.js';
 import { resolveSession, outboundDbPath } from './session-manager.js';
@@ -54,7 +54,7 @@ function seedAgentAndChannel(): void {
 }
 
 function insertOutbound(agentGroupId: string, sessionId: string, msgId: string): void {
-  const db = new Database(outboundDbPath(agentGroupId, sessionId));
+  const db = openDb(outboundDbPath(agentGroupId, sessionId));
   db.prepare(
     `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
      VALUES (?, datetime('now'), 'chat', 'telegram:123', 'telegram', ?)`,

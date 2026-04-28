@@ -26,7 +26,7 @@
  *        → kill + reset this message + tries++. Semantics: "container
  *        claimed a message and went quiet past tolerance since the claim."
  */
-import type Database from 'better-sqlite3';
+import type { Database } from './db/connection.js';
 import fs from 'fs';
 
 import { getActiveSessions } from './db/sessions.js';
@@ -42,6 +42,7 @@ import {
   type ContainerState,
 } from './db/session-db.js';
 import { log } from './log.js';
+import { sweepExpiredStates } from './oauth/state-store.js';
 import { openInboundDb, openOutboundDb, inboundDbPath, heartbeatPath } from './session-manager.js';
 import { isContainerRunning, killContainer, wakeContainer } from './container-runner.js';
 import type { Session } from './types.js';
@@ -129,6 +130,16 @@ async function sweep(): Promise<void> {
     log.error('Host sweep error', { err });
   }
 
+  // Global (non-per-session) maintenance: drop expired OAuth CSRF state rows.
+  // DB-backed state store grows by ~1 row per failed authorize attempt
+  // otherwise.
+  try {
+    const removed = sweepExpiredStates();
+    if (removed > 0) log.info('Swept expired oauth states', { removed });
+  } catch (err) {
+    log.warn('sweepExpiredStates failed', { err: err instanceof Error ? err.message : String(err) });
+  }
+
   setTimeout(sweep, SWEEP_INTERVAL_MS);
 }
 
@@ -139,8 +150,8 @@ async function sweepSession(session: Session): Promise<void> {
   const inPath = inboundDbPath(agentGroup.id, session.id);
   if (!fs.existsSync(inPath)) return;
 
-  let inDb: Database.Database;
-  let outDb: Database.Database | null = null;
+  let inDb: Database;
+  let outDb: Database | null = null;
   try {
     inDb = openInboundDb(agentGroup.id, session.id);
   } catch {
@@ -211,12 +222,7 @@ function bashTimeoutMs(state: ContainerState | null): number | null {
   return typeof state.tool_declared_timeout_ms === 'number' ? state.tool_declared_timeout_ms : null;
 }
 
-function enforceRunningContainerSla(
-  inDb: Database.Database,
-  outDb: Database.Database,
-  session: Session,
-  agentGroupId: string,
-): void {
+function enforceRunningContainerSla(inDb: Database, outDb: Database, session: Session, agentGroupId: string): void {
   const decision = decideStuckAction({
     now: Date.now(),
     heartbeatMtimeMs: heartbeatMtimeMs(agentGroupId, session.id),
@@ -247,12 +253,7 @@ function enforceRunningContainerSla(
   resetStuckProcessingRows(inDb, outDb, session, 'claim-stuck');
 }
 
-function resetStuckProcessingRows(
-  inDb: Database.Database,
-  outDb: Database.Database,
-  session: Session,
-  reason: string,
-): void {
+function resetStuckProcessingRows(inDb: Database, outDb: Database, session: Session, reason: string): void {
   const claims = getProcessingClaims(outDb);
   const now = Date.now();
   for (const { message_id } of claims) {

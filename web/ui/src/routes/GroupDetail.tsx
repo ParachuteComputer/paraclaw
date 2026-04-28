@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { ActivityFeed } from '../components/ActivityFeed.tsx';
 import { ScopeGrants, SCOPE_OPTIONS } from '../components/ScopeGrants.tsx';
 import { StatusDot, formatRelative } from '../components/StatusDot.tsx';
 import { VaultPicker } from '../components/VaultPicker.tsx';
@@ -15,8 +16,16 @@ import {
 
 const POLL_MS = 7_000;
 
+type DetailTab = 'overview' | 'activity';
+
+function parseTab(raw: string | null): DetailTab {
+  return raw === 'activity' ? 'activity' : 'overview';
+}
+
 export function GroupDetail() {
   const { folder } = useParams<{ folder: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseTab(searchParams.get('tab'));
   const [group, setGroup] = useState<AgentGroupView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -207,6 +216,28 @@ export function GroupDetail() {
 
       {flash && <div className={flash.kind === 'ok' ? 'status-banner' : 'error-banner'}>{flash.text}</div>}
 
+      <DetailTabs
+        tab={tab}
+        onChange={(next) => {
+          // Preserve any other search params (none today, but future-proof).
+          // The replace param keeps the tab toggle out of browser-history
+          // back-stack noise — flipping tabs shouldn't make Back unintuitive.
+          setSearchParams(
+            (prev) => {
+              const p = new URLSearchParams(prev);
+              if (next === 'overview') p.delete('tab');
+              else p.set('tab', next);
+              return p;
+            },
+            { replace: true },
+          );
+        }}
+      />
+
+      {tab === 'activity' && folder && <ActivityFeed folder={folder} />}
+
+      {tab === 'overview' && (
+      <>
       <div className="section">
         <h3>Agent group</h3>
         <div className="kv">
@@ -359,7 +390,26 @@ export function GroupDetail() {
           .)
         </p>
       </div>
+      </>
+      )}
     </div>
+  );
+}
+
+function DetailTabs({ tab, onChange }: { tab: DetailTab; onChange: (next: DetailTab) => void }) {
+  return (
+    <ol className="detail-tabs">
+      <li className={`detail-tab${tab === 'overview' ? ' active' : ''}`}>
+        <button type="button" onClick={() => onChange('overview')}>
+          Overview
+        </button>
+      </li>
+      <li className={`detail-tab${tab === 'activity' ? ' active' : ''}`}>
+        <button type="button" onClick={() => onChange('activity')}>
+          Activity
+        </button>
+      </li>
+    </ol>
   );
 }
 
