@@ -60,6 +60,7 @@ import {
 } from './auth.js';
 import { fetchHubVaults } from './hub-discovery.js';
 import { handleSecretsRoute } from './routes/secrets.js';
+import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 
@@ -245,6 +246,23 @@ async function handleApi(
   if (pathname === '/api/discovery' && method === 'GET') {
     json(res, 200, { hubOrigin: getHubOrigin() });
     return;
+  }
+
+  // /api/setup/status — readiness probe for the setup wizard. Read-gated
+  // because the per-check details (which folders, which keys) are
+  // operator-private. The endpoint itself is idempotent + side-effect-free
+  // EXCEPT for the master-key first-touch (loadOrCreateMasterKey generates
+  // ~/.parachute/claw/master.key on first call); that's intentional — the
+  // wizard polling drives bootstrap.
+  if (pathname === '/api/setup/status' && method === 'GET') {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    try {
+      const handled = await handleSetupStatusRoute({ pathname, method, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
   }
 
   // /api/secrets — local AES-GCM secret store. Read-gated for list,

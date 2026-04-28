@@ -12,6 +12,7 @@ import http from 'node:http';
 import {
   type AssignedMode,
   type SecretKind,
+  type SecretRow,
   deleteSecret,
   listSecrets,
   putSecret,
@@ -20,11 +21,37 @@ import {
 const ALLOWED_KINDS: SecretKind[] = ['channel-token', 'api-key', 'generic'];
 const ALLOWED_MODES: AssignedMode[] = ['all', 'selective'];
 
+// Camel-cased view shape consumed by `web/ui/src/lib/api.ts:SecretView`.
+// The DB layer stores snake_case; we transform at the boundary so the UI
+// stays in idiomatic JS and the storage stays in idiomatic SQL.
+interface SecretView {
+  id: string;
+  name: string;
+  kind: SecretKind;
+  agentGroupId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toView(r: SecretRow): SecretView {
+  return {
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+    agentGroupId: r.agent_group_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
 interface PutBody {
   name?: string;
   value?: string;
   kind?: string;
+  // Both the snake_case (legacy) and camelCase (UI) forms are accepted on
+  // input — saves a coordinated migration, costs one or-fallback line.
   agent_group_id?: string | null;
+  agentGroupId?: string | null;
   assigned_mode?: string;
   host_pattern?: string | null;
 }
@@ -63,7 +90,7 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
     let scope: string | null | undefined = undefined;
     if (groupParam !== null) scope = groupParam === '' ? null : groupParam;
     const rows = listSecrets(scope);
-    json(res, 200, { secrets: rows });
+    json(res, 200, { secrets: rows.map(toView) });
     return true;
   }
 
@@ -95,13 +122,25 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
       return true;
     }
 
+    const agentGroupId = body.agentGroupId ?? body.agent_group_id ?? null;
     const id = putSecret(name, body.value, {
       kind,
-      agent_group_id: body.agent_group_id ?? null,
+      agent_group_id: agentGroupId,
       assigned_mode: mode,
       host_pattern: body.host_pattern ?? null,
     });
-    json(res, 200, { id, name });
+    // Re-read so the response carries the canonical timestamps the upsert
+    // wrote (rather than guessing). Same scope filter — listSecrets returns
+    // both global + scoped rows when scope is the agent id, so we narrow
+    // by id manually. Fast path: in practice <100 secrets per install.
+    const view = listSecrets(agentGroupId).find((r) => r.id === id);
+    if (!view) {
+      // Should never happen — putSecret just wrote the row. Surfaced as
+      // 500 so a regression is loud, not silently masked.
+      error(res, 500, `secret ${id} disappeared between write and read`);
+      return true;
+    }
+    json(res, 200, { secret: toView(view) });
     return true;
   }
 
