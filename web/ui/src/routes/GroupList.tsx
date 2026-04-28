@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { StatusDot, formatRelative } from "../components/StatusDot.tsx";
 import { listGroups, type AgentGroupView } from "../lib/api.ts";
 
 const POLL_MS = 7_000;
+// Set ?bypass=1 (or hash #bypass) to suppress the auto-redirect to /setup
+// when no groups exist — useful for inspecting the empty state mid-debug
+// without getting bounced into the wizard. Spec from issue #27.
+function shouldBypassSetup(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (window.location.hash === '#bypass') return true;
+  return new URLSearchParams(window.location.search).has('bypass');
+}
 
 export function GroupList() {
+  const navigate = useNavigate();
   const [state, setState] = useState<
     | { kind: "loading" }
     | { kind: "ok"; groups: AgentGroupView[] }
@@ -22,7 +31,16 @@ export function GroupList() {
   useEffect(() => {
     let cancelled = false;
     listGroups()
-      .then((groups) => !cancelled && setState({ kind: "ok", groups }))
+      .then((groups) => {
+        if (cancelled) return;
+        if (groups.length === 0 && !shouldBypassSetup()) {
+          // Fresh install — drop the operator into the setup wizard.
+          // Bypass with /?bypass=1 if you want to see the empty state.
+          navigate('/setup', { replace: true });
+          return;
+        }
+        setState({ kind: "ok", groups });
+      })
       .catch(
         (err) =>
           !cancelled &&
@@ -34,7 +52,7 @@ export function GroupList() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, navigate]);
 
   // Background poll — refresh status without flipping back to loading state.
   useEffect(() => {

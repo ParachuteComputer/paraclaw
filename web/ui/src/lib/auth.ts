@@ -11,10 +11,18 @@
  *   5. POST <hub>/oauth/token         — authorization_code, then refresh_token
  *                                       on 401 from /api/* before re-login.
  *
- * Scopes: `claw:write vault:read vault:write`. The vault scopes anticipate
- * the vault tokens-API REST endpoint (paraclaw#4 companion vault issue);
- * today the server still shells out, but minting the user JWT with vault:*
- * now means no re-consent later.
+ * Scopes: `claw:admin claw:write vault:read vault:write`. `claw:admin` is
+ * required for the Phase 1 setup wizard (install-channel + onecli secrets
+ * writes are admin-gated). The vault scopes anticipate the vault tokens-API
+ * REST endpoint (paraclaw#4 companion vault issue); today the server still
+ * shells out, but minting the user JWT with vault:* now means no re-consent
+ * later.
+ *
+ * Existing users with cached tokens that lack a newly-required scope will
+ * hit 403 with a body like `requires the X scope`. The api.ts wrapper
+ * detects that shape and triggers re-auth (clearTokens + beginLogin) so
+ * upgrades don't strand users behind a manual `localStorage.clear()`.
+ * (paraclaw#33)
  */
 interface DiscoveryResponse {
   hubOrigin: string;
@@ -37,7 +45,7 @@ interface FlowState {
   hub_origin: string;
 }
 
-const REQUESTED_SCOPES = "claw:write vault:read vault:write";
+const REQUESTED_SCOPES = "claw:admin claw:write vault:read vault:write";
 const DISCOVERY_KEY = "paraclaw.discovery";
 const FLOW_KEY = "paraclaw.flow";
 

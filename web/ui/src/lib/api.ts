@@ -76,6 +76,20 @@ async function doFetch(
   return fetch(`${API_BASE}${path}`, { ...init, headers, body });
 }
 
+// Hub's scope-validation 403 (cli#71) responds with a body like
+// `{"error":"This endpoint requires the claw:admin scope"}`. We match the
+// substring rather than the exact phrase so a future copy tweak doesn't
+// silently disable re-auth. Reads via .clone() so readError() can still
+// consume the original body if the caller falls through to throw.
+async function isScopeMismatch(res: Response): Promise<boolean> {
+  try {
+    const text = await res.clone().text();
+    return /requires the [\w:]+ scope/.test(text);
+  } catch {
+    return false;
+  }
+}
+
 async function readError(res: Response): Promise<string> {
   let message = `${res.status} ${res.statusText}`;
   try {
@@ -107,6 +121,16 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
       clearTokens();
       await beginLogin();
     }
+  }
+  // 403 with a scope-mismatch body means the cached token was minted before
+  // a newly-required scope was added (paraclaw#33). Without this, existing
+  // users were stuck behind a manual `localStorage.clear()` after the Phase 1
+  // wizard bumped REQUESTED_SCOPES to include claw:admin. Refresh won't help
+  // (refresh tokens carry the original scope set), so drop straight to
+  // re-auth — beginLogin() will request the new scope set.
+  if (res.status === 403 && (await isScopeMismatch(res))) {
+    clearTokens();
+    await beginLogin();
   }
   if (!res.ok) {
     throw new Error(await readError(res));
@@ -209,4 +233,124 @@ export async function createGroup(input: CreateGroupInput): Promise<{
   mintedVaultToken: boolean;
 }> {
   return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(`/groups`, { method: 'POST', json: input });
+}
+
+// --- Setup wizard endpoints (paraclaw#27 PR A backend) ---
+
+export interface SetupCheck {
+  ok: boolean;
+  detail: string;
+  fix: string | null;
+}
+export interface SetupStatus {
+  onecli: SetupCheck;
+  hub: SetupCheck;
+  vaultAttached: SetupCheck;
+  channels: {
+    discord: { installed: boolean };
+    telegram: { installed: boolean };
+  };
+  ready: boolean;
+}
+
+export type ChannelKind = 'discord' | 'telegram';
+
+export async function getSetupStatus(): Promise<SetupStatus> {
+  return request<SetupStatus>(`/setup/status`);
+}
+
+export type TaskStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+export interface TaskStep {
+  name: string;
+  status: TaskStepStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+}
+export interface TaskRecord {
+  id: string;
+  kind: string;
+  status: TaskStepStatus;
+  steps: TaskStep[];
+  result: unknown;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StartInstallChannelResult {
+  taskId: string;
+  kind: string;
+}
+
+export async function startInstallChannel(channel: ChannelKind): Promise<StartInstallChannelResult> {
+  return request<StartInstallChannelResult>(`/setup/install-channel`, {
+    method: 'POST',
+    json: { channel },
+  });
+}
+
+export async function getTask(id: string): Promise<TaskRecord> {
+  return request<TaskRecord>(`/tasks/${encodeURIComponent(id)}`);
+}
+
+export interface DiscordIdentity {
+  id: string;
+  username: string;
+  discriminator: string;
+  bot: boolean;
+}
+export async function testDiscordToken(token: string): Promise<{ identity: DiscordIdentity }> {
+  return request<{ identity: DiscordIdentity }>(`/channels/discord/test`, {
+    method: 'POST',
+    json: { token },
+  });
+}
+
+export interface TelegramIdentity {
+  id: number;
+  username: string;
+  firstName: string;
+  isBot: boolean;
+}
+export async function testTelegramToken(token: string): Promise<{ identity: TelegramIdentity }> {
+  return request<{ identity: TelegramIdentity }>(`/channels/telegram/test`, {
+    method: 'POST',
+    json: { token },
+  });
+}
+
+export async function listOnecliSecrets(): Promise<{ secrets: { name: string }[] }> {
+  return request<{ secrets: { name: string }[] }>(`/onecli/secrets`);
+}
+
+export async function putOnecliSecret(name: string, value: string): Promise<{ name: string }> {
+  return request<{ name: string }>(`/onecli/secrets`, {
+    method: 'POST',
+    json: { name, value },
+  });
+}
+
+export interface WireChannelResult {
+  messagingGroupId: string;
+  messagingGroupAgentId: string;
+  platformId: string;
+  created: { messagingGroup: boolean; wiring: boolean };
+}
+
+/**
+ * Wire a DM channel to an agent group.
+ *
+ * `botUserId` semantics differ by channel — see web/server/src/wire-channel.ts:40-78:
+ *   - discord  : the BOT's snowflake (DMs are addressee-routed; ANY DM lands on the bot's @me)
+ *   - telegram : the OPERATOR's user id (DMs are chat-routed; only that user's DMs match)
+ */
+export async function wireChannelToGroup(
+  folder: string,
+  input: { channel: ChannelKind; botUserId: string; displayName?: string },
+): Promise<WireChannelResult> {
+  return request<WireChannelResult>(`/groups/${encodeURIComponent(folder)}/wire-channel`, {
+    method: 'POST',
+    json: input,
+  });
 }
