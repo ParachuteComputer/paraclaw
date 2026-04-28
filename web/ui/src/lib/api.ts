@@ -465,8 +465,10 @@ export type SecretKind = 'channel-token' | 'api-key' | 'generic';
  *   resolution per `src/secrets/index.ts:resolveInjectableSecrets`).
  * `selective` — inject only into the agent groups explicitly assigned via
  *   /api/secrets/:id/assignments.
+ *
+ * The `AssignedMode` type itself is declared in the Apps section above; both
+ * surfaces share the same allow-list semantics so we reuse the alias.
  */
-export type AssignedMode = 'all' | 'selective';
 
 export interface SecretView {
   id: string;
