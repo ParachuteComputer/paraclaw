@@ -3,6 +3,7 @@ import { GroupList } from "./routes/GroupList.tsx";
 import { GroupDetail } from "./routes/GroupDetail.tsx";
 import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 import { ApprovalsList } from "./routes/ApprovalsList.tsx";
+import { ChannelsList } from "./routes/ChannelsList.tsx";
 import { OAuthCallback } from "./routes/OAuthCallback.tsx";
 import { SecretsList } from "./routes/SecretsList.tsx";
 import { SessionsList } from "./routes/SessionsList.tsx";
@@ -32,6 +33,7 @@ export function App() {
         </Link>
         <Link to="/">Agent groups</Link>
         <Link to="/sessions">Sessions</Link>
+        <Link to="/channels">Channels</Link>
         <Link to="/secrets">Secrets</Link>
         <Link to="/approvals">Approvals</Link>
         <Link to="/setup">Setup</Link>
@@ -48,6 +50,7 @@ export function App() {
         <Route path="/" element={<GroupList />} />
         <Route path="/secrets" element={<SecretsList />} />
         <Route path="/sessions" element={<SessionsList />} />
+        <Route path="/channels" element={<ChannelsList />} />
         <Route path="/approvals" element={<ApprovalsList />} />
         <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />
