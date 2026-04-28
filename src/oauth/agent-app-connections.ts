@@ -36,6 +36,20 @@ export function listAgentsForConnection(connectionId: string): AgentForConnectio
     .all({ connection_id: connectionId });
 }
 
+/** Map of connectionId → agent count, populated in one query for the list view. */
+export function countAgentsByConnection(): Map<string, number> {
+  const rows = db()
+    .prepare<{ app_connection_id: string; n: number }>(
+      `SELECT app_connection_id, COUNT(*) AS n
+         FROM agent_app_connections
+         GROUP BY app_connection_id`,
+    )
+    .all();
+  const out = new Map<string, number>();
+  for (const r of rows) out.set(r.app_connection_id, r.n);
+  return out;
+}
+
 export function listConnectionsForAgent(agentGroupId: string): string[] {
   return db()
     .prepare<{ app_connection_id: string }>(

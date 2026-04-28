@@ -42,3 +42,7 @@ export function getProvider(slug: string): ProviderSpec | undefined {
 export function listProviderSlugs(): string[] {
   return Object.keys(PROVIDERS).sort();
 }
+
+export function listProviders(): ProviderSpec[] {
+  return Object.values(PROVIDERS).sort((a, b) => a.slug.localeCompare(b.slug));
+}

@@ -5,6 +5,7 @@
  *   POST            /api/apps/:provider/authorize       mint redirect URL
  *   GET             /api/apps/:provider/callback        token exchange
  *   GET             /api/apps                            list connections
+ *   GET             /api/apps/:id                        single connection
  *   DELETE          /api/apps/:id                        revoke + delete
  *   GET / PUT       /api/apps/:id/agents                 manage allowlist
  *
@@ -21,6 +22,7 @@ import http from 'node:http';
 
 import {
   type AgentForConnection,
+  countAgentsByConnection,
   listAgentsForConnection,
   setAgentsForConnection,
 } from '../../oauth/agent-app-connections.js';
@@ -29,7 +31,6 @@ import {
   deleteAppConfig,
   getAppConfig,
   getAppConfigWithSecret,
-  listAppConfigs,
   putAppConfig,
 } from '../../oauth/app-configs.js';
 import {
@@ -64,6 +65,7 @@ interface AppConnectionView {
   scopesGranted: string;
   expiresAt: string | null;
   label: string;
+  agentGroupCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,16 +89,17 @@ function configToView(r: AppConfigRow): AppConfigView {
   };
 }
 
-function connectionToView(r: AppConnectionRow, provider: string): AppConnectionView {
+function connectionToView(r: AppConnectionRow, agentGroupCount: number): AppConnectionView {
   return {
     id: r.id,
-    provider,
+    provider: r.provider,
     appConfigId: r.app_config_id,
     accountEmail: r.account_email,
     accountId: r.account_id,
     scopesGranted: r.scopes_granted,
     expiresAt: r.expires_at,
     label: r.label,
+    agentGroupCount,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -143,25 +146,6 @@ function callbackUri(req: http.IncomingMessage, providerSlug: string): string {
   return `${originFromReq(req)}/api/apps/${providerSlug}/callback`;
 }
 
-/** Resolve a connection by id. Returns the resolved provider slug too. */
-function resolveConnectionWithProvider(id: string): { row: AppConnectionRow; providerSlug: string } | undefined {
-  const row = getAppConnection(id);
-  if (!row) return undefined;
-  // Cheap lookup back to the provider slug via the config row.
-  const cfg = getAppConfigViaId(row.app_config_id);
-  if (!cfg) return undefined;
-  return { row, providerSlug: cfg.provider };
-}
-
-function getAppConfigViaId(id: string): AppConfigRow | undefined {
-  // app_configs is provider-keyed at the lookup layer; we walk the
-  // small list to find the row by id. Practical at <20 providers.
-  for (const row of listAppConfigs()) {
-    if (row.id === id) return row;
-  }
-  return undefined;
-}
-
 export interface AppsRouteContext {
   pathname: string;
   method: string;
@@ -182,10 +166,9 @@ export async function handleAppsRoute(ctx: AppsRouteContext): Promise<boolean> {
   // List connections (no tokens, no secrets).
   if (pathname === '/api/apps' && method === 'GET') {
     const rows = listAppConnections();
-    const providers = new Map<string, string>();
-    for (const cfg of listAppConfigs()) providers.set(cfg.id, cfg.provider);
+    const counts = countAgentsByConnection();
     json(res, 200, {
-      connections: rows.map((r) => connectionToView(r, providers.get(r.app_config_id) ?? 'unknown')),
+      connections: rows.map((r) => connectionToView(r, counts.get(r.id) ?? 0)),
     });
     return true;
   }
@@ -348,6 +331,7 @@ export async function handleAppsRoute(ctx: AppsRouteContext): Promise<boolean> {
     const expiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null;
     const connectionId = upsertAppConnection({
       app_config_id: cfg.id,
+      provider: providerSlug,
       account_id: extracted.accountId,
       account_email: extracted.accountEmail,
       access_token: tokens.access_token,
@@ -409,24 +393,31 @@ export async function handleAppsRoute(ctx: AppsRouteContext): Promise<boolean> {
   }
 
   const idMatch = pathname.match(ID_RE);
-  if (idMatch && method === 'DELETE') {
+  if (idMatch) {
     const id = decodeURIComponent(idMatch[1]);
-    const resolved = resolveConnectionWithProvider(id);
-    if (!resolved) {
+    const row = getAppConnection(id);
+    if (!row) {
       error(res, 404, `connection not found: ${id}`);
       return true;
     }
-    const provider = getProvider(resolved.providerSlug);
-    if (provider) {
-      const withTokens = getAppConnectionWithTokens(id);
-      if (withTokens) {
-        // Best-effort revocation; never blocks local delete.
-        await revokeToken({ provider, accessToken: withTokens.access_token });
-      }
+    if (method === 'GET') {
+      const counts = countAgentsByConnection();
+      json(res, 200, { connection: connectionToView(row, counts.get(row.id) ?? 0) });
+      return true;
     }
-    deleteAppConnection(id);
-    json(res, 200, { id, deleted: true });
-    return true;
+    if (method === 'DELETE') {
+      const provider = getProvider(row.provider);
+      if (provider) {
+        const withTokens = getAppConnectionWithTokens(id);
+        if (withTokens) {
+          // Best-effort revocation; never blocks local delete.
+          await revokeToken({ provider, accessToken: withTokens.access_token });
+        }
+      }
+      deleteAppConnection(id);
+      json(res, 200, { id, deleted: true });
+      return true;
+    }
   }
 
   return false;

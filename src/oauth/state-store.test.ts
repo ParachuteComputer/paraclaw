@@ -1,8 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { closeDb, initTestDb, runMigrations } from '../db/index.js';
 import { clearStateStore, consumeState, mintState, stateStoreSize } from './state-store.js';
 
-afterEach(() => clearStateStore());
+beforeEach(() => {
+  const db = initTestDb();
+  runMigrations(db);
+});
+
+afterEach(() => {
+  clearStateStore();
+  closeDb();
+});
 
 describe('oauth state-store', () => {
   it('mints unique opaque tokens', () => {

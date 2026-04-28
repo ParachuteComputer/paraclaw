@@ -27,6 +27,7 @@ describe('app_connections DB layer', () => {
   it('inserts and round-trips encrypted tokens', () => {
     const id = upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-1',
       account_email: 'a@example.com',
       access_token: 'access-1',
@@ -42,6 +43,7 @@ describe('app_connections DB layer', () => {
   it('hides token columns from public reads', () => {
     const id = upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-1',
       access_token: 'access-1',
       label: 'a',
@@ -56,12 +58,14 @@ describe('app_connections DB layer', () => {
   it('upserts on (app_config_id, account_id) — same id, refreshed tokens', () => {
     const id1 = upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-1',
       access_token: 'old',
       label: 'a',
     });
     const id2 = upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-1',
       access_token: 'new',
       refresh_token: 'rnew',
@@ -75,12 +79,14 @@ describe('app_connections DB layer', () => {
   it('treats different account_ids as separate connections', () => {
     upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-1',
       access_token: 't1',
       label: 'a',
     });
     upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-2',
       access_token: 't2',
       label: 'b',
@@ -91,6 +97,7 @@ describe('app_connections DB layer', () => {
   it('deletes by id', () => {
     const id = upsertAppConnection({
       app_config_id: configId,
+      provider: 'google',
       account_id: 'sub-1',
       access_token: 'access',
       label: 'a',

@@ -1,26 +1,49 @@
 /**
- * Domain-separated key for the OAuth subsystem. Same master key as the
- * secrets store; different HKDF info string so a bug in the secrets
- * subsystem can't decrypt OAuth tokens (and vice versa).
+ * Three domain-separated HKDF-derived keys for OAuth secrets:
  *
- * Bumping `paraclaw.oauth.v1` → `v2` would force re-encryption of every
- * `client_secret_encrypted`, `access_token_encrypted`, and
- * `refresh_token_encrypted` row. Treat the version as a key-rotation
- * trigger, not casual versioning.
+ *   - paraclaw.oauth.client.v1   → app_configs.client_secret_encrypted
+ *   - paraclaw.oauth.access.v1   → app_connections.access_token_encrypted
+ *   - paraclaw.oauth.refresh.v1  → app_connections.refresh_token_encrypted
+ *
+ * Three subkeys instead of one because compromise of one rotation surface
+ * (e.g. refresh tokens accidentally surfaced in a log) shouldn't yield
+ * decryption power on the others. Bumping any `v<n>` suffix is a
+ * per-domain key rotation.
  */
 import { deriveKey, encryptSecret, decryptSecret } from '../secrets/crypto.js';
 import { loadOrCreateMasterKey } from '../secrets/master-key.js';
 
-const OAUTH_INFO = 'paraclaw.oauth.v1';
+const CLIENT_INFO = 'paraclaw.oauth.client.v1';
+const ACCESS_INFO = 'paraclaw.oauth.access.v1';
+const REFRESH_INFO = 'paraclaw.oauth.refresh.v1';
 
-function oauthKey(): Buffer {
-  return deriveKey(loadOrCreateMasterKey(), OAUTH_INFO);
+function clientKey(): Buffer {
+  return deriveKey(loadOrCreateMasterKey(), CLIENT_INFO);
+}
+function accessKey(): Buffer {
+  return deriveKey(loadOrCreateMasterKey(), ACCESS_INFO);
+}
+function refreshKey(): Buffer {
+  return deriveKey(loadOrCreateMasterKey(), REFRESH_INFO);
 }
 
-export function encryptOauth(plaintext: string): string {
-  return encryptSecret(plaintext, oauthKey());
+export function encryptOauthClient(plaintext: string): string {
+  return encryptSecret(plaintext, clientKey());
+}
+export function decryptOauthClient(ciphertext: string): string {
+  return decryptSecret(ciphertext, clientKey());
 }
 
-export function decryptOauth(ciphertext: string): string {
-  return decryptSecret(ciphertext, oauthKey());
+export function encryptOauthAccess(plaintext: string): string {
+  return encryptSecret(plaintext, accessKey());
+}
+export function decryptOauthAccess(ciphertext: string): string {
+  return decryptSecret(ciphertext, accessKey());
+}
+
+export function encryptOauthRefresh(plaintext: string): string {
+  return encryptSecret(plaintext, refreshKey());
+}
+export function decryptOauthRefresh(ciphertext: string): string {
+  return decryptSecret(ciphertext, refreshKey());
 }

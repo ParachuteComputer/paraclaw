@@ -1,19 +1,28 @@
 /**
  * OAuth grant DB layer — one row per (provider × authorized account).
  *
- * Token columns are AES-GCM ciphertext at rest. The list/get views in
- * this module strip those columns; only `getConnectionWithTokens` (used
- * by the runtime injection seam, not the API) decrypts them.
+ * `provider` is denormalized onto this table (mig 022) for query speed
+ * and to avoid a join on every list call. `app_config_id` remains the
+ * authoritative FK; provider is just a copy of `app_configs.provider`
+ * filled at upsert time.
+ *
+ * Token columns are AES-GCM ciphertext at rest, encrypted under
+ * domain-separated keys (`paraclaw.oauth.access.v1` /
+ * `paraclaw.oauth.refresh.v1` — see oauth/crypto.ts). The list/get
+ * views in this module strip those columns; only
+ * `getAppConnectionWithTokens` (used by the runtime injection seam,
+ * not the API) decrypts them.
  */
 import crypto from 'crypto';
 
 import { getDb } from '../db/connection.js';
 import type { Database } from '../db/connection.js';
-import { decryptOauth, encryptOauth } from './crypto.js';
+import { decryptOauthAccess, decryptOauthRefresh, encryptOauthAccess, encryptOauthRefresh } from './crypto.js';
 
 export interface AppConnectionRow {
   id: string;
   app_config_id: string;
+  provider: string;
   account_email: string | null;
   account_id: string;
   scopes_granted: string;
@@ -43,7 +52,7 @@ function nowIso(): string {
 }
 
 const PUBLIC_COLS = `
-  id, app_config_id, account_email, account_id, scopes_granted,
+  id, app_config_id, provider, account_email, account_id, scopes_granted,
   expires_at, label, metadata_json, created_at, updated_at
 `;
 
@@ -62,13 +71,14 @@ export function getAppConnectionWithTokens(id: string): AppConnectionWithTokens 
   const { access_token_encrypted, refresh_token_encrypted, ...rest } = row;
   return {
     ...rest,
-    access_token: decryptOauth(access_token_encrypted),
-    refresh_token: refresh_token_encrypted ? decryptOauth(refresh_token_encrypted) : null,
+    access_token: decryptOauthAccess(access_token_encrypted),
+    refresh_token: refresh_token_encrypted ? decryptOauthRefresh(refresh_token_encrypted) : null,
   };
 }
 
 export interface UpsertConnectionOpts {
   app_config_id: string;
+  provider: string;
   account_id: string;
   account_email?: string | null;
   access_token: string;
@@ -85,8 +95,8 @@ export interface UpsertConnectionOpts {
  * a duplicate row.
  */
 export function upsertAppConnection(opts: UpsertConnectionOpts): string {
-  const accessCt = encryptOauth(opts.access_token);
-  const refreshCt = opts.refresh_token ? encryptOauth(opts.refresh_token) : null;
+  const accessCt = encryptOauthAccess(opts.access_token);
+  const refreshCt = opts.refresh_token ? encryptOauthRefresh(opts.refresh_token) : null;
   const scopes = opts.scopes_granted ?? '';
   const accountEmail = opts.account_email ?? null;
   const expiresAt = opts.expires_at ?? null;
@@ -104,7 +114,8 @@ export function upsertAppConnection(opts: UpsertConnectionOpts): string {
     db()
       .prepare(
         `UPDATE app_connections
-            SET account_email           = @account_email,
+            SET provider                = @provider,
+                account_email           = @account_email,
                 access_token_encrypted  = @access_token_encrypted,
                 refresh_token_encrypted = @refresh_token_encrypted,
                 scopes_granted          = @scopes_granted,
@@ -116,6 +127,7 @@ export function upsertAppConnection(opts: UpsertConnectionOpts): string {
       )
       .run({
         id: existing.id,
+        provider: opts.provider,
         account_email: accountEmail,
         access_token_encrypted: accessCt,
         refresh_token_encrypted: refreshCt,
@@ -132,12 +144,12 @@ export function upsertAppConnection(opts: UpsertConnectionOpts): string {
   db()
     .prepare(
       `INSERT INTO app_connections
-         (id, app_config_id, account_email, account_id,
+         (id, app_config_id, provider, account_email, account_id,
           access_token_encrypted, refresh_token_encrypted,
           scopes_granted, expires_at, label, metadata_json,
           created_at, updated_at)
        VALUES
-         (@id, @app_config_id, @account_email, @account_id,
+         (@id, @app_config_id, @provider, @account_email, @account_id,
           @access_token_encrypted, @refresh_token_encrypted,
           @scopes_granted, @expires_at, @label, @metadata_json,
           @created_at, @updated_at)`,
@@ -145,6 +157,7 @@ export function upsertAppConnection(opts: UpsertConnectionOpts): string {
     .run({
       id,
       app_config_id: opts.app_config_id,
+      provider: opts.provider,
       account_email: accountEmail,
       account_id: opts.account_id,
       access_token_encrypted: accessCt,

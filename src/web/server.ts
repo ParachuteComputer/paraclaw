@@ -57,6 +57,7 @@ import { handleAppsRoute } from './routes/apps.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleChannelsRoute } from './routes/channels.js';
 import { handleActivityRoute } from './routes/activity.js';
+import { handleOauthProvidersRoute } from './routes/oauth-providers.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
@@ -77,7 +78,7 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // hub#83) sets this from `module.json` `paths[0]` automatically. Empty
 // string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.14-rc.4';
+const SERVICE_VERSION = '0.0.14-rc.5';
 
 interface AgentGroupRow {
   id: string;
@@ -287,6 +288,19 @@ async function handleApi(
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSessionsRoute({ pathname, method, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  // Read-only provider registry — data-drives the SPA's "add integration"
+  // picker so new providers don't require a UI bundle change.
+  if (pathname === '/api/oauth/providers' && method === 'GET') {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    try {
+      const handled = handleOauthProvidersRoute({ pathname, method, res });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));

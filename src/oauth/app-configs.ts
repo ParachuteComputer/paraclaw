@@ -9,7 +9,7 @@ import crypto from 'crypto';
 
 import { getDb } from '../db/connection.js';
 import type { Database } from '../db/connection.js';
-import { decryptOauth, encryptOauth } from './crypto.js';
+import { decryptOauthClient, encryptOauthClient } from './crypto.js';
 
 export interface AppConfigRow {
   id: string;
@@ -46,7 +46,7 @@ export function getAppConfigWithSecret(provider: string): (AppConfigRow & { clie
   const row = db().prepare<RawAppConfigRow>(`SELECT * FROM app_configs WHERE provider = @provider`).get({ provider });
   if (!row) return undefined;
   const { client_secret_encrypted, ...rest } = row;
-  return { ...rest, client_secret: decryptOauth(client_secret_encrypted) };
+  return { ...rest, client_secret: decryptOauthClient(client_secret_encrypted) };
 }
 
 export function listAppConfigs(): AppConfigRow[] {
@@ -61,7 +61,7 @@ export interface PutAppConfigOpts {
 
 /** Insert or update a provider's client config. Returns the row's id. */
 export function putAppConfig(provider: string, opts: PutAppConfigOpts): string {
-  const ct = encryptOauth(opts.client_secret);
+  const ct = encryptOauthClient(opts.client_secret);
   const scopes = opts.scopes_default ?? '';
   const existing = db()
     .prepare<{ id: string }>(`SELECT id FROM app_configs WHERE provider = @provider`)
