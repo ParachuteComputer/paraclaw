@@ -7,7 +7,7 @@
  * reaches into this module via the delivery-action registry and we apply the
  * change to inbound.db here.
  */
-import type Database from 'better-sqlite3';
+import type { Database } from '../../db/connection.js';
 
 import { wakeContainer } from '../../container-runner.js';
 import { getSession } from '../../db/sessions.js';
@@ -19,7 +19,7 @@ import { cancelTask, insertTask, pauseTask, resumeTask, updateTask, type TaskUpd
 export async function handleScheduleTask(
   content: Record<string, unknown>,
   _session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ): Promise<void> {
   const taskId = content.taskId as string;
   const prompt = content.prompt as string;
@@ -42,7 +42,7 @@ export async function handleScheduleTask(
 export async function handleCancelTask(
   content: Record<string, unknown>,
   _session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ): Promise<void> {
   const taskId = content.taskId as string;
   cancelTask(inDb, taskId);
@@ -52,7 +52,7 @@ export async function handleCancelTask(
 export async function handlePauseTask(
   content: Record<string, unknown>,
   _session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ): Promise<void> {
   const taskId = content.taskId as string;
   pauseTask(inDb, taskId);
@@ -62,7 +62,7 @@ export async function handlePauseTask(
 export async function handleResumeTask(
   content: Record<string, unknown>,
   _session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ): Promise<void> {
   const taskId = content.taskId as string;
   resumeTask(inDb, taskId);
@@ -72,7 +72,7 @@ export async function handleResumeTask(
 export async function handleUpdateTask(
   content: Record<string, unknown>,
   session: Session,
-  inDb: Database.Database,
+  inDb: Database,
 ): Promise<void> {
   const taskId = content.taskId as string;
   const update: TaskUpdate = {};

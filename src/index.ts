@@ -4,16 +4,17 @@
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
  */
-import path from 'path';
+import http from 'node:http';
 
-import { DATA_DIR } from './config.js';
+import { CENTRAL_DB_PATH } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
-import { initDb } from './db/connection.js';
+import { initDb, migrateCentralDbLocation } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
+import { startWebServer } from './web/server.js';
 import { log } from './log.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -31,6 +32,8 @@ import {
 } from './response-registry.js';
 export { registerResponseHandler, onShutdown };
 export type { ResponsePayload, ResponseHandler };
+
+let webServer: http.Server | null = null;
 
 async function dispatchResponse(payload: ResponsePayload): Promise<void> {
   for (const handler of getResponseHandlers()) {
@@ -56,13 +59,15 @@ import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
 import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
-  log.info('NanoClaw starting');
+  log.info('Paraclaw starting');
 
-  // 1. Init central DB
-  const dbPath = path.join(DATA_DIR, 'v2.db');
-  const db = initDb(dbPath);
+  // 1. Init central DB. One-shot relocation runs before open: legacy
+  // <PROJECT_ROOT>/data/v2.db moves to ~/.parachute/claw/paraclaw.db. After
+  // that, every host process (including the web server) opens the new path.
+  migrateCentralDbLocation();
+  const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db);
-  log.info('Central DB ready', { path: dbPath });
+  log.info('Central DB ready', { path: CENTRAL_DB_PATH });
 
   // 1b. One-time filesystem cutover — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
@@ -159,7 +164,11 @@ async function main(): Promise<void> {
   startHostSweep();
   log.info('Host sweep started');
 
-  log.info('NanoClaw running');
+  // 7. Start the web server (single-process boot — replaces the old
+  //    standalone @paraclaw/web-server package).
+  webServer = startWebServer();
+
+  log.info('Paraclaw running');
 }
 
 /** Graceful shutdown. */
@@ -174,6 +183,10 @@ async function shutdown(signal: string): Promise<void> {
   }
   stopDeliveryPolls();
   stopHostSweep();
+  if (webServer) {
+    await new Promise<void>((resolve) => webServer!.close(() => resolve()));
+    webServer = null;
+  }
   await teardownChannelAdapters();
   process.exit(0);
 }

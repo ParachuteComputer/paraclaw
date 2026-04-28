@@ -11,14 +11,14 @@
  * direct dynamic import. When scheduling moves to the modules branch in
  * PR #8, the install skill re-fills the marker on install.
  */
-import type Database from 'better-sqlite3';
+import type { Database } from '../../db/connection.js';
 
 import { TIMEZONE } from '../../config.js';
 import { log } from '../../log.js';
 import type { Session } from '../../types.js';
 import { clearRecurrence, getCompletedRecurring, insertRecurrence } from './db.js';
 
-export async function handleRecurrence(inDb: Database.Database, session: Session): Promise<void> {
+export async function handleRecurrence(inDb: Database, session: Session): Promise<void> {
   const recurring = getCompletedRecurring(inDb);
 
   for (const msg of recurring) {

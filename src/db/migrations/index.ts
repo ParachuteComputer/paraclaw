@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { Database } from '../connection.js';
 
 import { log } from '../../log.js';
 import { migration001 } from './001-initial.js';
@@ -10,13 +10,14 @@ import { migration010 } from './010-engage-modes.js';
 import { migration011 } from './011-pending-sender-approvals.js';
 import { migration012 } from './012-channel-registration.js';
 import { migration013 } from './013-approval-render-metadata.js';
+import { migration014 } from './014-secrets.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 
 export interface Migration {
   version: number;
   name: string;
-  up: (db: Database.Database) => void;
+  up: (db: Database) => void;
 }
 
 const migrations: Migration[] = [
@@ -31,9 +32,10 @@ const migrations: Migration[] = [
   migration011,
   migration012,
   migration013,
+  migration014,
 ];
 
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,

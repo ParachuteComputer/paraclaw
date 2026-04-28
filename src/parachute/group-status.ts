@@ -14,8 +14,9 @@
  * NanoClaw's host sweep runs at 60s intervals; we use 90s as the "alive"
  * threshold so the dot doesn't blink during a sweep tick.
  */
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
+
+import { type Database, openDb } from '../db/connection.js';
 
 import { getAgentGroupByFolder } from '../db/agent-groups.js';
 import { getSessionsByAgentGroup } from '../db/sessions.js';
@@ -112,9 +113,9 @@ function readHeartbeatMtimeMs(agentGroupId: string, sessionId: string): number {
 
 function maxTimestamp(dbPath: string, table: 'messages_in' | 'messages_out'): string | null {
   if (!fs.existsSync(dbPath)) return null;
-  let db: Database.Database | null = null;
+  let db: Database | null = null;
   try {
-    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db = openDb(dbPath, { readonly: true });
     const row = db.prepare(`SELECT MAX(timestamp) AS ts FROM ${table}`).get() as { ts: string | null } | undefined;
     return row?.ts ?? null;
   } catch {
