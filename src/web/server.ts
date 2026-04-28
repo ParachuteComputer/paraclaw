@@ -55,6 +55,7 @@ import {
 import { fetchHubVaults } from './hub-discovery.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleChannelsRoute } from './routes/channels.js';
+import { handleActivityRoute } from './routes/activity.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
@@ -75,7 +76,7 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // hub#83) sets this from `module.json` `paths[0]` automatically. Empty
 // string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.14-rc.3';
+const SERVICE_VERSION = '0.0.14-rc.4';
 
 interface AgentGroupRow {
   id: string;
@@ -257,6 +258,22 @@ async function handleApi(
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleChannelsRoute({ pathname, method, req, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  // Activity feed must dispatch BEFORE the sessions/groups blocks below —
+  // those handlers 405 on unknown sub-paths and would shadow /activity.
+  if (
+    method === 'GET' &&
+    (/^\/api\/groups\/[^/]+\/activity$/.test(pathname) || /^\/api\/sessions\/[^/]+\/activity$/.test(pathname))
+  ) {
+    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    try {
+      const handled = await handleActivityRoute({ pathname, method, url, res });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));

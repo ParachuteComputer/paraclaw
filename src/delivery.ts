@@ -9,6 +9,7 @@
  */
 import type { Database } from './db/connection.js';
 
+import { getActivitySyncedSeq, mergeActivityBatch } from './db/agent-activity.js';
 import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -16,6 +17,7 @@ import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
 import {
   getDueOutboundMessages,
   getDeliveredIds,
+  getOutboundActivity,
   markDelivered,
   markDeliveryFailed,
   migrateDeliveredTable,
@@ -175,6 +177,20 @@ async function drainSession(session: Session): Promise<void> {
   }
 
   try {
+    // Drain any new activity rows from outbound.db into central agent_activity.
+    // Independent of message delivery — activity should be visible even when
+    // there are no outbound messages. Cheap on idle sessions: a single indexed
+    // SELECT > cursor returning zero rows.
+    try {
+      const sinceSeq = getActivitySyncedSeq(session.id);
+      const activityRows = getOutboundActivity(outDb, sinceSeq);
+      if (activityRows.length > 0) {
+        mergeActivityBatch(session.agent_group_id, session.id, activityRows);
+      }
+    } catch (err) {
+      log.warn('activity merge failed', { sessionId: session.id, err });
+    }
+
     // Read all due messages from outbound.db (read-only)
     const allDue = getDueOutboundMessages(outDb);
     if (allDue.length === 0) return;
