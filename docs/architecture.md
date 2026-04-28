@@ -48,8 +48,8 @@ dependencies of paraclaw v1; paraclaw owns its surface end to end.
                  │   agent_groups · sessions    inbound.db:    │
                  │   messaging_groups · channels   messages_in │
                  │   secrets · approvals        outbound.db:   │
-                 │   vault_attachments             messages_out│
-                 │   users · user_roles            session_state│
+                 │   users · user_roles            messages_out│
+                 │                                 session_state│
                  └──────────────────────────────────────────────┘
                             ▲                 ▲
                             │ JWT             │ MCP
@@ -148,24 +148,24 @@ An OAuth-bound credential that lets an agent group's container reach a
 Parachute vault over MCP. Vault attachments are how agents read and write
 the user's knowledge graph from inside a sandboxed session.
 
-| Field | Notes |
-|---|---|
-| `id` | ULID |
-| `agent_group_id` | foreign key |
-| `vault_base_url` | e.g. `http://127.0.0.1:1940` (loopback) or tailnet |
-| `vault_name` | which vault on that origin (default `default`) |
-| `scope` | `vault:read` · `vault:write` · `vault:admin` |
-| `token_encrypted` | AES-256-GCM-encrypted bearer; decrypted at injection |
-| `token_label` | short user-facing description |
-| `attached_at` | ISO-8601 |
+Storage is filesystem-scoped, not database-scoped. Two files per group:
+
+- `groups/<folder>/container.json` — the MCP entry the container reads.
+  The bearer lives in the `Authorization: Bearer <pvt_…>` header.
+- `groups/<folder>/parachute.json` — host-side metadata: `vaultBaseUrl`,
+  `vault_name`, `scope` (`vault:read|write|admin`), `tokenLabel`,
+  `attachedAt`. No bearer here — that's only in `container.json`.
 
 The bearer is minted via parachute-hub's OAuth flow (hub-as-issuer; see
 `design/2026-04-20-hub-as-portal-oauth-and-service-catalog.md` in
-`parachute.computer`). Paraclaw stores the token after the user consents on
-the hub's authorization page. At session spawn, the container-runner
-decrypts the token and writes the MCP server config into the agent's
-`.mcp.json`, so the in-container Claude SDK sees the vault as a
-first-class tool source.
+`parachute.computer`). The token sits plaintext on disk in
+`container.json` and inside the container at `/workspace/agent/container.json`
+(read-only mount). Access control is filesystem permissions on the group
+folder — the bearer is **not** AES-encrypted. Outbound third-party API
+keys go through the encrypted `secrets` layer; vault tokens deliberately
+do not, because the MCP entry must be world-readable to the in-container
+Claude Agent SDK at spawn time. See `docs/parachute-integration.md` for
+the full flow.
 
 ### Secret
 
@@ -418,17 +418,11 @@ CREATE TABLE channel_wires (
   created_at               TEXT NOT NULL
 );
 
--- agent → vault binding (OAuth-bound MCP credentials)
-CREATE TABLE vault_attachments (
-  id                TEXT PRIMARY KEY,
-  agent_group_id    TEXT NOT NULL REFERENCES agent_groups(id) ON DELETE CASCADE,
-  vault_base_url    TEXT NOT NULL,
-  vault_name        TEXT NOT NULL,
-  scope             TEXT NOT NULL,
-  token_encrypted   BLOB NOT NULL,
-  token_label       TEXT,
-  attached_at       TEXT NOT NULL
-);
+-- vault attachments are NOT in the central DB — they live on disk under
+-- groups/<folder>/parachute.json (metadata) and groups/<folder>/container.json
+-- (the actual MCP entry with bearer token in the Authorization header).
+-- The bearer is plaintext on disk; access control is filesystem permissions
+-- on the group folder, not encryption at rest. See docs/parachute-integration.md.
 
 -- secrets at rest (AES-256-GCM)
 CREATE TABLE secrets (
@@ -438,7 +432,6 @@ CREATE TABLE secrets (
   kind            TEXT NOT NULL,
   agent_group_id  TEXT REFERENCES agent_groups(id) ON DELETE CASCADE,
   assigned_mode   TEXT NOT NULL DEFAULT 'all',
-  host_pattern    TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   UNIQUE (agent_group_id, name)
@@ -661,8 +654,9 @@ parachute-hub at `:1939`. The flow:
 7. SPA stores the bearer; every `/api/*` call carries it.
 
 Vault attachments use the same hub-as-issuer flow but for `vault:*`
-scopes — and the resulting bearer is what gets stored encrypted in
-`vault_attachments.token_encrypted`. The full design is in
+scopes — and the resulting bearer lands in the agent group's
+`groups/<folder>/container.json` (plaintext, filesystem-scoped). The full
+design is in
 `parachute.computer/design/2026-04-20-hub-as-portal-oauth-and-service-catalog.md`.
 
 ### Lifecycle hooks
@@ -727,9 +721,9 @@ share one contract:
   pair stay distinct rows. The routing layer matches on the
   three-tuple and falls back to the NULL row when no thread is given.
 - **Vault token refresh is deferred to v2.** Hub-issued tokens have an
-  expiry; `vault_attachments` does not yet carry refresh tokens or
-  expiry metadata. v1 assumes long-lived bearers. The schema has room
-  for an additive migration when the refresh loop lands.
+  expiry; `parachute.json` does not yet carry refresh tokens or expiry
+  metadata. v1 assumes long-lived bearers. Adding refresh is an additive
+  shape change to the JSON schema, no migration required.
 
 ## Reference: key files
 

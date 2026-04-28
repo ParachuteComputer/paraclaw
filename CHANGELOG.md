@@ -1,12 +1,19 @@
 # Changelog
 
-All notable changes to NanoClaw will be documented in this file.
+All notable changes to Paraclaw will be documented in this file.
 
-For detailed release notes, see the [full changelog on the documentation site](https://docs.nanoclaw.dev/changelog).
+## [Unreleased]
 
-## [2.0.0] - 2026-04-22
+Hard fork from NanoClaw v2. Paraclaw is now its own service: single Bun process (host + web merged), native AES-GCM secrets layer, channels inlined permanently, skills system retired, capability card published at `/.well-known/parachute.json`. OneCLI is no longer a dependency.
 
-Major version. NanoClaw v2 is a substantial architectural rewrite. Existing forks should run `/migrate-nanoclaw` (clean-base replay of customizations) or `/update-nanoclaw` (selective cherry-pick) before resuming work.
+- **Schema relocate.** Central DB moved to `~/.parachute/claw/paraclaw.db`. Per-session two-file split (`inbound.db` + `outbound.db`) preserved — empirically validated as the only safe shape across Docker bind-mounts.
+- **Native secrets.** Master key at `~/.parachute/claw/master.key` (32 bytes, mode 0600), AES-256-GCM with HKDF domain separation per subsystem, redacted error messages. Migration 015 drops the vestigial `host_pattern` column.
+- **Web UI** ships native pages for paraclaw primitives: `/secrets`, `/approvals`, `/sessions`, `/channels`. Wizard's credential-capture step removed (replaced by `/secrets`).
+- **Lifecycle.** Install via `parachute install paraclaw`; start runs `bun src/index.ts`. Module manifest at `.parachute/module.json`.
+
+## [2.0.0] - 2026-04-22 (NanoClaw v2 — paraclaw's ancestor)
+
+Major version. NanoClaw v2 was a substantial architectural rewrite that paraclaw forks from.
 
 - [BREAKING] **New entity model.** Users, roles (owner/admin), messaging groups, and agent groups are now tracked as separate entities, wired via `messaging_group_agents`. Privilege is user-level instead of channel-level, so the old "main channel = admin" concept is retired. See [docs/architecture.md](docs/architecture.md) and [docs/isolation-model.md](docs/isolation-model.md).
 - [BREAKING] **Two-DB session split.** Each session now has `inbound.db` (host writes, container reads) and `outbound.db` (container writes, host reads) with exactly one writer each. Replaces the single shared session DB and eliminates cross-mount SQLite contention. See [docs/db-session.md](docs/db-session.md).

@@ -530,18 +530,24 @@ export function startWebServer(): http.Server {
           const manifestPath = path.resolve(PROJECT_ROOT, '.parachute/module.json');
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
           res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({
-            name: manifest.manifestName ?? manifest.name,
-            displayName: manifest.displayName,
-            version: SERVICE_VERSION,
-            kind: manifest.kind,
-            paths: manifest.paths,
-            health: manifest.health,
-            scopes: manifest.scopes,
-          }));
+          res.end(
+            JSON.stringify({
+              name: manifest.manifestName ?? manifest.name,
+              displayName: manifest.displayName,
+              version: SERVICE_VERSION,
+              kind: manifest.kind,
+              paths: manifest.paths,
+              health: manifest.health,
+              scopes: manifest.scopes,
+            }),
+          );
         } catch (err) {
           res.writeHead(500, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: `module manifest unavailable: ${err instanceof Error ? err.message : String(err)}` }));
+          res.end(
+            JSON.stringify({
+              error: `module manifest unavailable: ${err instanceof Error ? err.message : String(err)}`,
+            }),
+          );
         }
         return;
       }

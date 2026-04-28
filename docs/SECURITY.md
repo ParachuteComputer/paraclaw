@@ -1,4 +1,4 @@
-# NanoClaw Security Model
+# Paraclaw Security Model
 
 ## Trust Model
 
@@ -125,7 +125,7 @@ Each agent group has its own assignment list. A "sales" group and a "support" gr
 
 ## Supply Chain Security (pnpm)
 
-NanoClaw uses pnpm with two supply chain defenses configured in `pnpm-workspace.yaml`:
+Paraclaw uses pnpm with two supply chain defenses configured in `pnpm-workspace.yaml`:
 
 ### Minimum Release Age
 
