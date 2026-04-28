@@ -94,11 +94,11 @@ export function GroupList() {
           Couldn't load groups: <code>{state.message}</code>
         </div>
         <p className="muted">
-          Make sure the web server is running:{" "}
-          <code>cd web/server &amp;&amp; pnpm dev</code>. It needs the
-          NanoClaw central DB at <code>data/v2.db</code> — that gets created
-          the first time you run <code>pnpm setup</code> or{" "}
-          <code>pnpm dev</code> from the repo root.
+          Make sure paraclaw is running:{" "}
+          <code>parachute start claw</code>, or{" "}
+          <code>bun src/index.ts</code> from the repo root for development.
+          The central DB at <code>~/.parachute/claw/paraclaw.db</code> is
+          created on first start.
         </p>
         <div className="actions" style={{ marginTop: "1rem" }}>
           <button onClick={reload}>Retry</button>
@@ -123,12 +123,8 @@ export function GroupList() {
               name + folder + optional vault attach.
             </li>
             <li>
-              <strong>Claude Code skill</strong> —
-              run <code>/init-first-agent</code> for channel pick + identity + welcome DM.
-            </li>
-            <li>
-              <strong>CLI setup</strong> —
-              run <code>pnpm setup</code> from the repo root.
+              <strong>Setup wizard</strong> —
+              walk to <code>/setup</code> for prereqs + first channel + agent.
             </li>
           </ul>
           <div className="actions" style={{ justifyContent: "center", marginTop: "1rem" }}>
