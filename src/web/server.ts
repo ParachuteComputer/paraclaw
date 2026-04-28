@@ -520,6 +520,31 @@ export function startWebServer(): http.Server {
         await handleApi(req, res, url, dispatchPath);
         return;
       }
+      // Capability card per parachute-patterns/well-known-discovery-rfc.
+      // Lives at the origin root regardless of MOUNT — peer modules and the
+      // hub's services catalog hit `/.well-known/parachute.json` directly.
+      // Sourced from .parachute/module.json so the manifest stays the single
+      // source of truth.
+      if (url.pathname === '/.well-known/parachute.json' && req.method === 'GET') {
+        try {
+          const manifestPath = path.resolve(PROJECT_ROOT, '.parachute/module.json');
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            name: manifest.manifestName ?? manifest.name,
+            displayName: manifest.displayName,
+            version: SERVICE_VERSION,
+            kind: manifest.kind,
+            paths: manifest.paths,
+            health: manifest.health,
+            scopes: manifest.scopes,
+          }));
+        } catch (err) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: `module manifest unavailable: ${err instanceof Error ? err.message : String(err)}` }));
+        }
+        return;
+      }
       if (req.method === 'GET' || req.method === 'HEAD') {
         serveStatic(req, res, url.pathname);
         return;
