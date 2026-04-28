@@ -26,39 +26,86 @@ interface ActivityFeedProps {
   folder: string;
 }
 
+// 404 from the activity endpoint means the server hasn't shipped the route
+// yet (UI lands ahead of paraclaw-server's PR2 by design). Render a graceful
+// note rather than the raw status string.
+function isNotFoundError(err: unknown): boolean {
+  return err instanceof Error && /\b404\b|not\s*found/i.test(err.message);
+}
+
+const NOT_AVAILABLE_MESSAGE = 'Activity log not available on this server.';
+
 export function ActivityFeed({ folder }: ActivityFeedProps) {
   const [items, setItems] = useState<ActivityEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notAvailable, setNotAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // `reload` itself doesn't carry a cancelled flag — it's invoked from the
+  // effects below (which do), and from the Retry button (where there's no
+  // unmount race because the click and the response live in the same render).
   const reload = useCallback(async () => {
     try {
       const rows = await listGroupActivity(folder, { limit: PAGE_SIZE });
       setItems(rows);
       setError(null);
+      setNotAvailable(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (isNotFoundError(err)) {
+        setNotAvailable(true);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setLoading(false);
     }
   }, [folder]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    let cancelled = false;
+    listGroupActivity(folder, { limit: PAGE_SIZE })
+      .then((rows) => {
+        if (cancelled) return;
+        setItems(rows);
+        setError(null);
+        setNotAvailable(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (isNotFoundError(err)) {
+          setNotAvailable(true);
+          setError(null);
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [folder]);
 
   // Background poll — silent on failure. The 15s cadence is conservative
   // (this is an audit log, not a chat scroll); user can refresh manually if
   // they're watching live.
   useEffect(() => {
-    if (error) return;
+    if (error || notAvailable) return;
+    let cancelled = false;
     const t = setInterval(() => {
       listGroupActivity(folder, { limit: PAGE_SIZE })
-        .then((rows) => setItems(rows))
+        .then((rows) => {
+          if (!cancelled) setItems(rows);
+        })
         .catch(() => {});
     }, POLL_MS);
-    return () => clearInterval(t);
-  }, [folder, error]);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [folder, error, notAvailable]);
 
   if (loading && !items) {
     return (
@@ -66,6 +113,14 @@ export function ActivityFeed({ folder }: ActivityFeedProps) {
         <div className="skeleton skeleton-line" style={{ width: '40%' }} />
         <div className="skeleton skeleton-line" />
         <div className="skeleton skeleton-line" style={{ width: '70%' }} />
+      </div>
+    );
+  }
+
+  if (notAvailable) {
+    return (
+      <div className="section">
+        <div className="empty">{NOT_AVAILABLE_MESSAGE}</div>
       </div>
     );
   }
