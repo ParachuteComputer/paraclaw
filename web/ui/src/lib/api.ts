@@ -107,6 +107,21 @@ async function readError(res: Response): Promise<string> {
   return message;
 }
 
+/**
+ * Error thrown for non-2xx responses. Carries the HTTP status so callers can
+ * branch on it numerically instead of regex-matching the message string —
+ * less brittle when servers reword their error bodies.
+ */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
 export async function request<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   let bearer = getAccessToken();
   if (!bearer) {
@@ -137,7 +152,7 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
     await beginLogin();
   }
   if (!res.ok) {
-    throw new Error(await readError(res));
+    throw new HttpError(res.status, await readError(res));
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -394,7 +409,7 @@ export async function getAppConfig(provider: string): Promise<AppConfigView | nu
   try {
     return await request<AppConfigView>(`/apps/${encodeURIComponent(provider)}/config`);
   } catch (err) {
-    if (err instanceof Error && /404|not\s*found/i.test(err.message)) return null;
+    if (err instanceof HttpError && err.status === 404) return null;
     throw err;
   }
 }

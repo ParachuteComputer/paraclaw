@@ -68,13 +68,18 @@ export function Apps() {
   const [loading, setLoading] = useState(true);
   const [flash, setFlash] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  // Tracks the provider the user clicked Connect on when no config existed yet.
+  // After they save the config, we auto-resume the OAuth handoff for that
+  // provider so they don't have to re-click Connect.
+  const [pendingConnectProvider, setPendingConnectProvider] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (signal: { cancelled: boolean }) => {
     try {
       const [conns, ...cfgs] = await Promise.all([
         listAppConnections(),
         ...SUPPORTED_PROVIDERS.map((p) => getAppConfig(p.id)),
       ]);
+      if (signal.cancelled) return;
       const cfgMap: Record<string, AppConfigView | null> = {};
       SUPPORTED_PROVIDERS.forEach((p, i) => {
         cfgMap[p.id] = cfgs[i];
@@ -83,14 +88,24 @@ export function Apps() {
       setConnections(conns);
       setError(null);
     } catch (err) {
+      if (signal.cancelled) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (!signal.cancelled) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void reload();
+    const signal = { cancelled: false };
+    void reload(signal);
+    return () => {
+      signal.cancelled = true;
+    };
+  }, [reload]);
+
+  // Convenience for the Retry button — same call shape, throwaway signal.
+  const reloadNow = useCallback(() => {
+    void reload({ cancelled: false });
   }, [reload]);
 
   // Strip the `?connected=` param after we've consumed it for the highlight,
@@ -111,15 +126,7 @@ export function Apps() {
     return () => clearTimeout(t);
   }, [justConnectedId, setSearchParams]);
 
-  const onConnect = async (provider: string) => {
-    const cfg = configs[provider];
-    if (!cfg) {
-      // Need an app_config first — open the form and stop. The form's submit
-      // path will re-call onConnect once the config is saved.
-      setEditingProvider(provider);
-      setFlash({ kind: 'ok', text: `Configure ${provider} OAuth client first, then return to Connect.` });
-      return;
-    }
+  const authorizeAndRedirect = async (provider: string) => {
     setFlash(null);
     try {
       const { redirectUrl } = await authorizeApp(provider);
@@ -127,6 +134,19 @@ export function Apps() {
     } catch (err) {
       setFlash({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
     }
+  };
+
+  const onConnect = async (provider: string) => {
+    const cfg = configs[provider];
+    if (!cfg) {
+      // No app_config yet — record the user's intent so we can auto-resume
+      // the OAuth handoff after they save the config (handled in onSaved).
+      setPendingConnectProvider(provider);
+      setEditingProvider(provider);
+      setFlash({ kind: 'ok', text: `Configure ${providerLabel(provider)} OAuth client first.` });
+      return;
+    }
+    await authorizeAndRedirect(provider);
   };
 
   const onDeleteConnection = async (conn: AppConnectionView) => {
@@ -141,7 +161,7 @@ export function Apps() {
     try {
       await deleteAppConnection(conn.id);
       setFlash({ kind: 'ok', text: `Removed ${conn.label}.` });
-      await reload();
+      reloadNow();
     } catch (err) {
       setFlash({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
     }
@@ -170,7 +190,7 @@ export function Apps() {
       {error && (
         <div className="error-banner">
           {error}
-          <button className="secondary" onClick={() => void reload()} style={{ marginLeft: '0.6rem' }}>
+          <button className="secondary" onClick={reloadNow} style={{ marginLeft: '0.6rem' }}>
             Retry
           </button>
         </div>
@@ -192,11 +212,22 @@ export function Apps() {
               loading={configs[provider.id] === undefined}
               editing={editingProvider === provider.id}
               onEdit={() => setEditingProvider(provider.id)}
-              onCancel={() => setEditingProvider(null)}
+              onCancel={() => {
+                setEditingProvider(null);
+                setPendingConnectProvider(null);
+              }}
               onSaved={async (saved) => {
                 setConfigs((prev) => ({ ...prev, [provider.id]: saved }));
                 setEditingProvider(null);
-                setFlash({ kind: 'ok', text: `${provider.label} OAuth client saved.` });
+                if (pendingConnectProvider === provider.id && saved.hasSecret) {
+                  // The user clicked Connect first; resume the OAuth handoff
+                  // automatically now that the config is in place.
+                  setPendingConnectProvider(null);
+                  await authorizeAndRedirect(provider.id);
+                } else {
+                  setPendingConnectProvider(null);
+                  setFlash({ kind: 'ok', text: `${provider.label} OAuth client saved.` });
+                }
               }}
             />
           ))}
