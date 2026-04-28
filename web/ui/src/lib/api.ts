@@ -277,6 +277,52 @@ export async function closeSession(sessionId: string): Promise<{ id: string; sta
   });
 }
 
+// --- Agent activity log ---
+
+/**
+ * Activity entry surfaced from `/api/agent-groups/:folder/activity`.
+ * `kind` is open-ended (the server adds new ones over time), but the UI
+ * has special rendering for the three documented in the PR2 brief:
+ * `secret_use`, `mcp_call`, `cmd_exec`. Anything else falls through to a
+ * generic row.
+ *
+ * `target` is whatever-the-kind-points-at: secret name, tool name, or
+ * the command string. `summary` is the human-readable detail line — the
+ * server is responsible for keeping it short and quotable.
+ */
+export type ActivityKind = 'secret_use' | 'mcp_call' | 'cmd_exec' | string;
+
+export interface ActivityEntry {
+  id: string;
+  agentGroupId: string;
+  /** Null when the event isn't tied to a specific session (rare — most are). */
+  sessionId: string | null;
+  kind: ActivityKind;
+  target: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface ListActivityOptions {
+  /** ISO8601 — only return entries strictly newer than this. Used for incremental polling. */
+  since?: string;
+  /** Server caps at ~500; default is 100. */
+  limit?: number;
+}
+
+export async function listGroupActivity(
+  folder: string,
+  options: ListActivityOptions = {},
+): Promise<ActivityEntry[]> {
+  const params = new URLSearchParams();
+  if (options.since) params.set('since', options.since);
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  const qs = params.toString();
+  const path = `/agent-groups/${encodeURIComponent(folder)}/activity${qs ? `?${qs}` : ''}`;
+  const r = await request<{ activity: ActivityEntry[] }>(path);
+  return r.activity;
+}
+
 // --- Secrets (paraclaw-native, replaces OneCLI proxy) ---
 
 /** Per PRIMITIVES.md §"Secret": kinds keyed by purpose. */
