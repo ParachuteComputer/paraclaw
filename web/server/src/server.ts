@@ -61,6 +61,7 @@ import {
 import { fetchHubVaults } from './hub-discovery.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleSecretsRoute } from './routes/secrets.js';
+import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
@@ -302,6 +303,21 @@ async function handleApi(
     }
     try {
       const handled = await handleApprovalsRoute({ pathname, method, req, res, claims: auth.claims });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  // /api/sessions — global session list + per-session close.
+  // GET = read-gated, POST :id/close = write-gated. Liveness derives from
+  // heartbeat-file mtime (cross-process visible), not in-memory state.
+  if (pathname === '/api/sessions' || pathname.startsWith('/api/sessions/')) {
+    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    if (!(await gate(req, res, required))) return;
+    try {
+      const handled = await handleSessionsRoute({ pathname, method, res });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
