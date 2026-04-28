@@ -164,23 +164,95 @@ export function deleteSecret(id: string): boolean {
  * Resolve the secrets that should be injected into a session for the given
  * agent group. Returns plaintext values; callers are expected to inject as
  * env vars and never log. Agent-scoped wins over global on name collision.
+ *
+ * Mode semantics:
+ *   - `all`       — inject if scope matches (scoped row → its own group;
+ *                   global row → every group). Default behaviour.
+ *   - `selective` — inject only when an explicit `secret_assignments` row
+ *                   names this agent group. Lets operators stage a credential
+ *                   in the store before any agent gets it (and revoke per-
+ *                   agent without rotating the value).
  */
 export function resolveInjectableSecrets(agentGroupId: string): Map<string, string> {
   const key = secretsKey();
   const rows = db()
     .prepare<RawRow>(
-      `SELECT * FROM secrets
-       WHERE agent_group_id = @agent_group_id
-          OR agent_group_id IS NULL
-       ORDER BY agent_group_id IS NULL`,
+      `SELECT s.*
+         FROM secrets s
+         LEFT JOIN secret_assignments a
+           ON a.secret_id = s.id
+          AND a.agent_group_id = @agent_group_id
+        WHERE (s.agent_group_id = @agent_group_id OR s.agent_group_id IS NULL)
+          AND (s.assigned_mode = 'all' OR a.secret_id IS NOT NULL)
+        ORDER BY s.agent_group_id IS NULL`,
     )
     .all({ agent_group_id: agentGroupId });
 
   const out = new Map<string, string>();
   for (const row of rows) {
-    if (row.assigned_mode !== 'all') continue;
     if (out.has(row.name)) continue;
     out.set(row.name, decryptSecret(row.value_encrypted, key));
   }
   return out;
+}
+
+// ── Assignments ──
+
+export interface SecretAssignment {
+  secret_id: string;
+  agent_group_id: string;
+  created_at: string;
+}
+
+/** All agent_group_ids assigned to this secret (selective-mode allowlist). */
+export function listAssignments(secretId: string): string[] {
+  const rows = db()
+    .prepare<{ agent_group_id: string }>(
+      `SELECT agent_group_id FROM secret_assignments
+         WHERE secret_id = @secret_id
+         ORDER BY agent_group_id`,
+    )
+    .all({ secret_id: secretId });
+  return rows.map((r) => r.agent_group_id);
+}
+
+/**
+ * Replace the assignment set atomically. Empty array = revoke everything.
+ * Throws if the secret doesn't exist; FK ON DELETE CASCADE handles agent
+ * groups that vanish. The whole replace runs inside one transaction so
+ * the UI's "save" button is all-or-nothing.
+ */
+export function replaceAssignments(secretId: string, agentGroupIds: string[]): void {
+  const exists = db().prepare<{ id: string }>(`SELECT id FROM secrets WHERE id = @id`).get({ id: secretId });
+  if (!exists) throw new Error(`secret not found: ${secretId}`);
+  const now = nowIso();
+  db().transaction(() => {
+    db().prepare(`DELETE FROM secret_assignments WHERE secret_id = @secret_id`).run({ secret_id: secretId });
+    const insert = db().prepare(
+      `INSERT INTO secret_assignments (secret_id, agent_group_id, created_at)
+         VALUES (@secret_id, @agent_group_id, @created_at)`,
+    );
+    for (const gid of agentGroupIds) {
+      insert.run({ secret_id: secretId, agent_group_id: gid, created_at: now });
+    }
+  })();
+}
+
+/** Idempotent — re-adding an existing assignment is a no-op (composite PK). */
+export function addAssignment(secretId: string, agentGroupId: string): boolean {
+  const r = db()
+    .prepare(
+      `INSERT INTO secret_assignments (secret_id, agent_group_id, created_at)
+         VALUES (@secret_id, @agent_group_id, @created_at)
+         ON CONFLICT (secret_id, agent_group_id) DO NOTHING`,
+    )
+    .run({ secret_id: secretId, agent_group_id: agentGroupId, created_at: nowIso() });
+  return r.changes > 0;
+}
+
+export function removeAssignment(secretId: string, agentGroupId: string): boolean {
+  const r = db()
+    .prepare(`DELETE FROM secret_assignments WHERE secret_id = @secret_id AND agent_group_id = @agent_group_id`)
+    .run({ secret_id: secretId, agent_group_id: agentGroupId });
+  return r.changes > 0;
 }

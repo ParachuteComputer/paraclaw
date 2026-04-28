@@ -3,7 +3,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeDb, initTestDb, runMigrations } from '../db/index.js';
 import { _setMasterKeyForTest } from './master-key.js';
-import { deleteSecret, getSecret, listSecrets, putSecret, resolveInjectableSecrets } from './index.js';
+import {
+  addAssignment,
+  deleteSecret,
+  getSecret,
+  listAssignments,
+  listSecrets,
+  putSecret,
+  removeAssignment,
+  replaceAssignments,
+  resolveInjectableSecrets,
+} from './index.js';
 
 beforeEach(() => {
   const db = initTestDb();
@@ -107,5 +117,88 @@ describe('secrets store', () => {
     const env = resolveInjectableSecrets('g1');
     expect(env.has('OPT_IN')).toBe(false);
     expect(env.has('AUTO')).toBe(true);
+  });
+});
+
+describe('secret assignments (selective mode)', () => {
+  it('round-trips: selective secret with assignment to A injects into A, not B', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A');
+    seedAgentGroup(db, 'B');
+
+    const secretId = putSecret('SHARED_KEY', 'top-secret', { assigned_mode: 'selective' });
+    addAssignment(secretId, 'A');
+
+    expect(resolveInjectableSecrets('A').get('SHARED_KEY')).toBe('top-secret');
+    expect(resolveInjectableSecrets('B').has('SHARED_KEY')).toBe(false);
+  });
+
+  it('list/replace/add/remove cycle', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A');
+    seedAgentGroup(db, 'B');
+    seedAgentGroup(db, 'C');
+
+    const id = putSecret('K', 'v', { assigned_mode: 'selective' });
+    expect(listAssignments(id)).toEqual([]);
+
+    replaceAssignments(id, ['A', 'B']);
+    expect(listAssignments(id)).toEqual(['A', 'B']);
+
+    addAssignment(id, 'C');
+    expect(listAssignments(id)).toEqual(['A', 'B', 'C']);
+
+    // re-add is a no-op (composite PK)
+    expect(addAssignment(id, 'C')).toBe(false);
+
+    removeAssignment(id, 'A');
+    expect(listAssignments(id)).toEqual(['B', 'C']);
+
+    replaceAssignments(id, []);
+    expect(listAssignments(id)).toEqual([]);
+  });
+
+  it('replaceAssignments throws on unknown secret', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    expect(() => replaceAssignments('does-not-exist', [])).toThrow(/secret not found/);
+  });
+
+  it('deleting a secret cascades its assignments', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A');
+
+    const id = putSecret('K', 'v', { assigned_mode: 'selective' });
+    addAssignment(id, 'A');
+    expect(listAssignments(id)).toEqual(['A']);
+
+    deleteSecret(id);
+
+    const remaining = db.prepare<{ n: number }>(`SELECT COUNT(*) AS n FROM secret_assignments`).get();
+    expect(remaining?.n).toBe(0);
+  });
+
+  it('selective + assignment lets agent-scoped secrets coexist via name', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A');
+    seedAgentGroup(db, 'B');
+
+    // Global selective with assignment to A only.
+    const globalId = putSecret('TOKEN', 'shared-via-allowlist', { assigned_mode: 'selective' });
+    addAssignment(globalId, 'A');
+    // Scoped-to-B (mode: all) — different value, only B sees it.
+    putSecret('TOKEN', 'b-only', { agent_group_id: 'B' });
+
+    expect(resolveInjectableSecrets('A').get('TOKEN')).toBe('shared-via-allowlist');
+    expect(resolveInjectableSecrets('B').get('TOKEN')).toBe('b-only');
   });
 });
