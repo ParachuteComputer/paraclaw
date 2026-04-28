@@ -13,10 +13,12 @@
  * are NEVER returned through any of these endpoints. The view shapes
  * below shape DB rows into camelCase JSON without the secret fields.
  *
- * Operator setup: register `${origin}/api/apps/<provider>/callback` as
- * an authorized redirect URI in the provider's OAuth client console.
- * The origin is derived from `req.headers.host` (or
- * `PARACLAW_WEB_ORIGIN` if set, for tunneled deployments).
+ * Operator setup: register `${origin}${mount}/api/apps/<provider>/callback`
+ * as an authorized redirect URI in the provider's OAuth client console.
+ * `${mount}` is `PARACLAW_WEB_MOUNT` (e.g. `/claw` when fronted by the
+ * Parachute hub), empty when paraclaw serves at the origin root. The
+ * origin is derived from `req.headers.host` (or `PARACLAW_WEB_ORIGIN` if
+ * set, for tunneled deployments).
  */
 import http from 'node:http';
 
@@ -143,7 +145,13 @@ function originFromReq(req: http.IncomingMessage): string {
 }
 
 function callbackUri(req: http.IncomingMessage, providerSlug: string): string {
-  return `${originFromReq(req)}/api/apps/${providerSlug}/callback`;
+  // Must include PARACLAW_WEB_MOUNT (e.g. `/claw`) when the daemon is
+  // fronted at a path prefix — otherwise the provider redirects the
+  // browser to ${origin}/api/... which 404s on the hub. Authorize +
+  // token-exchange use this same string, so the operator-registered
+  // redirect_uri in the provider console must match.
+  const mount = (process.env.PARACLAW_WEB_MOUNT ?? '').replace(/\/$/, '');
+  return `${originFromReq(req)}${mount}/api/apps/${providerSlug}/callback`;
 }
 
 export interface AppsRouteContext {
