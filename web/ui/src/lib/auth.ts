@@ -12,8 +12,9 @@
  *                                       on 401 from /api/* before re-login.
  *
  * Scopes: `claw:admin claw:write vault:read vault:write`. `claw:admin` is
- * required for the Phase 1 setup wizard (install-channel + onecli secrets
- * writes are admin-gated). The vault scopes anticipate the vault tokens-API
+ * required for /api/secrets writes + the setup wizard install-channel
+ * step; `claw:write` is the bar for /api/approvals decisions and
+ * /api/sessions/:id/close. The vault scopes anticipate the vault tokens-API
  * REST endpoint (paraclaw#4 companion vault issue); today the server still
  * shells out, but minting the user JWT with vault:* now means no re-consent
  * later.

@@ -1,9 +1,9 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { GroupList } from "./routes/GroupList.tsx";
-import { GroupDetail } from "./routes/GroupDetail.tsx";
-import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 import { ApprovalsList } from "./routes/ApprovalsList.tsx";
 import { ChannelsList } from "./routes/ChannelsList.tsx";
+import { GroupDetail } from "./routes/GroupDetail.tsx";
+import { GroupList } from "./routes/GroupList.tsx";
+import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 import { OAuthCallback } from "./routes/OAuthCallback.tsx";
 import { SecretsList } from "./routes/SecretsList.tsx";
 import { SessionsList } from "./routes/SessionsList.tsx";
