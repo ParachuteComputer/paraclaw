@@ -60,6 +60,7 @@ import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
+import { wireDmToAgent } from './wire-channel.js';
 
 const PROJECT_ROOT = process.cwd();
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
@@ -472,6 +473,34 @@ async function handleApi(
           log.error('paraclaw: wakeContainer failed', { sessionId: session.id, err });
         });
         json(res, 202, { sessionId: session.id, created });
+      } catch (err) {
+        error(res, 500, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    if (sub === '/wire-channel' && method === 'POST') {
+      try {
+        const body = await readJsonBody<{
+          channelType?: 'discord' | 'telegram';
+          botUserId?: string;
+          displayName?: string;
+        }>(req);
+        if (!body.channelType || (body.channelType !== 'discord' && body.channelType !== 'telegram')) {
+          error(res, 400, `channelType must be "discord" or "telegram"`);
+          return;
+        }
+        if (!body.botUserId || !body.botUserId.trim()) {
+          error(res, 400, `botUserId is required`);
+          return;
+        }
+        const result = wireDmToAgent({
+          channelType: body.channelType,
+          agentGroup: { id: group.id, name: group.name, folder: group.folder } as never,
+          botUserId: body.botUserId,
+          displayName: body.displayName,
+        });
+        json(res, 200, result);
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));
       }
