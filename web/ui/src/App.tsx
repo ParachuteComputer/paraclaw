@@ -1,4 +1,5 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { Apps } from "./routes/Apps.tsx";
 import { ApprovalsList } from "./routes/ApprovalsList.tsx";
 import { ChannelsList } from "./routes/ChannelsList.tsx";
 import { GroupDetail } from "./routes/GroupDetail.tsx";
@@ -35,6 +36,7 @@ export function App() {
         <Link to="/sessions">Sessions</Link>
         <Link to="/channels">Channels</Link>
         <Link to="/secrets">Secrets</Link>
+        <Link to="/apps">Apps</Link>
         <Link to="/approvals">Approvals</Link>
         <Link to="/setup">Setup</Link>
         <a
@@ -51,6 +53,7 @@ export function App() {
         <Route path="/secrets" element={<SecretsList />} />
         <Route path="/sessions" element={<SessionsList />} />
         <Route path="/channels" element={<ChannelsList />} />
+        <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />
         <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />

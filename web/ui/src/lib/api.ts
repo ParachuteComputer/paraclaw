@@ -107,6 +107,21 @@ async function readError(res: Response): Promise<string> {
   return message;
 }
 
+/**
+ * Error thrown for non-2xx responses. Carries the HTTP status so callers can
+ * branch on it numerically instead of regex-matching the message string —
+ * less brittle when servers reword their error bodies.
+ */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
 export async function request<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   let bearer = getAccessToken();
   if (!bearer) {
@@ -137,7 +152,7 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
     await beginLogin();
   }
   if (!res.ok) {
-    throw new Error(await readError(res));
+    throw new HttpError(res.status, await readError(res));
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -323,6 +338,123 @@ export async function listGroupActivity(
   return r.activity;
 }
 
+// --- Apps (OAuth integrations: per-provider OAuth configs + user grants) ---
+
+/**
+ * Three-table OneCLI model surfaced through `/api/apps/*`:
+ *   1. app_configs      — per-provider OAuth client (paste client_id/secret)
+ *   2. app_connections  — user grants (the rows GET /api/apps returns)
+ *   3. assignments      — which agent groups see which connection (drawer; not yet wired in this PR)
+ *
+ * The brief locks the wire to one config per (paraclaw-instance, provider).
+ * A connection's `agentGroupCount` is the only assignment hint surfaced in
+ * this PR; full per-connection assignment editing comes with the cross-page
+ * pivot follow-up.
+ */
+export type AppConnectionStatus = 'active' | 'expired' | 'revoked';
+
+/**
+ * Per-connection scope: `all` injects into every agent group; `selective`
+ * consults the join table. Mirrors the secrets shape from PR1.
+ */
+export type AssignedMode = 'all' | 'selective';
+
+export interface AppConnectionView {
+  id: string;
+  provider: string;
+  /** From userinfo at OAuth completion. May be null for providers that don't expose it. */
+  account_email: string | null;
+  /** Auto-populated label (typically `<email> @ <provider>`). User-overridable in a future PR. */
+  label: string;
+  scopes_granted: string[];
+  /** ISO8601 — null when refresh tokens never expire (some providers). */
+  expires_at: string | null;
+  status: AppConnectionStatus;
+  /** Count only — the assignment list isn't returned here. */
+  agentGroupCount: number;
+  /**
+   * Forward-compat: nullable in v1; mandatory once the cross-page-pivot
+   * follow-up lands the per-connection assignment editor. UI is not yet
+   * bound to this field — leaving the slot in the type so the next PR
+   * doesn't have to retrofit.
+   */
+  assignedMode: AssignedMode | null;
+}
+
+export interface AppConfigView {
+  provider: string;
+  client_id: string;
+  scopes_default: string[];
+  /**
+   * The server NEVER returns the secret; only an existence flag. The UI uses
+   * this to choose between "Add config" and "Replace secret" in the form.
+   */
+  hasSecret: boolean;
+}
+
+export async function listAppConnections(): Promise<AppConnectionView[]> {
+  // Server returns the list directly per the brief (no envelope), but we
+  // accept either shape so a future envelope migration doesn't break here.
+  // assignedMode is forward-compat (see type comment) — default to null
+  // when the v1 server omits it.
+  type Wire = Omit<AppConnectionView, 'assignedMode'> & { assignedMode?: AssignedMode | null };
+  const r = await request<Wire[] | { apps: Wire[] }>('/apps');
+  const list = Array.isArray(r) ? r : r.apps;
+  return list.map((c) => ({ ...c, assignedMode: c.assignedMode ?? null }));
+}
+
+export async function getAppConfig(provider: string): Promise<AppConfigView | null> {
+  // 404 is the documented "no config yet" signal — distinguish that from a
+  // real error so the UI can render the "Add config" CTA instead of a banner.
+  try {
+    return await request<AppConfigView>(`/apps/${encodeURIComponent(provider)}/config`);
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export interface PutAppConfigInput {
+  client_id: string;
+  client_secret: string;
+  scopes_default?: string[];
+}
+
+export async function putAppConfig(provider: string, input: PutAppConfigInput): Promise<AppConfigView> {
+  // Canonical wire shape: PUT (idempotent upsert) per the team-lead's brief.
+  // Server-side handler keys on (paraclaw-instance, provider) and replaces.
+  return request<AppConfigView>(`/apps/${encodeURIComponent(provider)}/config`, {
+    method: 'PUT',
+    json: input,
+  });
+}
+
+export interface AuthorizeAppOptions {
+  /** Bind the resulting connection to a specific agent group on creation. */
+  agentGroupId?: string;
+}
+
+export interface AuthorizeAppResult {
+  redirectUrl: string;
+  state: string;
+}
+
+/**
+ * Kick off the OAuth dance — the caller is expected to navigate the browser
+ * to `redirectUrl`. The server completes the exchange on its callback and
+ * redirects back to `/claw/apps?connected=:id`.
+ */
+export async function authorizeApp(provider: string, options: AuthorizeAppOptions = {}): Promise<AuthorizeAppResult> {
+  return request<AuthorizeAppResult>(`/apps/${encodeURIComponent(provider)}/authorize`, {
+    method: 'POST',
+    json: options,
+  });
+}
+
+export async function deleteAppConnection(id: string): Promise<void> {
+  return request<void>(`/apps/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 // --- Secrets (paraclaw-native, replaces OneCLI proxy) ---
 
 /** Per PRIMITIVES.md §"Secret": kinds keyed by purpose. */
@@ -333,8 +465,10 @@ export type SecretKind = 'channel-token' | 'api-key' | 'generic';
  *   resolution per `src/secrets/index.ts:resolveInjectableSecrets`).
  * `selective` — inject only into the agent groups explicitly assigned via
  *   /api/secrets/:id/assignments.
+ *
+ * The `AssignedMode` type itself is declared in the Apps section above; both
+ * surfaces share the same allow-list semantics so we reuse the alias.
  */
-export type AssignedMode = 'all' | 'selective';
 
 export interface SecretView {
   id: string;
