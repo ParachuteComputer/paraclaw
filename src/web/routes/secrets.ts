@@ -13,9 +13,13 @@ import {
   type AssignedMode,
   type SecretKind,
   type SecretRow,
+  addAssignment,
   deleteSecret,
+  listAssignments,
   listSecrets,
   putSecret,
+  removeAssignment,
+  replaceAssignments,
 } from '../../secrets/index.js';
 
 const ALLOWED_KINDS: SecretKind[] = ['channel-token', 'api-key', 'generic'];
@@ -140,6 +144,74 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
     }
     json(res, 200, { secret: toView(view) });
     return true;
+  }
+
+  // Assignments — match before the bare /:id DELETE so the more-specific path wins.
+  const assignOne = pathname.match(/^\/api\/secrets\/([^/]+)\/assignments\/([^/]+)$/);
+  if (assignOne && method === 'DELETE') {
+    const secretId = decodeURIComponent(assignOne[1]);
+    const groupId = decodeURIComponent(assignOne[2]);
+    const ok = removeAssignment(secretId, groupId);
+    if (!ok) {
+      error(res, 404, `assignment not found: ${secretId} -> ${groupId}`);
+      return true;
+    }
+    json(res, 200, { secretId, agentGroupId: groupId, removed: true });
+    return true;
+  }
+
+  const assignList = pathname.match(/^\/api\/secrets\/([^/]+)\/assignments$/);
+  if (assignList) {
+    const secretId = decodeURIComponent(assignList[1]);
+    if (method === 'GET') {
+      json(res, 200, { secretId, agentGroupIds: listAssignments(secretId) });
+      return true;
+    }
+    if (method === 'PUT') {
+      let body: { agentGroupIds?: unknown };
+      try {
+        body = await readJsonBody<{ agentGroupIds?: unknown }>(req);
+      } catch {
+        error(res, 400, 'invalid JSON body');
+        return true;
+      }
+      const ids = body.agentGroupIds;
+      if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) {
+        error(res, 400, 'agentGroupIds must be a string[]');
+        return true;
+      }
+      try {
+        replaceAssignments(secretId, ids as string[]);
+      } catch (err) {
+        error(res, 404, err instanceof Error ? err.message : String(err));
+        return true;
+      }
+      json(res, 200, { secretId, agentGroupIds: listAssignments(secretId) });
+      return true;
+    }
+    if (method === 'POST') {
+      let body: { agentGroupId?: unknown };
+      try {
+        body = await readJsonBody<{ agentGroupId?: unknown }>(req);
+      } catch {
+        error(res, 400, 'invalid JSON body');
+        return true;
+      }
+      if (typeof body.agentGroupId !== 'string' || !body.agentGroupId.trim()) {
+        error(res, 400, 'agentGroupId is required');
+        return true;
+      }
+      try {
+        addAssignment(secretId, body.agentGroupId);
+      } catch (err) {
+        // Likely a FK violation (unknown secret_id or agent_group_id).
+        // Return 400 rather than 500 so the UI can surface a clean message.
+        error(res, 400, err instanceof Error ? err.message : String(err));
+        return true;
+      }
+      json(res, 201, { secretId, agentGroupId: body.agentGroupId, added: true });
+      return true;
+    }
   }
 
   const del = pathname.match(/^\/api\/secrets\/([^/]+)$/);
