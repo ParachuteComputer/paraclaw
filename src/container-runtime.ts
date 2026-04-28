@@ -60,7 +60,7 @@ export function ensureContainerRuntimeRunning(): void {
 /**
  * Kill orphaned Paraclaw containers from THIS install's previous runs.
  *
- * Scoped by label `nanoclaw-install=<slug>` so a crash-looping peer install
+ * Scoped by label `paraclaw-install=<slug>` so a crash-looping peer install
  * cannot reap our containers, and we cannot reap theirs. The label is
  * stamped onto every container at spawn time — see container-runner.ts.
  */

@@ -4,7 +4,7 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 /**
  * Command categories for messages starting with '/'.
- * - admin: sender must be in NANOCLAW_ADMIN_USER_IDS
+ * - admin: sender must have an admin role in the central `user_roles` table
  * - filtered: silently drop (mark completed without processing)
  * - passthrough: pass raw to the agent (no XML wrapping)
  * - none: not a command — format normally
@@ -25,12 +25,14 @@ export interface CommandInfo {
  * Categorize a message as a command or not.
  * Only applies to chat/chat-sdk messages.
  *
- * The extracted `senderId` is compared against `NANOCLAW_ADMIN_USER_IDS`
- * which stores ids in the namespaced form `<channel_type>:<raw>` (see
- * src/db/users.ts). chat-sdk-bridge serializes `author.userId` as a raw
- * platform id with no prefix, so we prefix it here. If the id already
- * contains a `:` we assume it's pre-namespaced (non-chat-sdk adapters
- * that populate `senderId` directly) and leave it alone.
+ * The extracted `senderId` is checked against the central DB's `user_roles`
+ * table on the host (the container itself doesn't enforce admin gating —
+ * that's the host's command gate, see src/command-gate.ts). User ids are
+ * stored in the namespaced form `<channel_type>:<raw>` (see src/db/users.ts).
+ * chat-sdk-bridge serializes `author.userId` as a raw platform id with no
+ * prefix, so we prefix it here. If the id already contains a `:` we assume
+ * it's pre-namespaced (non-chat-sdk adapters that populate `senderId`
+ * directly) and leave it alone.
  */
 export function categorizeMessage(msg: MessageInRow): CommandInfo {
   const content = parseContent(msg.content);

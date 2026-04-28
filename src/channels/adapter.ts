@@ -76,7 +76,7 @@ export interface InboundMessage {
    * and forwards `message.isMention` from `onSubscribedMessage`. Use this
    * in the router instead of agent-name regex matching, which breaks on
    * platforms where the mention text is the bot's platform username (e.g.
-   * Telegram's `@nanoclaw_v2_refactr_1_bot`) rather than the agent_group
+   * Telegram's `@paraclaw_refactr_bot`) rather than the agent_group
    * display name (e.g. `@Andy`).
    *
    * Adapters that don't set it (native / legacy) leave it undefined — the

@@ -13,7 +13,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # Derive the image name from the project root so two Paraclaw installs on the
-# same host don't overwrite each other's `nanoclaw-agent:latest` tag. Matches
+# same host don't overwrite each other's `paraclaw-agent:latest` tag. Matches
 # setup/lib/install-slug.sh + src/install-slug.ts.
 # shellcheck source=../setup/lib/install-slug.sh
 source "$PROJECT_ROOT/setup/lib/install-slug.sh"

@@ -1,6 +1,6 @@
 ## Companion and collaborator agents (`create_agent`)
 
-`mcp__nanoclaw__create_agent({ name, instructions })` spins up a new long-lived agent and wires it as a destination — bidirectional, so you can send it tasks and it can message you back.
+`mcp__paraclaw__create_agent({ name, instructions })` spins up a new long-lived agent and wires it as a destination — bidirectional, so you can send it tasks and it can message you back.
 
 ### How it works
 

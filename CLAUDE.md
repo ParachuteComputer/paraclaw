@@ -135,7 +135,7 @@ Run commands directly — don't tell the user to run them.
 # Host (Node + pnpm)
 pnpm run dev          # Host with hot reload
 pnpm run build        # Compile host TypeScript (src/)
-./container/build.sh  # Rebuild agent container image (nanoclaw-agent:latest)
+./container/build.sh  # Rebuild agent container image (paraclaw-agent-<slug>:latest)
 pnpm test             # Host tests (vitest)
 
 # Agent-runner (Bun — separate package tree under container/agent-runner/)
@@ -145,18 +145,18 @@ cd container/agent-runner && bun test      # Container tests (bun:test)
 
 Container typecheck is a separate tsconfig — if you edit `container/agent-runner/src/`, run `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` from root (or `bun run typecheck` from `container/agent-runner/`).
 
-Service management:
+Service management (substitute `<slug>` with the 8-char hash from `getInstallSlug()` — each checkout gets its own service so two installs on one host don't collide):
 ```bash
-# macOS (launchd)
-launchctl load   ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
+# macOS (launchd) — Label is computer.parachute.claw-<slug>
+launchctl load   ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist
+launchctl unload ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist
+launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>  # restart
 
-# Linux (systemd)
-systemctl --user start|stop|restart nanoclaw
+# Linux (systemd) — unit is paraclaw-<slug>.service
+systemctl --user start|stop|restart paraclaw-<slug>
 ```
 
-Host logs: `logs/nanoclaw.log` (normal) and `logs/nanoclaw.error.log` (errors only — some delivery/approval failures only show up here).
+Host logs: `logs/paraclaw.log` (normal) and `logs/paraclaw.error.log` (errors only — some delivery/approval failures only show up here).
 
 ## Supply Chain Security (pnpm)
 
@@ -226,8 +226,8 @@ grep -q '^INSTALL_CJK_FONTS=' .env && sed -i.bak 's/^INSTALL_CJK_FONTS=.*/INSTAL
 
 # Rebuild and restart so new sessions pick up the new image
 ./container/build.sh
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw   # macOS
-# systemctl --user restart nanoclaw                # Linux
+launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>   # macOS
+# systemctl --user restart paraclaw-<slug>                            # Linux
 ```
 
 `container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through as a Docker build-arg. Without CJK fonts, Chromium-rendered screenshots and PDFs containing CJK text show tofu (empty rectangles) instead of characters.
