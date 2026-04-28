@@ -99,5 +99,4 @@ describe('app_connections DB layer', () => {
     expect(getAppConnection(id)).toBeUndefined();
     expect(deleteAppConnection(id)).toBe(false);
   });
-
 });
