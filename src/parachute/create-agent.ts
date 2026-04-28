@@ -1,15 +1,11 @@
 /**
  * Create a Parachute agent group from a single call.
  *
- * Wraps NanoClaw's central-DB write (`createAgentGroup`) and on-disk init
+ * Wraps the central-DB write (`createAgentGroup`) and on-disk init
  * (`initGroupFilesystem`) into one shim, with optional inline vault
  * attachment via `attachVaultToGroup`. Channel wiring is intentionally NOT
  * here — the wizard creates a channel-less group; channel install is its
  * own surface (paraclaw#2).
- *
- * The shim is the seam the web server uses; the existing CLI scripts
- * (`init-first-agent.ts` etc.) stay on the same NanoClaw helpers and are
- * untouched.
  */
 import { createAgentGroup as dbCreateAgentGroup, getAgentGroupByFolder } from '../db/agent-groups.js';
 import { initGroupFilesystem } from '../group-init.js';

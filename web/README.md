@@ -4,12 +4,12 @@ Paraclaw's web UI — the management surface for vault attachments per agent gro
 
 ## Two pieces
 
-- **`server/`** — a small Node http server. Reads NanoClaw's central `data/v2.db` (agent_groups table) read-only, exposes `/api/groups` + attach/detach endpoints, shells out to the `parachute` CLI to mint scoped vault tokens. Static-serves the built UI bundle from `../ui/dist`.
+- **`server/`** — a small Node http server. Reads Paraclaw's central `data/v2.db` (agent_groups table) read-only, exposes `/api/groups` + attach/detach endpoints, shells out to the `parachute` CLI to mint scoped vault tokens. Static-serves the built UI bundle from `../ui/dist`.
 - **`ui/`** — Vite + React + TypeScript. Lists agent groups, drills into one to see its current vault attachment, has a form to attach a vault (mints a fresh scoped token via the server, or accepts a pasted one). Detach button and confirmation flow.
 
 ## Run (dev)
 
-You need a Parachute Vault running on `127.0.0.1:1940` and NanoClaw initialized at least once (so `data/v2.db` exists).
+You need a Parachute Vault running on `127.0.0.1:1940` and Paraclaw initialized at least once (so `data/v2.db` exists).
 
 ```sh
 # Terminal 1 — server
@@ -46,9 +46,9 @@ If the user opts to paste an existing token instead of minting, that token *does
 
 ## Why the bootstrap.ts dance
 
-NanoClaw's `src/config.ts` resolves `DATA_DIR` and `GROUPS_DIR` via `process.cwd()`. The web server is invoked from `web/server/`, which would resolve those to the wrong paths. `web/server/src/bootstrap.ts` is imported FIRST in `server.ts` and chdirs to the project root before any NanoClaw module loads.
+Paraclaw's `src/config.ts` resolves `DATA_DIR` and `GROUPS_DIR` via `process.cwd()`. The web server is invoked from `web/server/`, which would resolve those to the wrong paths. `web/server/src/bootstrap.ts` is imported FIRST in `server.ts` and chdirs to the project root before any Paraclaw module loads.
 
-A more upstream-friendly fix would be to make NanoClaw's config compute paths from `import.meta.url` instead of `process.cwd()`. That'd be a one-line change worth proposing upstream eventually; for now bootstrap chdir is the smallest patch.
+A more upstream-friendly fix would be to make Paraclaw's config compute paths from `import.meta.url` instead of `process.cwd()`. That'd be a one-line change worth proposing upstream eventually; for now bootstrap chdir is the smallest patch.
 
 ## Pinned to canonical port?
 
@@ -59,5 +59,5 @@ Yes — paraclaw claims slot **1944** in the `1939–1949` Parachute range (per 
 See [`../docs/parachute-integration.md`](../docs/parachute-integration.md) for the full trajectory. Near-term:
 
 - **OAuth handshake** — replace the admin-token-as-env path in the server with vault OAuth. Phase B's biggest single add.
-- **New-agent wizard** — currently the UI manages vault attachment for *existing* agent groups (created via NanoClaw's setup flow). Adding a wizard for "spin up a new agent group + attach vault in one flow" is the next natural step, requires wrapping NanoClaw's `init-first-agent` / `create-agent` paths.
-- **Live status** — show whether a group's container is currently running, recent activity. Reads from NanoClaw's session tables.
+- **New-agent wizard** — currently the UI manages vault attachment for *existing* agent groups (created via Paraclaw's setup flow). Adding a wizard for "spin up a new agent group + attach vault in one flow" is the next natural step, requires wrapping Paraclaw's `init-first-agent` / `create-agent` paths.
+- **Live status** — show whether a group's container is currently running, recent activity. Reads from Paraclaw's session tables.

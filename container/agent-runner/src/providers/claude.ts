@@ -34,7 +34,7 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitWorktree',
 ];
 
-// Tool allowlist for NanoClaw agent containers
+// Tool allowlist for Paraclaw agent containers
 const TOOL_ALLOWLIST = [
   'Bash',
   'Read',

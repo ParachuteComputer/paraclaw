@@ -2,20 +2,20 @@
 
 **If you are reading this because you just ran `git pull`, `git merge`, `git fetch && git merge`, or any equivalent to bring in upstream changes — and you see merge conflicts or a large diff involving this file — HALT IMMEDIATELY.**
 
-This is NanoClaw v2, a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
+This is Paraclaw, a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing NanoClaw v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
 
 **Do this instead:**
 1. Abort the merge: `git merge --abort` (or `git reset --hard ORIG_HEAD` if the merge already completed).
-2. Tell the user, verbatim: *"This is the v2 rewrite — it can't be merged into your existing install. Run `bash migrate-v2.sh` to migrate instead."*
+2. Tell the user, verbatim: *"This is Paraclaw — it can't be merged into your existing NanoClaw install. Run `bash migrate-v2.sh` to migrate instead."*
 3. Wait for the user to confirm before doing anything else. Do not attempt the migration yourself.
 
 If you are a fresh install (you ran `git clone`, not `git pull`) and there are no conflicts, ignore this banner and continue below.
 
 ---
 
-# NanoClaw
+# Paraclaw
 
-Personal Claude assistant. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
+Parachute's per-session containerized AI agent companion. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
 
 ## Quick Context
 
@@ -62,12 +62,12 @@ Exactly one writer per file — no cross-mount lock contention. Heartbeat is a f
 | `src/delivery.ts` | Polls `outbound.db`, delivers via adapter, handles system actions (schedule, approvals, etc.) |
 | `src/host-sweep.ts` | 60s sweep: `processing_ack` sync, stale detection, due-message wake, recurrence |
 | `src/session-manager.ts` | Resolves sessions; opens `inbound.db` / `outbound.db`; manages heartbeat path |
-| `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, OneCLI `ensureAgent` |
+| `src/container-runner.ts` | Spawns per-agent-group Docker containers with session DB + outbox mounts, decrypts + injects assigned secrets |
 | `src/container-runtime.ts` | Runtime selection (Docker vs Apple containers), orphan cleanup |
 | `src/modules/permissions/access.ts` | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members` |
 | `src/modules/approvals/primitive.ts` | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry |
 | `src/command-gate.ts` | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check) |
-| `src/onecli-approvals.ts` | OneCLI credentialed-action approval bridge |
+| `src/secrets/` | AES-GCM secret store: master key on disk + ciphertext in central DB, scoped per agent group |
 | `src/user-dm.ts` | Cold-DM resolution + `user_dms` cache |
 | `src/group-init.ts` | Per-agent-group filesystem scaffold (CLAUDE.md, skills, agent-runner-src overlay) |
 | `src/db/` | DB layer — agent_groups, messaging_groups, sessions, user_roles, user_dms, pending_*, migrations |
@@ -95,44 +95,29 @@ One tier of agent self-modification today:
 
 A second tier (direct source-level self-edits via a draft/activate flow) is planned but not yet implemented.
 
-## Secrets / Credentials / OneCLI
+## Secrets / Credentials
 
-API keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway. Secrets are injected into per-agent containers at request time — none are passed in env vars or through chat context. `src/onecli-approvals.ts`, `ensureAgent()` in `container-runner.ts`. Run `onecli --help`.
+Paraclaw owns its credential store. API keys, OAuth tokens, and auth credentials are stored locally as AES-GCM ciphertext in the central DB, with the master key at `~/.parachute/claw/master.key` (chmod 0600, generated on first boot). Code in `src/secrets/` decrypts the rows assigned to a given agent group at container spawn and injects them as env vars; nothing goes through chat context.
 
-### Gotcha: auto-created agents start in `selective` secret mode
+Surfaces:
+- **Web UI** — `/claw/secrets` lists, creates, updates, deletes secrets and assigns them to agent groups (mirrors the `selective` / `all` allow-list semantics).
+- **HTTP API** — `/api/secrets` (GET / POST / PATCH / DELETE) is the same code path the UI uses; scope-gated by `claw:admin`.
+- **Per-agent assignment** — every secret carries `assigned_mode` (`all` = injected into every group; `selective` = injected only into groups in `secret_assignments`).
 
-When the host first spawns a session for a new agent group, `container-runner.ts:385` calls `onecli.ensureAgent({ name, identifier })`. The OneCLI `POST /api/agents` endpoint creates the agent in **`selective`** secret mode — meaning **no secrets are assigned to it by default**, even if the secrets exist in the vault and have host patterns that would otherwise match.
+### Migrating from OneCLI
 
-Symptom: container starts, the proxy + CA cert are wired correctly, but the agent gets `401 Unauthorized` (or similar) from APIs whose credentials *are* in the vault. The credential just isn't in this agent's allow-list.
-
-The SDK does not expose `setSecretMode` — the only fix is the CLI (or the web UI at `http://127.0.0.1:10254`).
+Pre-paraclaw installs that used the OneCLI Agent Vault have a one-shot migration:
 
 ```bash
-# Find the agent (identifier is the agent group id)
-onecli agents list
-
-# Flip to "all" so every vault secret with a matching host pattern gets injected
-onecli agents set-secret-mode --id <agent-id> --mode all
-
-# Or, stay selective and assign specific secrets
-onecli secrets list                                    # find secret ids
-onecli agents set-secrets --id <agent-id> --secret-ids <id1>,<id2>
-
-# Inspect what an agent currently has
-onecli agents secrets --id <agent-id>                  # secrets assigned to this agent
-onecli secrets list                                    # all vault secrets (with host patterns)
+onecli secrets list --json > /tmp/onecli-secrets.json     # operator's shell
+bun src/cli/migrate-onecli.ts /tmp/onecli-secrets.json    # encrypts with master key + upserts into central DB
 ```
 
-If you've just enabled `mode all`, no container restart is needed — the gateway looks up secrets per request, so the next API call from the running container will see the new credentials.
+The migration is idempotent (`putSecret` is upsert-by `(name, agent_group_id)`) and re-runnable. After it lands, OneCLI is no longer reachable from paraclaw at runtime — the gateway URL/API key env vars are gone, the SDK is uninstalled, and the long-poll bridge is deleted. Operators are free to shut OneCLI down.
 
-### Requiring approval for credential use
+### Approval-gated credential use
 
-Approval-gating credentialed actions is a **two-sided** flow:
-
-- **Server-side** (OneCLI gateway): decides *when* to hold a request and emit a pending approval. As of `onecli@1.3.0`, the CLI does **not** expose this — `rules create --action` only accepts `block` or `rate_limit`, and `secrets create` has no approval flag. Approval policies must be configured via the OneCLI web UI at `http://127.0.0.1:10254`. If/when the CLI grows an `approve` action, this section needs updating.
-- **Host-side** (nanoclaw): receives pending approvals and routes them to a human. `src/modules/approvals/onecli-approvals.ts` registers a callback via `onecli.configureManualApproval(cb)` (long-polls `GET /api/approvals/pending`). The callback uses `pickApprover` + `pickApprovalDelivery` from `src/modules/approvals/primitive.ts` to DM an approver. Approvers are resolved from the `user_roles` table — preference order: scoped admins for the agent group → global admins → owners. There is no env var like `NANOCLAW_ADMIN_USER_IDS`; roles are persisted in the central DB only.
-
-If approvals are configured server-side but the host callback isn't running (or throws), every credentialed call hangs until the gateway times out. Conversely, if the gateway has no rule asking for approval, the host callback never fires regardless of how it's wired.
+Approval flows for credential use are now paraclaw-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`. There's no external gateway in the loop and no in-memory promise bridge to time out.
 
 ## Skills
 
@@ -140,18 +125,14 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 
 - **Channel/provider install skills** — copy the relevant module(s) in from the `channels` or `providers` branch, wire imports, install pinned deps (e.g. `/add-discord`, `/add-slack`, `/add-whatsapp`, `/add-opencode`).
 - **Utility skills** — ship code files alongside `SKILL.md` (e.g. `/claw`).
-- **Operational skills** — instruction-only workflows (`/setup`, `/debug`, `/customize`, `/init-first-agent`, `/manage-channels`, `/init-onecli`, `/update-nanoclaw`).
+- **Operational skills** — instruction-only workflows (`/debug`, `/customize`, `/update-nanoclaw`).
 - **Container skills** — loaded inside agent containers at runtime (`container/skills/`: `welcome`, `self-customize`, `agent-browser`, `slack-formatting`).
 
 | Skill | When to Use |
 |-------|-------------|
-| `/setup` | First-time install, auth, service config |
-| `/init-first-agent` | Bootstrap the first DM-wired agent (channel pick → identity → wire → welcome DM) |
-| `/manage-channels` | Wire channels to agent groups with isolation level decisions |
 | `/customize` | Adding channels, integrations, behavior changes |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream updates into a customized install |
-| `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials |
 
 ## Contributing
 
@@ -229,7 +210,6 @@ The agent container runs on **Bun**; the host runs on **Node** (pnpm). They comm
 - **Adding a Node CLI the agent invokes at runtime** (like `agent-browser`, `claude-code`, `vercel`) → put it in the Dockerfile's pnpm global-install block, pinned to an exact version via a new `ARG`. Don't use `bun install -g` — that bypasses the pnpm supply-chain policy.
 - **Changing the Dockerfile entrypoint or the dynamic-spawn command** (`src/container-runner.ts` line ~301) → keep `exec bun ...` so signals forward cleanly. The image has no `/app/dist`; don't reintroduce a tsc build step.
 - **Changing session-DB pragmas** (`container/agent-runner/src/db/connection.ts`) → `journal_mode=DELETE` is load-bearing for cross-mount visibility. Read the comment block at the top of the file first.
-- **Editing `.parachute/module.json` `startCmd`** → use `["pnpm", "exec", "tsx", "web/server/src/server.ts"]`, NOT `bun`. The web server reuses NanoClaw's `initDb()` which loads `better-sqlite3` (native bindings) — bun crashes on import. Host-runs-on-Node applies to the parachute lifecycle spawn too.
 
 ## Web UI (mount-aware)
 

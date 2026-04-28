@@ -7,10 +7,7 @@
  * is a parallel surface that lets the operator approve from the web UI
  * without waiting on a DM round-trip.
  *
- * Filtering: only `status='pending'` rows are listed. OneCLI credential
- * approvals (`action='onecli_credential'`) are excluded — they have no
- * `session_id`/`agent_group_id` shape the UI can render, and the OneCLI
- * bridge resolves them via an in-memory promise on a different code path.
+ * Filtering: only `status='pending'` rows are listed.
  *
  * Decide flow: synthesize the same `ResponsePayload` the chat-card path
  * produces and call `handleApprovalsResponse`. That dispatcher updates the
@@ -48,13 +45,11 @@ interface ApprovalView {
   requestedBy: string;
 }
 
-const ONECLI_ACTION = 'onecli_credential';
-
 function rowToView(row: ApprovalRow): ApprovalView | null {
   // Resolve agent_group_id, falling back to the session's group when the
-  // approval row didn't capture it (legacy rows; OneCLI rows; module-init
-  // request paths that didn't pass it). Without this, the UI can't link
-  // back to the originating group.
+  // approval row didn't capture it (legacy rows; module-init request paths
+  // that didn't pass it). Without this, the UI can't link back to the
+  // originating group.
   let agentGroupId = row.agent_group_id ?? '';
   if (!agentGroupId && row.session_id) {
     const session = getSession(row.session_id);
@@ -102,10 +97,9 @@ function listPendingApprovals(): ApprovalView[] {
       `SELECT approval_id, session_id, action, payload, created_at, agent_group_id, status
          FROM pending_approvals
         WHERE status = 'pending'
-          AND action != @onecli
         ORDER BY created_at DESC`,
     )
-    .all({ onecli: ONECLI_ACTION });
+    .all();
   return rows.flatMap((r) => {
     const view = rowToView(r);
     return view ? [view] : [];

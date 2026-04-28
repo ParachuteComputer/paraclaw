@@ -1,11 +1,11 @@
 /**
- * NanoClaw Agent Runner v2
+ * Paraclaw Agent Runner
  *
  * Runs inside a container. All IO goes through the session DB.
  * No stdin, no stdout markers, no IPC files.
  *
  * Config is read from /workspace/agent/container.json (mounted RO).
- * Only TZ and OneCLI networking vars come from env.
+ * Only TZ comes from env.
  *
  * Mount structure:
  *   /workspace/

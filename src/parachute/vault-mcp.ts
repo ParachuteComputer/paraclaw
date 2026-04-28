@@ -1,5 +1,5 @@
 /**
- * Helpers for attaching a Parachute Vault as an MCP server to a NanoClaw
+ * Helpers for attaching a Parachute Vault as an MCP server to a Paraclaw
  * agent group.
  *
  * The vault MCP is HTTP-transport (`type: 'http'` + `url` + `Authorization`
