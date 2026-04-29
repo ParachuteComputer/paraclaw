@@ -9,7 +9,7 @@
  */
 import http from 'node:http';
 
-import { getAgentGroupSecretMode, setAgentGroupSecretMode } from '../../db/agent-groups.js';
+import { getAgentGroupSecretMode, getAgentGroupSecretModes, setAgentGroupSecretMode } from '../../db/agent-groups.js';
 import {
   type AssignedMode,
   type SecretKind,
@@ -22,6 +22,7 @@ import {
   removeAssignment,
   replaceAssignments,
 } from '../../secrets/index.js';
+import type { SecretMode } from '../../types.js';
 
 const ALLOWED_KINDS: SecretKind[] = ['channel-token', 'api-key', 'generic'];
 const ALLOWED_MODES: AssignedMode[] = ['all', 'selective'];
@@ -45,10 +46,14 @@ interface SecretView {
  * scoped secret we read its containing group; globals report `'all'` because
  * a global is unconditionally in-scope and the recipient group's mode gates
  * actual injection. Field stays in the response shape for UI continuity.
+ *
+ * Pass `modes` when projecting a list — callers prefetch one query for all
+ * groups touched by the rows, avoiding the per-row SELECT this helper would
+ * otherwise issue. Single-row paths can omit it.
  */
-function toView(r: SecretRow): SecretView {
+function toView(r: SecretRow, modes?: Map<string, SecretMode>): SecretView {
   const assignedMode: AssignedMode = r.agent_group_id
-    ? (getAgentGroupSecretMode(r.agent_group_id) ?? 'selective')
+    ? ((modes ? modes.get(r.agent_group_id) : getAgentGroupSecretMode(r.agent_group_id)) ?? 'selective')
     : 'all';
   return {
     id: r.id,
@@ -112,7 +117,9 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
     let scope: string | null | undefined = undefined;
     if (groupParam !== null) scope = groupParam === '' ? null : groupParam;
     const rows = listSecrets(scope);
-    json(res, 200, { secrets: rows.map(toView) });
+    const groupIds = [...new Set(rows.map((r) => r.agent_group_id).filter((x): x is string => !!x))];
+    const modes = getAgentGroupSecretModes(groupIds);
+    json(res, 200, { secrets: rows.map((r) => toView(r, modes)) });
     return true;
   }
 

@@ -6,7 +6,7 @@
  * transport, lands in the encrypted DB column, and is read back only by
  * the container-runner at session-spawn time.
  */
-import { getAgentGroupSecretMode, setAgentGroupSecretMode } from '../../db/agent-groups.js';
+import { getAgentGroupSecretMode, getAgentGroupSecretModes, setAgentGroupSecretMode } from '../../db/agent-groups.js';
 import {
   type AssignedMode,
   type SecretKind,
@@ -17,6 +17,7 @@ import {
   putSecret,
   replaceAssignments,
 } from '../../secrets/index.js';
+import type { SecretMode } from '../../types.js';
 import type { ToolDef } from '../types.js';
 
 const ALLOWED_KINDS: SecretKind[] = ['channel-token', 'api-key', 'generic'];
@@ -34,10 +35,12 @@ interface SecretView {
 
 // Per-secret `assignedMode` derives from the recipient agent group's
 // `secret_mode` (paraclaw#9). Globals report 'all' — a global is in-scope
-// for every group; the group's own mode gates injection.
-function toView(r: SecretRow): SecretView {
+// for every group; the group's own mode gates injection. Callers projecting
+// a list pass `modes` (one batched read) instead of letting toView fan out
+// a per-row SELECT.
+function toView(r: SecretRow, modes?: Map<string, SecretMode>): SecretView {
   const assignedMode: AssignedMode = r.agent_group_id
-    ? (getAgentGroupSecretMode(r.agent_group_id) ?? 'selective')
+    ? ((modes ? modes.get(r.agent_group_id) : getAgentGroupSecretMode(r.agent_group_id)) ?? 'selective')
     : 'all';
   return {
     id: r.id,
@@ -67,7 +70,10 @@ export const secretTools: ToolDef[] = [
       let scope: string | null | undefined = undefined;
       if (args.agentGroupId === null || args.agentGroupId === '') scope = null;
       else if (typeof args.agentGroupId === 'string') scope = args.agentGroupId;
-      return { secrets: listSecrets(scope).map(toView) };
+      const rows = listSecrets(scope);
+      const groupIds = [...new Set(rows.map((r) => r.agent_group_id).filter((x): x is string => !!x))];
+      const modes = getAgentGroupSecretModes(groupIds);
+      return { secrets: rows.map((r) => toView(r, modes)) };
     },
   },
   {
