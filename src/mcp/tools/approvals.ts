@@ -10,20 +10,10 @@
  * transport details to individual handlers.
  */
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { getDb } from '../../db/connection.js';
-import { getSession } from '../../db/sessions.js';
+import { getApproval, listPendingApprovals } from '../../db/sessions.js';
 import { handleApprovalsResponse } from '../../modules/approvals/response-handler.js';
+import type { ActionApprovalBody, Approval } from '../../types.js';
 import type { ToolDef } from '../types.js';
-
-interface ApprovalRow {
-  approval_id: string;
-  session_id: string | null;
-  action: string;
-  payload: string;
-  created_at: string;
-  agent_group_id: string | null;
-  status: string;
-}
 
 interface ApprovalView {
   id: string;
@@ -37,65 +27,45 @@ interface ApprovalView {
   requestedBy: string;
 }
 
-function rowToView(row: ApprovalRow): ApprovalView | null {
-  let agentGroupId = row.agent_group_id ?? '';
-  if (!agentGroupId && row.session_id) {
-    const session = getSession(row.session_id);
-    if (session) agentGroupId = session.agent_group_id;
-  }
-  if (!agentGroupId) return null;
+function approvalToView(approval: Approval): ApprovalView | null {
+  if (!approval.agent_group_id) return null;
   let agentGroupName: string | null = null;
   try {
-    const group = getAgentGroup(agentGroupId);
+    const group = getAgentGroup(approval.agent_group_id);
     if (group) agentGroupName = group.name;
   } catch {
     // tolerate FK miss
   }
-  let actionPayload: Record<string, unknown> = {};
-  try {
-    actionPayload = JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    actionPayload = { _raw: row.payload };
-  }
-  const status = (['pending', 'approved', 'rejected', 'expired'] as const).find((s) => s === row.status) ?? 'pending';
+  const body = approval.body as ActionApprovalBody;
+  const actionPayload = (body.payload ?? {}) as Record<string, unknown>;
+  const status =
+    (['pending', 'approved', 'rejected', 'expired'] as const).find((s) => s === approval.status) ?? 'pending';
   return {
-    id: row.approval_id,
-    agentGroupId,
+    id: approval.id,
+    agentGroupId: approval.agent_group_id,
     agentGroupName,
-    kind: row.action,
+    kind: approval.kind,
     actionPayload,
     status,
-    requestedAt: row.created_at,
-    decidedAt: null,
-    requestedBy: row.session_id ?? '',
+    requestedAt: approval.created_at,
+    decidedAt: approval.decided_at,
+    requestedBy: approval.session_id ?? '',
   };
 }
 
 function listPending(): ApprovalView[] {
-  const rows = getDb()
-    .prepare<ApprovalRow>(
-      `SELECT approval_id, session_id, action, payload, created_at, agent_group_id, status
-         FROM pending_approvals
-        WHERE status = 'pending'
-        ORDER BY created_at DESC`,
-    )
-    .all() as ApprovalRow[];
+  const rows = listPendingApprovals({ excludeKinds: ['question'] });
   return rows.flatMap((r) => {
-    const v = rowToView(r);
+    const v = approvalToView(r);
     return v ? [v] : [];
   });
 }
 
 function getOne(approvalId: string): ApprovalView | null {
-  const row = getDb()
-    .prepare<ApprovalRow>(
-      `SELECT approval_id, session_id, action, payload, created_at, agent_group_id, status
-         FROM pending_approvals
-        WHERE approval_id = @id`,
-    )
-    .get({ id: approvalId }) as ApprovalRow | undefined;
-  if (!row) return null;
-  return rowToView(row);
+  const approval = getApproval(approvalId);
+  if (!approval) return null;
+  if (approval.kind === 'question') return null;
+  return approvalToView(approval);
 }
 
 export function buildApprovalTools(getCallerSubject: () => string): ToolDef[] {

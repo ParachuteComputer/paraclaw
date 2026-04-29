@@ -28,9 +28,9 @@ import {
   getRunningSessions,
   updateSession,
   deleteSession,
-  createPendingQuestion,
-  getPendingQuestion,
-  deletePendingQuestion,
+  createApproval,
+  getApproval,
+  deleteApproval,
 } from './index.js';
 
 function now() {
@@ -369,9 +369,9 @@ describe('sessions', () => {
   });
 });
 
-// ── Pending Questions ──
+// ── Approvals (kind='question') ──
 
-describe('pending questions', () => {
+describe('approvals — question rows', () => {
   beforeEach(() => {
     createAgentGroup({
       id: 'ag-1',
@@ -394,37 +394,47 @@ describe('pending questions', () => {
   });
 
   it('should create and retrieve', () => {
-    createPendingQuestion({
-      question_id: 'q-1',
+    createApproval({
+      id: 'q-1',
+      kind: 'question',
+      agent_group_id: 'ag-1',
       session_id: 'sess-1',
-      message_out_id: 'msg-out-1',
-      platform_id: 'chan-1',
-      channel_type: 'discord',
-      thread_id: null,
-      title: 'Test',
-      options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+      body: {
+        title: 'Test',
+        options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+        message_out_id: 'msg-out-1',
+        platform_id: 'chan-1',
+        channel_type: 'discord',
+        thread_id: null,
+      },
       created_at: now(),
     });
-    const result = getPendingQuestion('q-1');
+    const result = getApproval('q-1');
     expect(result).toBeDefined();
     expect(result!.session_id).toBe('sess-1');
-    expect(result!.title).toBe('Test');
-    expect(result!.options[0].value).toBe('yes');
+    expect(result!.kind).toBe('question');
+    const body = result!.body as { title: string; options: { value: string }[] };
+    expect(body.title).toBe('Test');
+    expect(body.options[0].value).toBe('yes');
   });
 
   it('should delete', () => {
-    createPendingQuestion({
-      question_id: 'q-1',
+    createApproval({
+      id: 'q-1',
+      kind: 'question',
+      agent_group_id: 'ag-1',
       session_id: 'sess-1',
-      message_out_id: 'msg-out-1',
-      platform_id: null,
-      channel_type: null,
-      thread_id: null,
-      title: 'Test',
-      options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+      body: {
+        title: 'Test',
+        options: [{ label: 'Yes', selectedLabel: 'Yes', value: 'yes' }],
+        message_out_id: 'msg-out-1',
+        platform_id: null,
+        channel_type: null,
+        thread_id: null,
+      },
       created_at: now(),
     });
-    deletePendingQuestion('q-1');
-    expect(getPendingQuestion('q-1')).toBeUndefined();
+    deleteApproval('q-1');
+    expect(getApproval('q-1')).toBeUndefined();
   });
 });

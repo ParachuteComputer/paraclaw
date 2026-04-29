@@ -10,7 +10,7 @@
 import type { Database } from './db/connection.js';
 
 import { getActivitySyncedSeq, mergeActivityBatch } from './db/agent-activity.js';
-import { getRunningSessions, getActiveSessions, createPendingQuestion } from './db/sessions.js';
+import { getRunningSessions, getActiveSessions, createApproval } from './db/sessions.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroupByPlatform } from './db/messaging-groups.js';
@@ -325,11 +325,11 @@ async function deliverMessage(
     }
   }
 
-  // Track pending questions for ask_user_question flow.
-  // Guarded: without the interactive module, `pending_questions` doesn't
-  // exist and we skip persistence — the card still delivers to the user,
-  // but the response path has nowhere to land and will log unclaimed.
-  if (content.type === 'ask_question' && content.questionId && hasTable(getDb(), 'pending_questions')) {
+  // Track pending questions for ask_user_question flow as kind='question'
+  // rows in the unified `approvals` table. Guarded: without the interactive
+  // module's migration, `approvals` doesn't exist and we skip persistence —
+  // the card still delivers, but the response path has nowhere to land.
+  if (content.type === 'ask_question' && content.questionId && hasTable(getDb(), 'approvals')) {
     const title = content.title as string | undefined;
     const rawOptions = content.options as unknown;
     if (!title || !Array.isArray(rawOptions)) {
@@ -337,15 +337,19 @@ async function deliverMessage(
         questionId: content.questionId,
       });
     } else {
-      const inserted = createPendingQuestion({
-        question_id: content.questionId,
+      const inserted = createApproval({
+        id: content.questionId as string,
+        kind: 'question',
+        agent_group_id: session.agent_group_id,
         session_id: session.id,
-        message_out_id: msg.id,
-        platform_id: msg.platform_id,
-        channel_type: msg.channel_type,
-        thread_id: msg.thread_id,
-        title,
-        options: normalizeOptions(rawOptions as never),
+        body: {
+          title,
+          options: normalizeOptions(rawOptions as never),
+          message_out_id: msg.id,
+          platform_id: msg.platform_id,
+          channel_type: msg.channel_type,
+          thread_id: msg.thread_id,
+        },
         created_at: new Date().toISOString(),
       });
       if (inserted) {
