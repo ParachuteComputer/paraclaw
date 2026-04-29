@@ -2,7 +2,7 @@ import { Database as RawDatabase } from 'bun:sqlite';
 import fs from 'fs';
 import path from 'path';
 
-import { CENTRAL_DB_DIR, CENTRAL_DB_PATH, LEGACY_CENTRAL_DB_PATH } from '../config.js';
+import { CENTRAL_DB_PATH, LEGACY_CENTRAL_DB_PATH } from '../config.js';
 import { log } from '../log.js';
 
 let _db: WrappedDatabase | null = null;
@@ -31,19 +31,24 @@ export function initDb(dbPath: string): WrappedDatabase {
  * data is irreplaceable (per-session message state, agent group config, etc).
  *
  * Called from src/index.ts before initDb. Safe to call multiple times.
+ *
+ * Path overrides exist for tests; production callers pass no args.
  */
-export function migrateCentralDbLocation(): void {
-  if (fs.existsSync(CENTRAL_DB_PATH)) return; // already on the new location
-  if (!fs.existsSync(LEGACY_CENTRAL_DB_PATH)) return; // fresh install, nothing to migrate
+export function migrateCentralDbLocation(
+  legacy: string = LEGACY_CENTRAL_DB_PATH,
+  current: string = CENTRAL_DB_PATH,
+): void {
+  if (fs.existsSync(current)) return; // already on the new location
+  if (!fs.existsSync(legacy)) return; // fresh install, nothing to migrate
 
-  fs.mkdirSync(CENTRAL_DB_DIR, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.dirname(current), { recursive: true, mode: 0o700 });
   // Use copyFile (not rename) so a partial migration doesn't strand the user
   // between locations. After successful copy the legacy file stays as backup.
-  fs.copyFileSync(LEGACY_CENTRAL_DB_PATH, CENTRAL_DB_PATH);
-  fs.chmodSync(CENTRAL_DB_PATH, 0o600);
+  fs.copyFileSync(legacy, current);
+  fs.chmodSync(current, 0o600);
   log.info('Central DB migrated from legacy location', {
-    from: LEGACY_CENTRAL_DB_PATH,
-    to: CENTRAL_DB_PATH,
+    from: legacy,
+    to: current,
     note: 'legacy file kept as backup; rm manually after verifying',
   });
 }
