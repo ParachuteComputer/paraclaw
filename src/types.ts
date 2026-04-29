@@ -154,37 +154,52 @@ export interface MessageOut {
   content: string; // JSON blob
 }
 
-// ── Pending questions (central DB) ──
+// ── Approvals (central DB) ──
 
-export interface PendingQuestion {
-  question_id: string;
-  session_id: string;
+/**
+ * Open-string discriminator. The host knows two well-known values
+ * (`'question'` for inline UX prompts; module-action strings like
+ * `'install_packages'` / `'add_mcp_server'` / `'credential'` for admin
+ * gating), but third-party modules can register their own action strings
+ * via `registerApprovalHandler`, so this is intentionally not a closed
+ * union.
+ */
+export type ApprovalKind = string;
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+
+export interface QuestionApprovalBody {
+  title: string;
+  options: import('./channels/ask-question.js').NormalizedOption[];
   message_out_id: string;
   platform_id: string | null;
   channel_type: string | null;
   thread_id: string | null;
-  title: string;
-  options: import('./channels/ask-question.js').NormalizedOption[];
-  created_at: string;
 }
 
-// ── Pending approvals (central DB) ──
-
-export interface PendingApproval {
-  approval_id: string;
-  session_id: string | null;
-  request_id: string;
-  action: string;
-  payload: string; // JSON
-  created_at: string;
-  agent_group_id: string | null;
-  channel_type: string | null;
-  platform_id: string | null;
-  platform_message_id: string | null;
-  expires_at: string | null;
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
+export interface ActionApprovalBody {
   title: string;
-  options_json: string;
+  options: import('./channels/ask-question.js').NormalizedOption[];
+  request_id: string;
+  payload: Record<string, unknown>;
+  platform_id: string | null;
+  channel_type: string | null;
+  thread_id: string | null;
+  platform_message_id: string | null;
+}
+
+export type ApprovalBody = QuestionApprovalBody | ActionApprovalBody | Record<string, unknown>;
+
+export interface Approval {
+  id: string;
+  kind: ApprovalKind;
+  agent_group_id: string;
+  session_id: string | null;
+  body: ApprovalBody;
+  status: ApprovalStatus;
+  approver_user_id: string | null;
+  decided_at: string | null;
+  created_at: string;
+  expires_at: string | null;
 }
 
 // ── Agent destinations (central DB) ──
