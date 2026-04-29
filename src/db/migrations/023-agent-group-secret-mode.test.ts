@@ -3,32 +3,21 @@
  * secrets or a single mode per group, so the interesting paths — mixed-mode
  * collapse and group-level fan-out — only get exercised with fixtures.
  *
- * Strategy: pre-record `agent-group-secret-mode` in `schema_version` so
- * `runMigrations()` skips it, build the pre-023 DB shape (no `secret_mode`
- * column on `agent_groups`, `assigned_mode` still present on `secrets`),
- * seed fixtures, then call `migration023.up(db)` directly and assert.
+ * Strategy: skip 023 (and 025, which assumes the column 023 adds) via the
+ * `applyMigrationsExcept` helper, build the pre-023 DB shape (no
+ * `secret_mode` column on `agent_groups`, `assigned_mode` still present on
+ * `secrets`), seed fixtures, then call `migration023.up(db)` directly and
+ * assert. 024 doesn't depend on either, so it runs cleanly between the gaps.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { closeDb, getDb, initTestDb, runMigrations } from '../index.js';
+import { closeDb, getDb } from '../index.js';
 import { migration023 } from './023-agent-group-secret-mode.js';
+import { migration025 } from './025-secret-mode-check.js';
+import { applyMigrationsExcept } from './_test-helpers.js';
 
 function applyAllExcept023(): void {
-  const db = initTestDb();
-  // Mark 023 as already-applied so runMigrations skips it. Also skip 025
-  // (the secret_mode CHECK constraint) since it assumes the column exists.
-  // 024 doesn't depend on either, so it runs cleanly between the gaps.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER PRIMARY KEY,
-      name    TEXT NOT NULL,
-      applied TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_version_name ON schema_version(name);
-    INSERT INTO schema_version (version, name, applied) VALUES (9999, 'agent-group-secret-mode', '2026-01-01');
-    INSERT INTO schema_version (version, name, applied) VALUES (9998, 'secret-mode-check', '2026-01-01');
-  `);
-  runMigrations(db);
+  applyMigrationsExcept([migration023, migration025]);
 }
 
 function seedAgentGroup(id: string): void {
