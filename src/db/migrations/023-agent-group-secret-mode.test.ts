@@ -15,8 +15,9 @@ import { migration023 } from './023-agent-group-secret-mode.js';
 
 function applyAllExcept023(): void {
   const db = initTestDb();
-  // Mark 023 as already-applied so runMigrations skips it. 024 doesn't
-  // depend on the secret_mode column, so it runs cleanly afterwards.
+  // Mark 023 as already-applied so runMigrations skips it. Also skip 025
+  // (the secret_mode CHECK constraint) since it assumes the column exists.
+  // 024 doesn't depend on either, so it runs cleanly between the gaps.
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
@@ -25,6 +26,7 @@ function applyAllExcept023(): void {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_version_name ON schema_version(name);
     INSERT INTO schema_version (version, name, applied) VALUES (9999, 'agent-group-secret-mode', '2026-01-01');
+    INSERT INTO schema_version (version, name, applied) VALUES (9998, 'secret-mode-check', '2026-01-01');
   `);
   runMigrations(db);
 }
