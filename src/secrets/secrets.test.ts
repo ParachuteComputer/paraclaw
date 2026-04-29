@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { SecretMode } from '../types.js';
 import { closeDb, initTestDb, runMigrations } from '../db/index.js';
 import { _setMasterKeyForTest } from './master-key.js';
 import {
@@ -25,11 +26,11 @@ afterEach(() => {
   closeDb();
 });
 
-function seedAgentGroup(db: ReturnType<typeof initTestDb>, id: string) {
+function seedAgentGroup(db: ReturnType<typeof initTestDb>, id: string, mode: SecretMode = 'selective') {
   db.prepare(
-    `INSERT INTO agent_groups (id, folder, name, created_at)
-     VALUES (?, ?, ?, datetime('now'))`,
-  ).run(id, id, id);
+    `INSERT INTO agent_groups (id, folder, name, secret_mode, created_at)
+     VALUES (?, ?, ?, ?, datetime('now'))`,
+  ).run(id, id, id, mode);
 }
 
 describe('secrets store', () => {
@@ -88,11 +89,11 @@ describe('secrets store', () => {
     expect(deleteSecret(id)).toBe(false);
   });
 
-  it('resolveInjectableSecrets unions global + scoped, scoped wins', () => {
+  it('resolveInjectableSecrets in mode=all unions global + scoped, scoped wins', () => {
     const db = initTestDb();
     runMigrations(db);
     _setMasterKeyForTest(crypto.randomBytes(32));
-    seedAgentGroup(db, 'g1');
+    seedAgentGroup(db, 'g1', 'all');
 
     putSecret('G', 'global-only');
     putSecret('S', 'scoped-only', { agent_group_id: 'g1' });
@@ -105,30 +106,34 @@ describe('secrets store', () => {
     expect(env.get('B')).toBe('scoped-B');
   });
 
-  it('skips assigned_mode=selective rows from resolveInjectableSecrets', () => {
+  it('mode=selective injects nothing without explicit assignments', () => {
     const db = initTestDb();
     runMigrations(db);
     _setMasterKeyForTest(crypto.randomBytes(32));
-    seedAgentGroup(db, 'g1');
+    seedAgentGroup(db, 'g1', 'selective');
 
-    putSecret('OPT_IN', 'value', { assigned_mode: 'selective' });
-    putSecret('AUTO', 'value', { assigned_mode: 'all' });
+    putSecret('GLOBAL', 'value');
+    putSecret('SCOPED', 'value', { agent_group_id: 'g1' });
 
     const env = resolveInjectableSecrets('g1');
-    expect(env.has('OPT_IN')).toBe(false);
-    expect(env.has('AUTO')).toBe(true);
+    expect(env.size).toBe(0);
+  });
+
+  it('unknown agent_group_id resolves as no-secrets (selective default)', () => {
+    putSecret('GLOBAL', 'v');
+    expect(resolveInjectableSecrets('does-not-exist').size).toBe(0);
   });
 });
 
 describe('secret assignments (selective mode)', () => {
-  it('round-trips: selective secret with assignment to A injects into A, not B', () => {
+  it('round-trips: assignment to A injects into A, not B', () => {
     const db = initTestDb();
     runMigrations(db);
     _setMasterKeyForTest(crypto.randomBytes(32));
-    seedAgentGroup(db, 'A');
-    seedAgentGroup(db, 'B');
+    seedAgentGroup(db, 'A', 'selective');
+    seedAgentGroup(db, 'B', 'selective');
 
-    const secretId = putSecret('SHARED_KEY', 'top-secret', { assigned_mode: 'selective' });
+    const secretId = putSecret('SHARED_KEY', 'top-secret');
     addAssignment(secretId, 'A');
 
     expect(resolveInjectableSecrets('A').get('SHARED_KEY')).toBe('top-secret');
@@ -143,7 +148,7 @@ describe('secret assignments (selective mode)', () => {
     seedAgentGroup(db, 'B');
     seedAgentGroup(db, 'C');
 
-    const id = putSecret('K', 'v', { assigned_mode: 'selective' });
+    const id = putSecret('K', 'v');
     expect(listAssignments(id)).toEqual([]);
 
     replaceAssignments(id, ['A', 'B']);
@@ -175,7 +180,7 @@ describe('secret assignments (selective mode)', () => {
     _setMasterKeyForTest(crypto.randomBytes(32));
     seedAgentGroup(db, 'A');
 
-    const id = putSecret('K', 'v', { assigned_mode: 'selective' });
+    const id = putSecret('K', 'v');
     addAssignment(id, 'A');
     expect(listAssignments(id)).toEqual(['A']);
 
@@ -185,17 +190,17 @@ describe('secret assignments (selective mode)', () => {
     expect(remaining?.n).toBe(0);
   });
 
-  it('selective + assignment lets agent-scoped secrets coexist via name', () => {
+  it('selective group + assignment + scoped secret in mode=all peer group', () => {
     const db = initTestDb();
     runMigrations(db);
     _setMasterKeyForTest(crypto.randomBytes(32));
-    seedAgentGroup(db, 'A');
-    seedAgentGroup(db, 'B');
+    seedAgentGroup(db, 'A', 'selective');
+    seedAgentGroup(db, 'B', 'all');
 
-    // Global selective with assignment to A only.
-    const globalId = putSecret('TOKEN', 'shared-via-allowlist', { assigned_mode: 'selective' });
+    // Global with explicit assignment to A only — A sees it via assignment,
+    // B sees its own scoped row instead (scoped wins on name collision).
+    const globalId = putSecret('TOKEN', 'shared-via-allowlist');
     addAssignment(globalId, 'A');
-    // Scoped-to-B (mode: all) — different value, only B sees it.
     putSecret('TOKEN', 'b-only', { agent_group_id: 'B' });
 
     expect(resolveInjectableSecrets('A').get('TOKEN')).toBe('shared-via-allowlist');

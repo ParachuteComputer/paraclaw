@@ -9,6 +9,7 @@
  */
 import http from 'node:http';
 
+import { getAgentGroupSecretMode, setAgentGroupSecretMode } from '../../db/agent-groups.js';
 import {
   type AssignedMode,
   type SecretKind,
@@ -38,13 +39,23 @@ interface SecretView {
   updatedAt: string;
 }
 
+/**
+ * Per-secret `assignedMode` is now derived from the recipient agent group's
+ * `secret_mode` (paraclaw#9 — modes moved off the per-secret row). For a
+ * scoped secret we read its containing group; globals report `'all'` because
+ * a global is unconditionally in-scope and the recipient group's mode gates
+ * actual injection. Field stays in the response shape for UI continuity.
+ */
 function toView(r: SecretRow): SecretView {
+  const assignedMode: AssignedMode = r.agent_group_id
+    ? (getAgentGroupSecretMode(r.agent_group_id) ?? 'selective')
+    : 'all';
   return {
     id: r.id,
     name: r.name,
     kind: r.kind,
     agentGroupId: r.agent_group_id,
-    assignedMode: r.assigned_mode,
+    assignedMode,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -58,6 +69,12 @@ interface PutBody {
   // input — saves a coordinated migration, costs one or-fallback line.
   agent_group_id?: string | null;
   agentGroupId?: string | null;
+  /**
+   * Accepted on POST for backward-compatibility with the existing UI/MCP
+   * callers that still send it. Now applies to the recipient agent_group
+   * (paraclaw#9): scoped secret + assigned_mode='all' flips the parent
+   * group's secret_mode to 'all'. No-op for globals (no parent group).
+   */
   assigned_mode?: string;
 }
 
@@ -121,8 +138,8 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
       error(res, 400, `invalid kind: ${kind}`);
       return true;
     }
-    const mode = (body.assigned_mode ?? 'all') as AssignedMode;
-    if (!ALLOWED_MODES.includes(mode)) {
+    const mode = body.assigned_mode === undefined ? undefined : (body.assigned_mode as AssignedMode);
+    if (mode !== undefined && !ALLOWED_MODES.includes(mode)) {
       error(res, 400, `invalid assigned_mode: ${mode}`);
       return true;
     }
@@ -131,8 +148,10 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
     const id = putSecret(name, body.value, {
       kind,
       agent_group_id: agentGroupId,
-      assigned_mode: mode,
     });
+    if (mode !== undefined && agentGroupId) {
+      setAgentGroupSecretMode(agentGroupId, mode);
+    }
     // Re-read so the response carries the canonical timestamps the upsert
     // wrote (rather than guessing). Same scope filter — listSecrets returns
     // both global + scoped rows when scope is the agent id, so we narrow
