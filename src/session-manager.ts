@@ -56,7 +56,10 @@ export function legacySessionsBaseDir(): string {
  *
  * Path overrides exist for tests; production callers pass no args.
  */
-export function migrateSessionsDir(legacy: string = legacySessionsBaseDir(), current: string = sessionsBaseDir()): void {
+export function migrateSessionsDir(
+  legacy: string = legacySessionsBaseDir(),
+  current: string = sessionsBaseDir(),
+): void {
   if (fs.existsSync(current)) return;
   if (!fs.existsSync(legacy)) return;
   fs.renameSync(legacy, current);
