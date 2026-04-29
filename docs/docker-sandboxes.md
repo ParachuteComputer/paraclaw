@@ -11,7 +11,7 @@ Host (macOS / Windows WSL)
     │   ├── Channel adapters (WhatsApp, Telegram, etc.)
     │   └── Container spawner → nested Docker daemon
     └── Docker-in-Docker
-        └── nanoclaw-agent containers
+        └── paraclaw-agent containers
             └── Claude Agent SDK
 ```
 
@@ -39,16 +39,16 @@ On your host machine:
 
 ```bash
 # Create a workspace directory
-mkdir -p ~/nanoclaw-workspace
+mkdir -p ~/paraclaw-workspace
 
 # Create a shell sandbox with the workspace mounted
-docker sandbox create shell ~/nanoclaw-workspace
+docker sandbox create shell ~/paraclaw-workspace
 ```
 
 If you're using WhatsApp, configure proxy bypass so WhatsApp's Noise protocol isn't MITM-inspected:
 
 ```bash
-docker sandbox network proxy shell-nanoclaw-workspace \
+docker sandbox network proxy shell-paraclaw-workspace \
   --bypass-host web.whatsapp.com \
   --bypass-host "*.whatsapp.com" \
   --bypass-host "*.whatsapp.net"
@@ -58,7 +58,7 @@ Telegram does not need proxy bypass.
 
 Enter the sandbox:
 ```bash
-docker sandbox run shell-nanoclaw-workspace
+docker sandbox run shell-paraclaw-workspace
 ```
 
 ## Step 2: Install Prerequisites
@@ -77,14 +77,14 @@ Paraclaw must live inside the workspace directory — Docker-in-Docker can only 
 ```bash
 # Clone to home first (virtiofs can corrupt git pack files during clone)
 cd ~
-git clone https://github.com/qwibitai/nanoclaw.git
+git clone https://github.com/ParachuteComputer/paraclaw.git
 
 # Replace with YOUR workspace path (the host path you passed to `docker sandbox create`)
-WORKSPACE=/Users/you/nanoclaw-workspace
+WORKSPACE=/Users/you/paraclaw-workspace
 
 # Move into workspace so DinD mounts work
-mv nanoclaw "$WORKSPACE/nanoclaw"
-cd "$WORKSPACE/nanoclaw"
+mv paraclaw "$WORKSPACE/paraclaw"
+cd "$WORKSPACE/paraclaw"
 
 # Install dependencies
 pnpm install
@@ -160,7 +160,7 @@ if (caCertSrc) {
 
 ### 4d. Container runtime — prevent self-termination
 
-In `src/container-runtime.ts`, the `cleanupOrphans()` function matches containers by the `nanoclaw-` prefix. Inside a sandbox, the sandbox container itself may match (e.g., `nanoclaw-docker-sandbox`). Filter out the current hostname:
+In `src/container-runtime.ts`, the `cleanupOrphans()` function matches containers by the `paraclaw-install=<slug>` label. Inside a sandbox, the sandbox container itself may match. Filter out the current hostname:
 
 ```typescript
 // In cleanupOrphans(), filter out os.hostname() from the list of containers to stop
@@ -203,7 +203,7 @@ pnpm run build
 # Configure .env
 cat > .env << EOF
 TELEGRAM_BOT_TOKEN=<your-token-from-botfather>
-ASSISTANT_NAME=nanoclaw
+ASSISTANT_NAME=paraclaw
 ANTHROPIC_API_KEY=proxy-managed
 EOF
 mkdir -p data/env && cp .env data/env/env
@@ -212,10 +212,10 @@ mkdir -p data/env && cp .env data/env/env
 pnpm exec tsx setup/index.ts --step register \
   --jid "tg:<your-chat-id>" \
   --name "My Chat" \
-  --trigger "@nanoclaw" \
+  --trigger "@paraclaw" \
   --folder "telegram_main" \
   --channel telegram \
-  --assistant-name "nanoclaw" \
+  --assistant-name "paraclaw" \
   --is-main \
   --no-trigger-required
 ```
@@ -242,7 +242,7 @@ pnpm run build
 
 # Configure .env
 cat > .env << EOF
-ASSISTANT_NAME=nanoclaw
+ASSISTANT_NAME=paraclaw
 ANTHROPIC_API_KEY=proxy-managed
 EOF
 mkdir -p data/env && cp .env data/env/env
@@ -259,10 +259,10 @@ pnpm exec tsx src/whatsapp-auth.ts --pairing-code --phone <phone-number-no-plus>
 pnpm exec tsx setup/index.ts --step register \
   --jid "<phone>@s.whatsapp.net" \
   --name "My Chat" \
-  --trigger "@nanoclaw" \
+  --trigger "@paraclaw" \
   --folder "whatsapp_main" \
   --channel whatsapp \
-  --assistant-name "nanoclaw" \
+  --assistant-name "paraclaw" \
   --is-main \
   --no-trigger-required
 ```
@@ -316,7 +316,7 @@ npm config set strict-ssl false
 docker build \
   --build-arg http_proxy=$http_proxy \
   --build-arg https_proxy=$https_proxy \
-  -t nanoclaw-agent:latest container/
+  -t paraclaw-agent:latest container/
 ```
 
 ### Agent containers fail with "path not shared"
@@ -347,13 +347,13 @@ docker sandbox network proxy <sandbox-name> \
 ### Git clone fails with "inflate: data stream error"
 Clone to a non-workspace path first, then move:
 ```bash
-cd ~ && git clone https://github.com/qwibitai/nanoclaw.git && mv nanoclaw /path/to/workspace/nanoclaw
+cd ~ && git clone https://github.com/ParachuteComputer/paraclaw.git && mv paraclaw /path/to/workspace/paraclaw
 ```
 
 ### WhatsApp QR code doesn't display
 Run the auth command interactively inside the sandbox (not piped through `docker sandbox exec`):
 ```bash
-docker sandbox run shell-nanoclaw-workspace
+docker sandbox run shell-paraclaw-workspace
 # Then inside:
 pnpm exec tsx src/whatsapp-auth.ts
 ```
