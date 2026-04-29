@@ -1,11 +1,14 @@
 /**
  * Migration 025 (paraclaw#28): CHECK constraint on agent_groups.secret_mode.
- * Verify it (a) preserves existing rows and (b) rejects out-of-range writes
- * that previously would have been silently accepted.
+ * Verify it (a) preserves existing rows across the table recreate-and-rename
+ * and (b) rejects out-of-range writes that previously would have been
+ * silently accepted.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { closeDb, getDb, initTestDb, runMigrations } from '../index.js';
+import { closeDb, initTestDb, runMigrations } from '../index.js';
+import { migration025 } from './025-secret-mode-check.js';
+import { applyMigrationsExcept } from './_test-helpers.js';
 
 afterEach(() => {
   closeDb();
@@ -13,12 +16,22 @@ afterEach(() => {
 
 describe('migration 025 — secret_mode CHECK constraint', () => {
   it('preserves rows already in agent_groups across the table recreate', () => {
-    const db = initTestDb();
-    runMigrations(db);
+    // Apply everything up through 024, leaving 025 unrun. Insert a row
+    // with the pre-025 shape (no CHECK constraint). Then run 025 directly
+    // and confirm the row survives the DROP-and-RENAME dance.
+    //
+    // The migration runner wraps each migration in a transaction so
+    // `PRAGMA defer_foreign_keys = TRUE` defers FK checks until commit;
+    // we replicate that wrapping here, otherwise the DROP TABLE
+    // agent_groups would trip the FKs on sessions/secrets/etc.
+    const db = applyMigrationsExcept([migration025]);
     db.prepare(
       `INSERT INTO agent_groups (id, name, folder, agent_provider, secret_mode, created_at)
        VALUES (?, ?, ?, NULL, 'all', datetime('now'))`,
     ).run('keepme', 'keepme', 'keepme');
+
+    db.transaction(() => migration025.up(db))();
+
     const row = db.prepare(`SELECT * FROM agent_groups WHERE id = ?`).get('keepme') as {
       secret_mode: string;
     };
