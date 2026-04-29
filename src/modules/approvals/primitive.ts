@@ -3,8 +3,9 @@
  *
  * Two surfaces:
  *   - `requestApproval()` — queue an approval request, deliver the card to
- *     the right admin DM, record the pending_approvals row. Used by any
- *     module that needs admin confirmation before doing something sensitive.
+ *     the right admin DM, record the row in `approvals` (paraclaw#11). Used
+ *     by any module that needs admin confirmation before doing something
+ *     sensitive.
  *   - `registerApprovalHandler(action, handler)` — called at module import
  *     time. When the admin approves a pending row with matching `action`,
  *     the response handler dispatches into the registered callback. Optional
@@ -147,7 +148,7 @@ export interface RequestApprovalOptions {
   agentName: string;
   /** Free-form action identifier. Must match the key the consumer registered via registerApprovalHandler. */
   action: string;
-  /** JSON-serializable opaque payload. Carried on the pending_approvals row, handed to the handler on approve. */
+  /** JSON-serializable opaque payload. Carried in the approvals row body, handed to the handler on approve. */
   payload: Record<string, unknown>;
   /** Card title shown to the admin. */
   title: string;
@@ -157,9 +158,9 @@ export interface RequestApprovalOptions {
 
 /**
  * Queue an approval request. Picks an approver, delivers the card to their
- * DM, and records the pending_approvals row. Fire-and-forget from the
- * caller's perspective — the admin's response kicks off the registered
- * approval handler for this action via the response dispatcher.
+ * DM, and records the row in `approvals` (kind = action). Fire-and-forget
+ * from the caller's perspective — the admin's response kicks off the
+ * registered approval handler for this action via the response dispatcher.
  */
 export async function requestApproval(opts: RequestApprovalOptions): Promise<void> {
   const { session, action, payload, title, question, agentName } = opts;

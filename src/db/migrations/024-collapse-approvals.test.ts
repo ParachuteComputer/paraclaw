@@ -135,7 +135,11 @@ describe('migration 024 — backfill', () => {
     migration024.up(db);
 
     const rows = db.prepare(`SELECT * FROM approvals ORDER BY id`).all() as ApprovalRow[];
-    // ORDER BY id: a-cred, a-install, a-mcp
+    // SQLite ORDER BY id is a lexicographic sort over the row-id strings,
+    // not insertion order. Fixture ids `a-cred` < `a-install` < `a-mcp`,
+    // so the kinds line up as credential → install_packages → add_mcp_server.
+    // Renaming a fixture id will reshuffle this list — re-derive, don't
+    // chase by re-sorting.
     expect(rows.map((r) => r.kind)).toEqual(['credential', 'install_packages', 'add_mcp_server']);
     for (const r of rows) {
       expect(r.agent_group_id).toBe('ag-a');
