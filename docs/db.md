@@ -2,7 +2,7 @@
 
 Orientation for the data model: the three databases, how they fit together, and the invariants that hold across them. For table-level schemas, follow the links below.
 
-- **[db-central.md](db-central.md)** — every table in `data/v2.db` (identity, wiring, approvals, Chat SDK state) plus the migration system.
+- **[db-central.md](db-central.md)** — every table in the central DB (identity, wiring, approvals, Chat SDK state) plus the migration system.
 - **[db-session.md](db-session.md)** — the per-session `inbound.db` + `outbound.db` pair, seq parity, and session folder layout.
 
 Related: [architecture.md](architecture.md) for the high-level design; [api-details.md](api-details.md) for inbound/outbound message content shapes; [isolation-model.md](isolation-model.md) for channel-to-agent wiring modes.
@@ -15,9 +15,9 @@ Paraclaw uses **three kinds of SQLite database**, all on the host filesystem:
 
 | DB | Location | Writer | Readers | Purpose |
 |----|----------|--------|---------|---------|
-| **Central** | `data/v2.db` | host | host | Identity, permissions, routing, wiring — the admin plane |
-| **Session inbound** | `data/v2-sessions/<agent_group_id>/<session_id>/inbound.db` | host | host (sync), container (read-only) | Host → container messages + routing projections |
-| **Session outbound** | `data/v2-sessions/<agent_group_id>/<session_id>/outbound.db` | container | host (poll), container | Container → host messages + processing status |
+| **Central** | `~/.parachute/claw/paraclaw.db` | host | host | Identity, permissions, routing, wiring — the admin plane |
+| **Session inbound** | `data/sessions/<agent_group_id>/<session_id>/inbound.db` | host | host (sync), container (read-only) | Host → container messages + routing projections |
+| **Session outbound** | `data/sessions/<agent_group_id>/<session_id>/outbound.db` | container | host (poll), container | Container → host messages + processing status |
 
 **Single-writer rule.** Every SQLite file has exactly one writer. Host writes the central DB and every `inbound.db`; container writes only its own `outbound.db`. This eliminates write contention across the Docker/Apple Container mount boundary — SQLite locking across that boundary is unreliable.
 
@@ -30,9 +30,9 @@ Paraclaw uses **three kinds of SQLite database**, all on the host filesystem:
 ## 2. Database map
 
 ```
+~/.parachute/claw/paraclaw.db             ← CENTRAL (host ↔ host)
 data/
-  v2.db                                   ← CENTRAL (host ↔ host)
-  v2-sessions/
+  sessions/
     <agent_group_id>/
       .claude-shared/                     ← shared Claude state for the agent group
       agent-runner-src/                   ← per-group agent-runner overlay

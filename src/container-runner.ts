@@ -226,7 +226,7 @@ function buildMounts(
   initGroupFilesystem(agentGroup);
 
   // Sync skill symlinks based on container.json selection before mounting.
-  const claudeDir = path.join(DATA_DIR, 'v2-sessions', agentGroup.id, '.claude-shared');
+  const claudeDir = path.join(DATA_DIR, 'sessions', agentGroup.id, '.claude-shared');
   syncSkillSymlinks(claudeDir, containerConfig);
 
   // Compose CLAUDE.md fresh every spawn from the shared base, enabled skill

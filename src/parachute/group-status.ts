@@ -8,7 +8,7 @@
  * host-process scoped — useless from the web server. Heartbeat file mtime
  * is the only cross-process liveness signal:
  *
- *   data/v2-sessions/<agent_group_id>/<session_id>/.heartbeat
+ *   data/sessions/<agent_group_id>/<session_id>/.heartbeat
  *
  * The container's agent-runner touches this on every poll iteration. The
  * host sweep runs at 60s intervals; we use 90s as the "alive" threshold
