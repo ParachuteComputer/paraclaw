@@ -7,7 +7,9 @@
  * is a parallel surface that lets the operator approve from the web UI
  * without waiting on a DM round-trip.
  *
- * Filtering: only `status='pending'` rows are listed.
+ * Filtering: only `status='pending'` rows are listed, and `kind='question'`
+ * (inline UX prompts from the interactive module) is excluded — those land
+ * in their own card UI surface, not the admin approvals queue.
  *
  * Decide flow: synthesize the same `ResponsePayload` the chat-card path
  * produces and call `handleApprovalsResponse`. That dispatcher updates the
@@ -16,22 +18,12 @@
  */
 import http from 'node:http';
 
-import { getDb } from '../../db/connection.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
-import { getSession } from '../../db/sessions.js';
+import { getApproval, listPendingApprovals as listPendingApprovalsDb } from '../../db/sessions.js';
 import { handleApprovalsResponse } from '../../modules/approvals/response-handler.js';
 import { log } from '../../log.js';
+import type { ActionApprovalBody, Approval } from '../../types.js';
 import type { HubJwtClaims } from '../auth.js';
-
-interface ApprovalRow {
-  approval_id: string;
-  session_id: string | null;
-  action: string;
-  payload: string;
-  created_at: string;
-  agent_group_id: string | null;
-  status: string;
-}
 
 interface ApprovalView {
   id: string;
@@ -45,77 +37,48 @@ interface ApprovalView {
   requestedBy: string;
 }
 
-function rowToView(row: ApprovalRow): ApprovalView | null {
-  // Resolve agent_group_id, falling back to the session's group when the
-  // approval row didn't capture it (legacy rows; module-init request paths
-  // that didn't pass it). Without this, the UI can't link back to the
-  // originating group.
-  let agentGroupId = row.agent_group_id ?? '';
-  if (!agentGroupId && row.session_id) {
-    const session = getSession(row.session_id);
-    if (session) agentGroupId = session.agent_group_id;
-  }
-  if (!agentGroupId) {
-    // Truly orphaned (no group, no session). The UI's view shape requires
-    // a non-empty agentGroupId; rather than emit a string-empty value that
-    // breaks the GroupDetail link, we drop the row from the list.
-    return null;
-  }
+function approvalToView(approval: Approval): ApprovalView | null {
+  if (!approval.agent_group_id) return null;
   let agentGroupName: string | null = null;
   try {
-    const group = getAgentGroup(agentGroupId);
+    const group = getAgentGroup(approval.agent_group_id);
     if (group) agentGroupName = group.name;
   } catch {
     // getAgentGroup throws on missing FK; tolerate it for a graceful list view.
   }
 
-  let actionPayload: Record<string, unknown> = {};
-  try {
-    actionPayload = JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    actionPayload = { _raw: row.payload };
-  }
+  const body = approval.body as ActionApprovalBody;
+  const actionPayload = (body.payload ?? {}) as Record<string, unknown>;
 
-  const status = (['pending', 'approved', 'rejected', 'expired'] as const).find((s) => s === row.status) ?? 'pending';
+  const status =
+    (['pending', 'approved', 'rejected', 'expired'] as const).find((s) => s === approval.status) ?? 'pending';
 
   return {
-    id: row.approval_id,
-    agentGroupId,
+    id: approval.id,
+    agentGroupId: approval.agent_group_id,
     agentGroupName,
-    kind: row.action,
+    kind: approval.kind,
     actionPayload,
     status,
-    requestedAt: row.created_at,
-    decidedAt: null,
-    requestedBy: row.session_id ?? '',
+    requestedAt: approval.created_at,
+    decidedAt: approval.decided_at,
+    requestedBy: approval.session_id ?? '',
   };
 }
 
-function listPendingApprovals(): ApprovalView[] {
-  const rows = getDb()
-    .prepare<ApprovalRow>(
-      `SELECT approval_id, session_id, action, payload, created_at, agent_group_id, status
-         FROM pending_approvals
-        WHERE status = 'pending'
-        ORDER BY created_at DESC`,
-    )
-    .all();
+function listAdminApprovals(): ApprovalView[] {
+  const rows = listPendingApprovalsDb({ excludeKinds: ['question'] });
   return rows.flatMap((r) => {
-    const view = rowToView(r);
+    const view = approvalToView(r);
     return view ? [view] : [];
   });
 }
 
 function getOneApprovalView(approvalId: string): ApprovalView | null {
-  const row = getDb()
-    .prepare<ApprovalRow>(
-      `SELECT approval_id, session_id, action, payload, created_at, agent_group_id, status
-         FROM pending_approvals
-        WHERE approval_id = @id`,
-    )
-    .get({ id: approvalId });
-  if (!row) return null;
-  return rowToView(row);
+  const approval = getApproval(approvalId);
+  if (!approval) return null;
+  if (approval.kind === 'question') return null;
+  return approvalToView(approval);
 }
 
 interface DecideBody {
@@ -150,7 +113,7 @@ export async function handleApprovalsRoute(ctx: ApprovalsRouteContext): Promise<
   const { pathname, method, req, res, claims } = ctx;
 
   if (pathname === '/api/approvals' && method === 'GET') {
-    const approvals = listPendingApprovals();
+    const approvals = listAdminApprovals();
     json(res, 200, { approvals });
     return true;
   }

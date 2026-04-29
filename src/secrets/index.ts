@@ -8,6 +8,10 @@
  *
  * Resolution preference at injection time: agent-scoped secret with that
  * name beats the global one. The host walks both rows and the scoped wins.
+ *
+ * Injection policy lives on the recipient `agent_groups.secret_mode` row
+ * (migration 023): `all` injects every in-scope secret; `selective` injects
+ * only those with an explicit `secret_assignments` row pointing to the group.
  */
 import crypto from 'crypto';
 
@@ -32,7 +36,6 @@ export interface SecretRow {
   name: string;
   kind: SecretKind;
   agent_group_id: string | null;
-  assigned_mode: AssignedMode;
   created_at: string;
   updated_at: string;
 }
@@ -40,7 +43,6 @@ export interface SecretRow {
 export interface PutSecretOpts {
   kind?: SecretKind;
   agent_group_id?: string | null;
-  assigned_mode?: AssignedMode;
 }
 
 interface RawRow extends SecretRow {
@@ -61,7 +63,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
   const ct = encryptSecret(value, key);
   const agentGroupId = opts.agent_group_id ?? null;
   const kind = opts.kind ?? 'generic';
-  const mode = opts.assigned_mode ?? 'all';
 
   const existing = db()
     .prepare<{ id: string }>(`SELECT id FROM secrets WHERE name = @name AND agent_group_id IS @agent_group_id`)
@@ -74,7 +75,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
         `UPDATE secrets
             SET value_encrypted = @value_encrypted,
                 kind            = @kind,
-                assigned_mode   = @assigned_mode,
                 updated_at      = @updated_at
           WHERE id = @id`,
       )
@@ -82,7 +82,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
         id: existing.id,
         value_encrypted: ct,
         kind,
-        assigned_mode: mode,
         updated_at: now,
       });
     return existing.id;
@@ -92,9 +91,9 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
   db()
     .prepare(
       `INSERT INTO secrets
-         (id, name, value_encrypted, kind, agent_group_id, assigned_mode, created_at, updated_at)
+         (id, name, value_encrypted, kind, agent_group_id, created_at, updated_at)
        VALUES
-         (@id, @name, @value_encrypted, @kind, @agent_group_id, @assigned_mode, @created_at, @updated_at)`,
+         (@id, @name, @value_encrypted, @kind, @agent_group_id, @created_at, @updated_at)`,
     )
     .run({
       id,
@@ -102,7 +101,6 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
       value_encrypted: ct,
       kind,
       agent_group_id: agentGroupId,
-      assigned_mode: mode,
       created_at: now,
       updated_at: now,
     });
@@ -132,7 +130,7 @@ export function listSecrets(agentGroupId?: string | null): SecretRow[] {
   if (agentGroupId === undefined) {
     return db()
       .prepare<SecretRow>(
-        `SELECT id, name, kind, agent_group_id, assigned_mode, created_at, updated_at
+        `SELECT id, name, kind, agent_group_id, created_at, updated_at
          FROM secrets ORDER BY name`,
       )
       .all();
@@ -140,14 +138,14 @@ export function listSecrets(agentGroupId?: string | null): SecretRow[] {
   if (agentGroupId === null) {
     return db()
       .prepare<SecretRow>(
-        `SELECT id, name, kind, agent_group_id, assigned_mode, created_at, updated_at
+        `SELECT id, name, kind, agent_group_id, created_at, updated_at
          FROM secrets WHERE agent_group_id IS NULL ORDER BY name`,
       )
       .all();
   }
   return db()
     .prepare<SecretRow>(
-      `SELECT id, name, kind, agent_group_id, assigned_mode, created_at, updated_at
+      `SELECT id, name, kind, agent_group_id, created_at, updated_at
        FROM secrets
        WHERE agent_group_id = @agent_group_id OR agent_group_id IS NULL
        ORDER BY name`,
@@ -165,13 +163,16 @@ export function deleteSecret(id: string): boolean {
  * agent group. Returns plaintext values; callers are expected to inject as
  * env vars and never log. Agent-scoped wins over global on name collision.
  *
- * Mode semantics:
- *   - `all`       — inject if scope matches (scoped row → its own group;
- *                   global row → every group). Default behaviour.
- *   - `selective` — inject only when an explicit `secret_assignments` row
- *                   names this agent group. Lets operators stage a credential
- *                   in the store before any agent gets it (and revoke per-
- *                   agent without rotating the value).
+ * Mode lives on the recipient `agent_groups.secret_mode`:
+ *   - `all`       — inject every in-scope secret (scoped + globals).
+ *   - `selective` — inject only those with an explicit assignment row
+ *                   pointing to this group. Lets operators stage credentials
+ *                   in the store before any agent gets them and revoke per
+ *                   agent without rotating the value.
+ *
+ * Unknown agent_group_id is treated as `selective` (the safe default) — the
+ * group-level row is the source of truth, so a missing row means we err on
+ * the side of withholding.
  */
 export function resolveInjectableSecrets(agentGroupId: string): Map<string, string> {
   const key = secretsKey();
@@ -182,8 +183,10 @@ export function resolveInjectableSecrets(agentGroupId: string): Map<string, stri
          LEFT JOIN secret_assignments a
            ON a.secret_id = s.id
           AND a.agent_group_id = @agent_group_id
+         LEFT JOIN agent_groups g
+           ON g.id = @agent_group_id
         WHERE (s.agent_group_id = @agent_group_id OR s.agent_group_id IS NULL)
-          AND (s.assigned_mode = 'all' OR a.secret_id IS NOT NULL)
+          AND (g.secret_mode = 'all' OR a.secret_id IS NOT NULL)
         ORDER BY s.agent_group_id IS NULL`,
     )
     .all({ agent_group_id: agentGroupId });

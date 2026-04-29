@@ -6,6 +6,7 @@
  * transport, lands in the encrypted DB column, and is read back only by
  * the container-runner at session-spawn time.
  */
+import { getAgentGroupSecretMode, setAgentGroupSecretMode } from '../../db/agent-groups.js';
 import {
   type AssignedMode,
   type SecretKind,
@@ -31,13 +32,19 @@ interface SecretView {
   updatedAt: string;
 }
 
+// Per-secret `assignedMode` derives from the recipient agent group's
+// `secret_mode` (paraclaw#9). Globals report 'all' — a global is in-scope
+// for every group; the group's own mode gates injection.
 function toView(r: SecretRow): SecretView {
+  const assignedMode: AssignedMode = r.agent_group_id
+    ? (getAgentGroupSecretMode(r.agent_group_id) ?? 'selective')
+    : 'all';
   return {
     id: r.id,
     name: r.name,
     kind: r.kind,
     agentGroupId: r.agent_group_id,
-    assignedMode: r.assigned_mode,
+    assignedMode,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -82,7 +89,7 @@ export const secretTools: ToolDef[] = [
           type: 'string',
           enum: ALLOWED_MODES,
           description:
-            '"all" = injected into every group; "selective" = only into groups in secret_assignments. Defaults to "all".',
+            '"all" = the recipient agent group injects every in-scope secret; "selective" = only those with an explicit assignment. Setting this on a scoped secret flips the parent group\'s secret_mode. No-op for globals.',
         },
       },
       required: ['name', 'value'],
@@ -95,11 +102,12 @@ export const secretTools: ToolDef[] = [
       if (!value) throw new Error('value is required');
       const kind = (typeof args.kind === 'string' ? args.kind : 'generic') as SecretKind;
       if (!ALLOWED_KINDS.includes(kind)) throw new Error(`invalid kind: ${kind}`);
-      const mode = (typeof args.assignedMode === 'string' ? args.assignedMode : 'all') as AssignedMode;
-      if (!ALLOWED_MODES.includes(mode)) throw new Error(`invalid assignedMode: ${mode}`);
+      const mode = typeof args.assignedMode === 'string' ? (args.assignedMode as AssignedMode) : undefined;
+      if (mode !== undefined && !ALLOWED_MODES.includes(mode)) throw new Error(`invalid assignedMode: ${mode}`);
       const agentGroupId = typeof args.agentGroupId === 'string' && args.agentGroupId.length ? args.agentGroupId : null;
 
-      const id = putSecret(name, value, { kind, agent_group_id: agentGroupId, assigned_mode: mode });
+      const id = putSecret(name, value, { kind, agent_group_id: agentGroupId });
+      if (mode !== undefined && agentGroupId) setAgentGroupSecretMode(agentGroupId, mode);
       const row = listSecrets(agentGroupId).find((r) => r.id === id);
       if (!row) throw new Error(`secret ${id} disappeared after write`);
       return { secret: toView(row) };
