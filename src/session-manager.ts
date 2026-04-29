@@ -53,10 +53,10 @@ export function legacySessionsBaseDir(): string {
  * Called from `src/index.ts` at startup, before any session DB is opened.
  * Same-filesystem rename is atomic, so partial-migration recovery is not a
  * concern (unlike the central-DB copy in `migrateCentralDbLocation`).
+ *
+ * Path overrides exist for tests; production callers pass no args.
  */
-export function migrateSessionsDir(): void {
-  const legacy = legacySessionsBaseDir();
-  const current = sessionsBaseDir();
+export function migrateSessionsDir(legacy: string = legacySessionsBaseDir(), current: string = sessionsBaseDir()): void {
   if (fs.existsSync(current)) return;
   if (!fs.existsSync(legacy)) return;
   fs.renameSync(legacy, current);

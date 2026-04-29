@@ -143,16 +143,16 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
  * Globally:
  *   - delete `groups/global/` (content already in `container/CLAUDE.md`)
  */
-export function migrateGroupsToClaudeLocal(): void {
-  if (!fs.existsSync(GROUPS_DIR)) return;
+export function migrateGroupsToClaudeLocal(groupsDir: string = GROUPS_DIR): void {
+  if (!fs.existsSync(groupsDir)) return;
 
   const actions: string[] = [];
 
-  for (const entry of fs.readdirSync(GROUPS_DIR, { withFileTypes: true })) {
+  for (const entry of fs.readdirSync(groupsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (entry.name === 'global') continue;
 
-    const groupDir = path.join(GROUPS_DIR, entry.name);
+    const groupDir = path.join(groupsDir, entry.name);
 
     const oldGlobalLink = path.join(groupDir, '.claude-global.md');
     try {
@@ -171,7 +171,7 @@ export function migrateGroupsToClaudeLocal(): void {
     }
   }
 
-  const globalDir = path.join(GROUPS_DIR, 'global');
+  const globalDir = path.join(groupsDir, 'global');
   if (fs.existsSync(globalDir)) {
     fs.rmSync(globalDir, { recursive: true, force: true });
     actions.push('groups/global/ removed');
