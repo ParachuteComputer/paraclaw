@@ -1,13 +1,24 @@
-import type { AgentGroup } from '../types.js';
+import type { AgentGroup, SecretMode } from '../types.js';
 import { getDb } from './connection.js';
 
-export function createAgentGroup(group: AgentGroup): void {
+export function createAgentGroup(group: Omit<AgentGroup, 'secret_mode'> & { secret_mode?: SecretMode }): void {
   getDb()
     .prepare(
-      `INSERT INTO agent_groups (id, name, folder, agent_provider, created_at)
-       VALUES (@id, @name, @folder, @agent_provider, @created_at)`,
+      `INSERT INTO agent_groups (id, name, folder, agent_provider, secret_mode, created_at)
+       VALUES (@id, @name, @folder, @agent_provider, @secret_mode, @created_at)`,
     )
-    .run(group);
+    .run({ ...group, secret_mode: group.secret_mode ?? 'selective' });
+}
+
+export function getAgentGroupSecretMode(agentGroupId: string): SecretMode | undefined {
+  const row = getDb()
+    .prepare<{ secret_mode: SecretMode }>('SELECT secret_mode FROM agent_groups WHERE id = ?')
+    .get(agentGroupId);
+  return row?.secret_mode;
+}
+
+export function setAgentGroupSecretMode(agentGroupId: string, mode: SecretMode): void {
+  getDb().prepare('UPDATE agent_groups SET secret_mode = @mode WHERE id = @id').run({ id: agentGroupId, mode });
 }
 
 export function getAgentGroup(id: string): AgentGroup | undefined {
@@ -22,7 +33,10 @@ export function getAllAgentGroups(): AgentGroup[] {
   return getDb().prepare('SELECT * FROM agent_groups ORDER BY name').all() as AgentGroup[];
 }
 
-export function updateAgentGroup(id: string, updates: Partial<Pick<AgentGroup, 'name' | 'agent_provider'>>): void {
+export function updateAgentGroup(
+  id: string,
+  updates: Partial<Pick<AgentGroup, 'name' | 'agent_provider' | 'secret_mode'>>,
+): void {
   const fields: string[] = [];
   const values: Record<string, unknown> = { id };
 

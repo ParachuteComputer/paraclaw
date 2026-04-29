@@ -19,6 +19,7 @@ import { migration019 } from './019-oauth-app-connections.js';
 import { migration020 } from './020-agent-app-connections.js';
 import { migration021 } from './021-pending-oauth-states.js';
 import { migration022 } from './022-app-connections-provider.js';
+import { migration023 } from './023-agent-group-secret-mode.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 
@@ -49,6 +50,7 @@ const migrations: Migration[] = [
   migration020,
   migration021,
   migration022,
+  migration023,
 ];
 
 export function runMigrations(db: Database): void {

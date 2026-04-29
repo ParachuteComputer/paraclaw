@@ -1,10 +1,19 @@
 // ── Central DB entities ──
 
+export type SecretMode = 'all' | 'selective';
+
 export interface AgentGroup {
   id: string;
   name: string;
   folder: string;
   agent_provider: string | null;
+  /**
+   * Per-group injection policy for secrets in this group's scope (its own
+   * scoped secrets + globals): `all` injects every in-scope secret;
+   * `selective` injects only those with an explicit `secret_assignments`
+   * row pointing to this group. Defaults to `selective` (migration 023).
+   */
+  secret_mode: SecretMode;
   created_at: string;
 }
 
