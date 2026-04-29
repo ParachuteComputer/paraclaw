@@ -38,7 +38,29 @@ import type { Session } from './types.js';
 
 /** Root directory for all session data. */
 export function sessionsBaseDir(): string {
+  return path.join(DATA_DIR, 'sessions');
+}
+
+/** Legacy location, pre-rename. Kept only so `migrateSessionsDir` can find it. */
+export function legacySessionsBaseDir(): string {
   return path.join(DATA_DIR, 'v2-sessions');
+}
+
+/**
+ * One-shot rename: `data/v2-sessions/` → `data/sessions/`. Idempotent — noop
+ * if the legacy directory doesn't exist or the new directory already does.
+ *
+ * Called from `src/index.ts` at startup, before any session DB is opened.
+ * Same-filesystem rename is atomic, so partial-migration recovery is not a
+ * concern (unlike the central-DB copy in `migrateCentralDbLocation`).
+ */
+export function migrateSessionsDir(): void {
+  const legacy = legacySessionsBaseDir();
+  const current = sessionsBaseDir();
+  if (fs.existsSync(current)) return;
+  if (!fs.existsSync(legacy)) return;
+  fs.renameSync(legacy, current);
+  log.info('Sessions directory renamed', { from: legacy, to: current });
 }
 
 /** Directory for a specific session: sessions/{agent_group_id}/{session_id}/ */

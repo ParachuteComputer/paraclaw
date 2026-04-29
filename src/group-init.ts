@@ -60,8 +60,8 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
     initialized.push('container.json');
   }
 
-  // 2. data/v2-sessions/<id>/.claude-shared/ — Claude state + per-group skills
-  const claudeDir = path.join(DATA_DIR, 'v2-sessions', group.id, '.claude-shared');
+  // 2. data/sessions/<id>/.claude-shared/ — Claude state + per-group skills
+  const claudeDir = path.join(DATA_DIR, 'sessions', group.id, '.claude-shared');
   if (!fs.existsSync(claudeDir)) {
     fs.mkdirSync(claudeDir, { recursive: true });
     initialized.push('.claude-shared');

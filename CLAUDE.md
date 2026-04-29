@@ -42,7 +42,7 @@ Privilege is user-level (owner/admin), not agent-group-level. See [docs/isolatio
 
 ## Two-DB Session Split
 
-Each session has **two** SQLite files under `data/v2-sessions/<session_id>/`:
+Each session has **two** SQLite files under `data/sessions/<agent_group_id>/<session_id>/`:
 
 - `inbound.db` — host writes, container reads. `messages_in`, routing, destinations, pending_questions, processing_ack.
 - `outbound.db` — container writes, host reads. `messages_out`, session_state.
