@@ -429,11 +429,12 @@ async function buildContainerArgs(
     }
   }
 
-  // Paraclaw secret injection — every secret with assigned_mode='all'
-  // for this agent group (or global) lands as an env var on the container.
-  // Agent-scoped beats global on name collision (handled inside
-  // resolveInjectableSecrets). Plaintext lives in container env only;
-  // never logged here, never written to chat context.
+  // Paraclaw secret injection. Mode is per-recipient agent group
+  // (`agent_groups.secret_mode`): `all` injects every in-scope secret,
+  // `selective` only those with an explicit assignment row. Agent-scoped
+  // beats global on name collision (handled inside resolveInjectableSecrets).
+  // Plaintext lives in container env only; never logged here, never
+  // written to chat context.
   try {
     const secrets = resolveInjectableSecrets(agentGroup.id);
     for (const [name, value] of secrets) {

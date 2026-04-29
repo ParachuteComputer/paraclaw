@@ -97,6 +97,7 @@ export function createParachuteAgentGroup(opts: CreateAgentGroupOpts): CreateAge
     name: trimmedName,
     folder: opts.folder,
     agent_provider: null,
+    secret_mode: 'selective',
     created_at,
   };
 
