@@ -23,7 +23,7 @@ export interface VolumeMount {
 }
 
 export interface ProviderContainerContext {
-  /** Per-session host directory: `<DATA_DIR>/sessions/<session_id>`. */
+  /** Per-session host directory: `<DATA_DIR>/sessions/<agent_group_id>/<session_id>`. */
   sessionDir: string;
   /** Agent group ID, for any per-group logic. */
   agentGroupId: string;
