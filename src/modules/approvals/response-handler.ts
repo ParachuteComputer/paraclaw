@@ -10,33 +10,30 @@
  * core iterates handlers and the first one to return `true` claims the response.
  */
 import { wakeContainer } from '../../container-runner.js';
-import { deletePendingApproval, getPendingApproval, getSession } from '../../db/sessions.js';
+import { deleteApproval, getApproval, getSession } from '../../db/sessions.js';
 import type { ResponsePayload } from '../../response-registry.js';
 import { log } from '../../log.js';
 import { writeSessionMessage } from '../../session-manager.js';
-import type { PendingApproval } from '../../types.js';
+import type { ActionApprovalBody, Approval } from '../../types.js';
 import { getApprovalHandler } from './primitive.js';
 
 export async function handleApprovalsResponse(payload: ResponsePayload): Promise<boolean> {
-  const approval = getPendingApproval(payload.questionId);
+  const approval = getApproval(payload.questionId);
   if (!approval) return false;
+  if (approval.kind === 'question') return false;
 
   await handleRegisteredApproval(approval, payload.value, payload.userId ?? '');
   return true;
 }
 
-async function handleRegisteredApproval(
-  approval: PendingApproval,
-  selectedOption: string,
-  userId: string,
-): Promise<void> {
+async function handleRegisteredApproval(approval: Approval, selectedOption: string, userId: string): Promise<void> {
   if (!approval.session_id) {
-    deletePendingApproval(approval.approval_id);
+    deleteApproval(approval.id);
     return;
   }
   const session = getSession(approval.session_id);
   if (!session) {
-    deletePendingApproval(approval.approval_id);
+    deleteApproval(approval.id);
     return;
   }
 
@@ -53,37 +50,38 @@ async function handleRegisteredApproval(
   };
 
   if (selectedOption !== 'approve') {
-    notify(`Your ${approval.action} request was rejected by admin.`);
-    log.info('Approval rejected', { approvalId: approval.approval_id, action: approval.action, userId });
-    deletePendingApproval(approval.approval_id);
+    notify(`Your ${approval.kind} request was rejected by admin.`);
+    log.info('Approval rejected', { approvalId: approval.id, action: approval.kind, userId });
+    deleteApproval(approval.id);
     await wakeContainer(session);
     return;
   }
 
   // Approved — dispatch to the module that registered for this action.
-  const handler = getApprovalHandler(approval.action);
+  const handler = getApprovalHandler(approval.kind);
   if (!handler) {
     log.warn('No approval handler registered — row dropped', {
-      approvalId: approval.approval_id,
-      action: approval.action,
+      approvalId: approval.id,
+      action: approval.kind,
     });
-    notify(`Your ${approval.action} was approved, but no handler is installed to apply it.`);
-    deletePendingApproval(approval.approval_id);
+    notify(`Your ${approval.kind} was approved, but no handler is installed to apply it.`);
+    deleteApproval(approval.id);
     await wakeContainer(session);
     return;
   }
 
-  const payload = JSON.parse(approval.payload);
+  const body = approval.body as ActionApprovalBody;
+  const payload = body.payload ?? {};
   try {
     await handler({ session, payload, userId, notify });
-    log.info('Approval handled', { approvalId: approval.approval_id, action: approval.action, userId });
+    log.info('Approval handled', { approvalId: approval.id, action: approval.kind, userId });
   } catch (err) {
-    log.error('Approval handler threw', { approvalId: approval.approval_id, action: approval.action, err });
+    log.error('Approval handler threw', { approvalId: approval.id, action: approval.kind, err });
     notify(
-      `Your ${approval.action} was approved, but applying it failed: ${err instanceof Error ? err.message : String(err)}.`,
+      `Your ${approval.kind} was approved, but applying it failed: ${err instanceof Error ? err.message : String(err)}.`,
     );
   }
 
-  deletePendingApproval(approval.approval_id);
+  deleteApproval(approval.id);
   await wakeContainer(session);
 }

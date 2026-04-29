@@ -23,7 +23,7 @@
  */
 import { normalizeOptions, type RawOption } from '../../channels/ask-question.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
-import { createPendingApproval, getSession } from '../../db/sessions.js';
+import { createApproval, getSession } from '../../db/sessions.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
@@ -182,15 +182,22 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
 
   const approvalId = `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const normalizedOptions = normalizeOptions(APPROVAL_OPTIONS);
-  createPendingApproval({
-    approval_id: approvalId,
+  createApproval({
+    id: approvalId,
+    kind: action,
+    agent_group_id: session.agent_group_id,
     session_id: session.id,
-    request_id: approvalId,
-    action,
-    payload: JSON.stringify(payload),
+    body: {
+      title,
+      options: normalizedOptions,
+      request_id: approvalId,
+      payload,
+      platform_id: target.messagingGroup.platform_id,
+      channel_type: target.messagingGroup.channel_type,
+      thread_id: null,
+      platform_message_id: null,
+    },
     created_at: new Date().toISOString(),
-    title,
-    options_json: JSON.stringify(normalizedOptions),
   });
 
   const adapter = getDeliveryAdapter();
