@@ -14,6 +14,7 @@ import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runti
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
+import { migrateSessionsDir } from './session-manager.js';
 import { startWebServer } from './web/server.js';
 import { log } from './log.js';
 
@@ -69,8 +70,9 @@ async function main(): Promise<void> {
   runMigrations(db);
   log.info('Central DB ready', { path: CENTRAL_DB_PATH });
 
-  // 1b. One-time filesystem cutover — idempotent, no-op after first run.
+  // 1b. One-time filesystem cutovers — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
+  migrateSessionsDir();
 
   // 2. Container runtime
   ensureContainerRuntimeRunning();

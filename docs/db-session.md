@@ -9,7 +9,7 @@ Schemas live in `src/db/schema.ts` as the `INBOUND_SCHEMA` and `OUTBOUND_SCHEMA`
 ## 1. Session folder layout
 
 ```
-data/v2-sessions/<agent_group_id>/<session_id>/
+data/sessions/<agent_group_id>/<session_id>/
   inbound.db              ← host writes, container reads (read-only mount)
   outbound.db             ← container writes, host reads (read-only open)
   .heartbeat              ← mtime touched by container (not a DB write)

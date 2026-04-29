@@ -70,7 +70,7 @@ heartbeat file.
 The schema is the contract. Most primitives below correspond to a table
 in the **central** `~/.parachute/claw/paraclaw.db`. The message-bus
 tables — `messages_in`, `messages_out`, `session_state` — live in
-**per-session** files under `data/v2-sessions/<session_id>/`, split into
+**per-session** files under `data/sessions/<agent_group_id>/<session_id>/`, split into
 `inbound.db` and `outbound.db` so each file has exactly one writer
 across the bind mount. The §Schema section explains why; the TypeScript
 types are in `src/db/`.
@@ -300,7 +300,7 @@ lifecycles — containers are not.
 ### How the host and container talk
 
 Through SQLite — but **not** through the central DB. Each session has
-two per-session files under `data/v2-sessions/<session_id>/`:
+two per-session files under `data/sessions/<agent_group_id>/<session_id>/`:
 
 - `inbound.db` — **host writes, container reads.** Mounted into the
   container read-only at `/workspace/.inbound.db`. Holds `messages_in`.
@@ -354,7 +354,7 @@ State splits across two SQLite surfaces, by *who can write to what*:
 - **Central** `~/.parachute/claw/paraclaw.db` — host-only writer. Never
   mounted into a container. Holds every primitive that isn't a live
   message queue.
-- **Per-session** under `data/v2-sessions/<session_id>/` — two files:
+- **Per-session** under `data/sessions/<agent_group_id>/<session_id>/` — two files:
   `inbound.db` (host writes, container reads) and `outbound.db`
   (container writes, host reads). Both run in `journal_mode=DELETE` and
   obey the one-writer-per-file rule. See "How the host and container
@@ -476,7 +476,7 @@ those approvals. Membership-as-access-gate (NanoClaw's
 
 ### Per-session `inbound.db` / `outbound.db`
 
-Two files per session under `data/v2-sessions/<session_id>/`, both
+Two files per session under `data/sessions/<agent_group_id>/<session_id>/`, both
 opened with `journal_mode=DELETE`. No foreign keys to the central DB
 (neither file can reference a row it cannot see) and no cross-file
 references either — `outbound.db.in_reply_to` is an opaque message id
