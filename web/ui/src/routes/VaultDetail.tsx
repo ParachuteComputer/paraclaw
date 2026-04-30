@@ -906,6 +906,7 @@ function DetachModal({
               onClick={() => void detach(false)}
               disabled={busy}
               autoFocus
+              style={{ cursor: 'default' }}
             >
               Keep token
             </button>
