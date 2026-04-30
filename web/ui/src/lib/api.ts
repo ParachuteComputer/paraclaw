@@ -222,6 +222,77 @@ export async function listVaults(): Promise<VaultListing[]> {
   return r.vaults;
 }
 
+/**
+ * POST /api/vaults/refresh — clears the 30s discovery cache and re-fetches
+ * the well-known list. The Refresh button on `/vaults` calls this when the
+ * operator just installed a new vault and doesn't want to wait out the cache.
+ */
+export async function refreshVaults(): Promise<VaultListing[]> {
+  const r = await request<{ vaults: VaultListing[] }>('/vaults/refresh', { method: 'POST' });
+  return r.vaults;
+}
+
+export interface VaultAttachedGroup {
+  folder: string;
+  mcpName: string;
+  scope: string;
+  tokenLabel: string;
+  attachedAt: string;
+}
+
+export interface VaultDetail {
+  vault: VaultListing;
+  attachedGroups: VaultAttachedGroup[];
+}
+
+/** GET /api/vaults/:name — listing entry + attached-group derivation. claw:read. */
+export async function getVaultDetail(name: string): Promise<VaultDetail> {
+  return request<VaultDetail>(`/vaults/${encodeURIComponent(name)}`);
+}
+
+/**
+ * Discriminated result of a tolerant token-count probe — distinguishes
+ * "operator hasn't consented to vault:<name>:admin yet" (the case we want
+ * to render as a row-level "—" with a Manage hint) from "vault is down or
+ * the request blew up" (a generic error sentinel). Without the split, a
+ * 500 would label as `unauthorized` and lie to the operator about why
+ * the count is missing.
+ */
+export type TokenCountProbe =
+  | { kind: 'count'; value: number }
+  | { kind: 'unauthorized' }
+  | { kind: 'error' };
+
+/**
+ * Tolerant token-count probe for the index page. Bypasses `request<T>` on
+ * purpose — a 401/403 here means the session JWT is missing the per-vault
+ * narrow scope, not that the session itself is dead, and we don't want to
+ * trap the operator in a re-auth loop before they can even see what
+ * vaults exist. Consent prompt fires on the detail page (Phase 3).
+ *
+ * Do not reuse this helper for endpoints that should surface auth errors.
+ */
+export async function tryListVaultTokenCount(name: string): Promise<TokenCountProbe> {
+  const bearer = getAccessToken();
+  if (!bearer) return { kind: 'error' };
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/vaults/${encodeURIComponent(name)}/tokens`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${bearer}` },
+    });
+  } catch {
+    return { kind: 'error' };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: 'unauthorized' };
+  if (!res.ok) return { kind: 'error' };
+  try {
+    const body = (await res.json()) as { tokens?: unknown[] };
+    return { kind: 'count', value: Array.isArray(body.tokens) ? body.tokens.length : 0 };
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
 export async function attachVault(
   folder: string,
   input: {
