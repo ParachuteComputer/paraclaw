@@ -623,7 +623,19 @@ async function handleApi(
             return;
           }
           const tokens = (list.body as { tokens?: { id: string; label: string }[] }).tokens ?? [];
-          const match = tokens.find((t) => t.label === attachment.tokenLabel);
+          const matches = tokens.filter((t) => t.label === attachment.tokenLabel);
+          // Vault labels are not unique at the protocol level. If two tokens
+          // share this label, picking the first is deterministic but silent —
+          // log so the operator has signal on the host side.
+          if (matches.length > 1) {
+            log.warn('vault detach: ambiguous token label, revoking first match', {
+              folder,
+              tokenLabel: attachment.tokenLabel,
+              matchCount: matches.length,
+              ids: matches.map((m) => m.id),
+            });
+          }
+          const match = matches[0] ?? null;
           if (!match) {
             // Label has no matching token — already revoked or never minted.
             // Continue with detach but report the discrepancy in the response.
