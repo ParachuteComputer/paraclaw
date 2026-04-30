@@ -71,9 +71,15 @@ describe('createPairing', () => {
   });
 
   it('does not collide with active codes', async () => {
+    // Use distinct intents per pairing — `createPairing('main')` invalidates
+    // the previous pending 'main' so only one stays active at a time, which
+    // means the collision-avoidance loop is never actually exercised. With
+    // distinct intents all N stay pending and `generateCode` has to dodge
+    // every one. (Using a single intent with 20 iterations was a birthday-
+    // paradox flake — ~2% collision rate across 10k codes.)
     const codes = new Set<string>();
     for (let i = 0; i < 20; i++) {
-      const r = await createPairing('main');
+      const r = await createPairing({ kind: 'wire-to', folder: `g-${i}` });
       expect(codes.has(r.code)).toBe(false);
       codes.add(r.code);
     }
