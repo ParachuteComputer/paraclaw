@@ -72,7 +72,13 @@ export function VaultDetail() {
   useEffect(() => {
     if (!name) return;
     let cancelled = false;
-    setState({ kind: 'loading' });
+    // Skip the loading-skeleton transition on reloads — keep the existing
+    // LoadedView mounted so its ephemeral local state (mintedDismissed,
+    // pre-targeted modals, etc.) survives the round-trip. Initial mount
+    // still shows the skeleton because state starts as { kind: 'loading' }.
+    setState((prev) =>
+      prev.kind === 'ok' || prev.kind === 'auth-gate' ? prev : { kind: 'loading' },
+    );
 
     (async () => {
       // Load detail (claw:read) and tokens (claw:admin + vault:<name>:admin)
