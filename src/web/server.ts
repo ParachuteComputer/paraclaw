@@ -391,9 +391,17 @@ async function handleApi(
           // Implicit mint: forward operator's JWT to the vault. The shell-out
           // path that used to live here (`mintVaultToken`) is gone — see
           // docs/design/2026-04-29-vault-management-ui.md § Admin auth model.
+          // Defense-in-depth — gate() ahead of this should have rejected an
+          // unauth'd request, but if the header is somehow empty, fail loud
+          // here rather than forwarding `Authorization: ` to vault.
+          const authHeader = req.headers.authorization ?? '';
+          if (!authHeader) {
+            error(res, 401, 'auto-mint requires Authorization header');
+            return;
+          }
           const minted = await mintVaultTokenHttp({
             vaultBaseUrl,
-            authHeader: req.headers.authorization ?? '',
+            authHeader,
             label: tokenLabel,
             scopes: [scope],
           });
@@ -494,9 +502,14 @@ async function handleApi(
 
         let token = body.token;
         if (!token) {
+          const authHeader = req.headers.authorization ?? '';
+          if (!authHeader) {
+            error(res, 401, 'auto-mint requires Authorization header');
+            return;
+          }
           const minted = await mintVaultTokenHttp({
             vaultBaseUrl,
-            authHeader: req.headers.authorization ?? '',
+            authHeader,
             label: tokenLabel,
             scopes: [scope],
           });
