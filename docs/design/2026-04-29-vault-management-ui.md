@@ -70,6 +70,26 @@ Plaintext is **never** rendered after mint — the table shows label + scopes + 
 - **Expires** — date picker, optional. Default never.
 - Submit → POST mint → server displays plaintext **once** in a copy-with-confirmation card, with a button to assign-to-group inline (skips a round-trip back to `/claw/groups/<id>/vault`).
 
+## Admin auth model
+
+paraclaw mints, lists, and revokes vault tokens by calling vault HTTP endpoints directly — no CLI shell-out. Those endpoints are admin-gated (`vault:<name>:admin` scope), so paraclaw needs a credential that carries that scope at request time.
+
+**Chosen approach for v1: forward the operator's hub-issued session JWT.**
+
+Flow:
+
+1. Operator hits `/claw/vaults` in their browser. Their session JWT was issued by the hub at portal sign-in.
+2. The first time the operator navigates to a vault management surface, paraclaw checks the JWT for `vault:<name>:admin` on the targeted vault. If absent, paraclaw redirects to `/oauth/authorize?scope=vault:<name>:admin claw:admin …` and the hub prompts the operator to consent. The new JWT comes back via the existing OAuth callback.
+3. Subsequent paraclaw → vault calls (mint / list / revoke) attach `Authorization: Bearer <operator-jwt>`. The vault validates against the hub's JWKS (same path it already uses for hub-issued JWTs per parachute-vault#234).
+
+Why this over the alternatives Aaron raised:
+
+- **Pasted setup-time admin token (Option A)** — adds a manual onboarding step ("paste this token") and creates a long-lived secret in paraclaw's secret store. Friction at install; recoverability problem if it leaks (rotate everything that uses it).
+- **paraclaw client_credentials grant (Option B)** — paraclaw acquires a JWT via DCR-issued credentials. More plumbing (paraclaw must register a hub client, store its client_secret, refresh JWTs). Audit trail loses the operator identity — actions show as "paraclaw" not "alice@example.com". Worth doing if a non-UI surface ever needs vault admin (cron job, webhook, etc.); not needed for v1, where every admin call originates from an operator click.
+- **Hub-issued JWT scoped to the operator's session (Option C, chosen)** — reuses the existing OAuth flow, attributes actions to the operator, expires automatically with the session, revoking the session revokes vault admin access. The one cost is the consent prompt the first time per vault; that's a feature for the security-conscious operator.
+
+Migration path: if multi-tenant cloud later needs a non-operator-bound caller (Aaron's planned cloud Tier 1/2 split), we add Option B alongside C — both auth modes can coexist on the vault side because they're both hub-issued JWTs differentiated only by the `sub` claim.
+
 ## Refresh story
 
 The 30s in-process cache in `src/web/hub-discovery.ts:36` is the right default for the picker (saves a hub round-trip on every group-detail page load), but the UI must be able to bypass it on demand:
@@ -83,8 +103,8 @@ That covers paraclaw#37's third suspect root (now closed; root was vault-side `c
 
 1. Operator clicks `Mint` on `/claw/vaults/<name>`.
 2. UI shows form (label + scopes + expires).
-3. Submit → `POST /api/vaults/<name>/tokens` (new paraclaw endpoint, see § API surface) → paraclaw shells out to `parachute vault tokens create --vault <name> --scope <s> --label <l>` (extending the existing `mintVaultToken` shell-out at `src/web/server.ts:144` to take a `--vault` arg) OR directly POSTs to `<vaultUrl>/tokens` if we'd rather avoid the CLI shellout (see § Open question 4).
-4. Response: `{ token: "pvt_…", label, scopes, id, created_at }`.
+3. Submit → `POST /api/vaults/<name>/tokens` (new paraclaw endpoint, see § API surface) → paraclaw forwards the operator's hub JWT (see § Admin auth model) and POSTs `<vaultUrl>/tokens` directly. No CLI shell-out.
+4. Response from vault: `{ token: "pvt_…", label, scopes, id, created_at }`. paraclaw passes plaintext through to the browser unmodified.
 5. UI renders a one-time copy-card. Plaintext is held in component state, never persisted in a state store, never echoed back to a server log.
 6. Operator either copies-and-closes (token saved server-side via the mint, plaintext never touches the disk) or clicks `Attach to group…` which lets them pick a target group inline; this triggers `POST /api/groups/<folder>/attach-vault` with the freshly-minted token (saving the round-trip).
 
@@ -138,10 +158,11 @@ UI treatment:
 | `GET /api/vaults` | List vaults from hub well-known | `src/web/server.ts:357` |
 | `POST /api/groups/:folder/attach-vault` | Attach vault to group (mint or use existing token) | `:478` |
 | `POST /api/groups/:folder/detach-vault` | Detach (no revoke) | `:562` |
-| `mintVaultToken({ scope, label })` | Shells out `parachute vault tokens create` | `:144` |
 | `clearHubDiscoveryCache()` | Cache buster | `src/web/hub-discovery.ts:46` |
 
-### Vault-side, already in place (paraclaw will call HTTP, hub will proxy)
+The existing `mintVaultToken` shell-out at `src/web/server.ts:144` will be deleted once the new HTTP-based mint endpoint lands; the new flow replaces it everywhere.
+
+### Vault-side, already in place
 
 | Endpoint | Purpose | Source |
 |---|---|---|
@@ -149,20 +170,22 @@ UI treatment:
 | `GET /vault/<name>/tokens` | List tokens (metadata only) | same |
 | `DELETE /vault/<name>/tokens/<id>` | Revoke; idempotent (200 even if id unknown — no enumeration leak) | same |
 
-All three are admin-gated (`vault:admin` scope).
+All three are admin-gated (`vault:<name>:admin` scope on the bearer JWT). paraclaw calls them with the operator's session JWT in the `Authorization: Bearer …` header.
 
 ### New paraclaw endpoints to add
 
-| Endpoint | Scope | Purpose |
-|---|---|---|
-| `POST /api/vaults/refresh` | `claw:read` | Clear discovery cache + re-fetch |
-| `GET /api/vaults/:name` | `claw:read` | Detail = listing entry + attached-groups computation |
-| `GET /api/vaults/:name/tokens` | `claw:admin` | Proxy to vault `GET /vault/:name/tokens`; merge in attached-to-group derived from `parachute.json` walk |
-| `POST /api/vaults/:name/tokens` | `claw:admin` | Mint via shell-out (extend `mintVaultToken` to take `--vault`) or proxy POST |
-| `DELETE /api/vaults/:name/tokens/:id` | `claw:admin` | Proxy to vault DELETE; warn UI if the id is currently attached to a group |
-| `POST /api/groups/:folder/detach-vault` (extend) | `claw:write` | Add `revokeToken: boolean` query param; when true, also DELETE the vault token after detach |
+Each endpoint validates the operator's session JWT for `claw:*` scope at the paraclaw boundary, then forwards the same JWT to the vault. The vault validates `vault:<name>:admin` independently — paraclaw doesn't downgrade or re-issue.
 
-Open question: should paraclaw call the vault HTTP endpoints directly (bypassing CLI), or keep shelling out? See § Open questions.
+| Endpoint | paraclaw-side scope | Forwards to vault? | Purpose |
+|---|---|---|---|
+| `POST /api/vaults/refresh` | `claw:read` | No | Clear discovery cache + re-fetch |
+| `GET /api/vaults/:name` | `claw:read` | No | Detail = listing entry + attached-groups computation |
+| `GET /api/vaults/:name/tokens` | `claw:admin` | `GET /vault/:name/tokens` | Proxy + merge attached-to-group from `parachute.json` walk |
+| `POST /api/vaults/:name/tokens` | `claw:admin` | `POST /vault/:name/tokens` | Mint, return plaintext once |
+| `DELETE /api/vaults/:name/tokens/:id` | `claw:admin` | `DELETE /vault/:name/tokens/:id` | Revoke; warn UI if id is currently attached |
+| `POST /api/groups/:folder/detach-vault` (extend) | `claw:write` (+ `vault:<name>:admin` if revoke=true) | Conditional DELETE on revoke=true | Add `revokeToken: boolean` body param |
+
+The vault name in the path is the canonical routing key end-to-end — browser → paraclaw → vault. No additional plumbing needed to pick the vault.
 
 ### Vault-side gaps (none blocking)
 
@@ -173,7 +196,7 @@ Open question: should paraclaw call the vault HTTP endpoints directly (bypassing
 
 Single PR for the doc (this one). Implementation likely splits into 3 PRs:
 
-1. **Backend** (~150 LOC): the five new paraclaw endpoints + refresh + per-vault token proxy + `mintVaultToken` `--vault` extension + `detach-vault revokeToken` param. Tests for the proxy + the attached-to derivation.
+1. **Backend** (~150 LOC): the five new paraclaw endpoints (refresh + detail + tokens proxy GET/POST/DELETE) + `detach-vault revokeToken` param + JWT-forwarding helper. Delete the old `mintVaultToken` shell-out and its callers. Tests for the proxy paths + the attached-to derivation + the consent-prompt redirect on missing `vault:<name>:admin` scope.
 2. **Frontend index** (~250 LOC): `/claw/vaults` route, vault list table, refresh button.
 3. **Frontend detail + mint flow** (~400 LOC): `/claw/vaults/<name>` route, tokens table, attached-groups table, mint form + one-time copy card, detach-modal with revoke option, group-page cross-links.
 
@@ -185,17 +208,23 @@ Aaron landed on **status-quo + nearby revoke** (paraclaw#36 closed today): keep 
 
 This avoids the "silent revoke wedges unrelated callers" footgun while making the secure default reachable in one click.
 
-## Open questions
+## Open questions — resolved
 
-1. **Vault HTTP vs CLI shell-out.** `mintVaultToken` shells out to `parachute vault tokens create` today. For the new endpoints we have two paths: (a) extend the shell-out — minimal change, but needs `--vault <name>` support in the vault CLI (does the CLI accept that today? worth verifying); (b) bypass the CLI and POST directly to `<vaultUrl>/tokens` from paraclaw — fewer process spawns, but paraclaw needs an admin token to *the vault* to mint other tokens, which is the bootstrap problem. **Lean (a)** for the v1 MVP — the CLI is already authenticated against the vault's owner credentials.
+All five Aaron weighed in on; recording the calls here for future-me.
 
-2. **Token attachment derivation accuracy.** Building "attached to group X" by walking every `parachute.json` is O(groups) per page load. Fine at <100 groups; if multi-tenant cloud needs scale, we'd want an index. **Punt to a follow-up issue if it shows up in profiling.**
+1. **~~Vault HTTP vs CLI shell-out.~~** **Decided: HTTP.** See § Admin auth model. paraclaw forwards the operator's hub JWT to the vault directly; the existing `mintVaultToken` shell-out gets deleted once the new endpoints land.
 
-3. **Multi-vault mint defaults.** When the operator is on `/claw/vaults/work`, the mint form should default to *that* vault's name. But `mintVaultToken` was written assuming a single default vault — the path through `/api/groups/:folder/attach-vault` doesn't currently take a `vault` argument. The new mint endpoint addresses this directly; the existing attach endpoint either needs `body.vaultName` (preferred) or stays default-only and the new flow on `/claw/vaults/:name` does mint+attach in one POST.
+2. **Token attachment derivation accuracy.** O(groups) walk per page load. **Punt to a follow-up issue if profiling shows it.** Confirmed.
 
-4. **Hub-issued JWT bindings.** When a future surface lets operators grant a hub-issued JWT for vault access (instead of a pvt_*), the UI needs a third "tokens" sub-table: "JWT grants" (label, audience, scopes, expires). **Out of scope for v1** — design noted, schema-extensible.
+3. **~~Multi-vault mint defaults.~~** **Dissolves under HTTP.** The vault name lives in the URL path (`/api/vaults/:name/tokens`) and is forwarded one-to-one to `<vaultUrl>/tokens`. No "default vault" disambiguation needed.
 
-5. **Refresh button auth.** `POST /api/vaults/refresh` is logically a write (mutates the cache) but doesn't write user data. Gating on `claw:read` is more consistent (any reader can trigger a re-fetch); on `claw:write` is more conservative. **Lean `claw:read`** since the worst case is one extra hub round-trip.
+4. **Hub-issued JWT bindings.** Out of scope for v1. Confirmed.
+
+5. **Refresh button auth.** `claw:read`. Confirmed.
+
+## Dependencies
+
+**hub#141 — `buildWellKnown` emitted one vault per service entry instead of one per path.** Tracked on the hub side; the multi-vault picker and the `/claw/vaults` index page rely on the well-known returning multiple vaults. Phase 1 backend work can land independently (the new paraclaw endpoints don't depend on the well-known shape — vault name comes via URL path), but phase 2 should verify hub#141 has shipped before relying on multi-vault discovery.
 
 ---
 
