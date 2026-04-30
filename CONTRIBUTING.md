@@ -117,6 +117,16 @@ Instructions here...
 
 Test your contribution on a fresh clone before submitting. For skills, run the skill end-to-end and verify it works.
 
+### web/ui test harness
+
+The frontend bundle in `web/ui/` is intentionally outside the pnpm workspace (the `web:build` script uses `--ignore-workspace`), so a root-level `pnpm install` does **not** populate `web/ui/node_modules`. If you're running web/ui tests, install its deps first:
+
+```bash
+cd web/ui && pnpm install --ignore-workspace && pnpm test
+```
+
+Otherwise the runner exits with `ERR_MODULE_NOT_FOUND: @vitejs/plugin-react`.
+
 ## Pull Requests
 
 ### Before opening
