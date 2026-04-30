@@ -180,6 +180,58 @@ describe('VaultDetail — dismiss without copying', () => {
     // Plaintext is gone from the DOM — vault stored only a hash.
     expect(screen.queryByDisplayValue('pvt_uncopied_secret')).not.toBeInTheDocument();
   });
+
+  it('disables the inline Revoke button when the token is not in the live list (paraclaw#62)', async () => {
+    // Race / id-mismatch path: operator dismisses without copying, but the
+    // post-mint reload returns a tokens list that doesn't include the new
+    // id (vault hiccup, server-side rename, etc.). The CTA must visibly
+    // disable rather than silently no-op on click.
+    const minted: api.MintedVaultToken = {
+      token: 'pvt_lost_secret',
+      id: 't_lost',
+      label: 'claw-lost',
+      scopes: ['vault:read'],
+      created_at: '2026-04-30T10:00:00Z',
+    };
+    vi.mocked(api.mintVaultToken).mockResolvedValue(minted);
+    // First call (initial render) returns the seeded sampleTokens; every
+    // subsequent call (the post-mint reload) returns an empty list, so the
+    // banner's `live` lookup misses.
+    vi.mocked(api.listVaultTokens)
+      .mockReset()
+      .mockResolvedValueOnce(sampleTokens)
+      .mockResolvedValue([]);
+
+    const user = userEvent.setup();
+    renderAt('/vaults/work');
+
+    await waitFor(() => {
+      expect(screen.getByText('Mint new token')).toBeInTheDocument();
+    });
+
+    const labelInput = screen.getByLabelText('Label') as HTMLInputElement;
+    await user.clear(labelInput);
+    await user.type(labelInput, 'claw-lost');
+    await user.click(screen.getByRole('button', { name: 'Mint token' }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('pvt_lost_secret')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Close without copying' }));
+
+    // Wait for the post-dismiss reload to settle so the empty tokens list
+    // is reflected in `state.tokens`.
+    await waitFor(() => {
+      expect(screen.queryByText(/Tokens \(1\)/)).not.toBeInTheDocument();
+    });
+
+    const revokeBtn = screen.getByRole('button', { name: 'Revoke claw-lost' });
+    expect(revokeBtn).toBeDisabled();
+    expect(revokeBtn).toHaveAttribute(
+      'title',
+      'Token no longer in current list — see tokens table below',
+    );
+  });
 });
 
 describe('VaultDetail — revoke modal', () => {

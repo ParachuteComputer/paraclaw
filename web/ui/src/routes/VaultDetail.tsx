@@ -249,14 +249,18 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
     reload();
   };
 
+  // Derive the live VaultToken for the banner's inline Revoke CTA. Computed
+  // outside the handler so the JSX can disable the button + show a tooltip
+  // when the lookup misses (race vs. reload, or vault renamed the id post-
+  // mint). Without this guard, clicking the button is inert and the operator
+  // sees no feedback.
+  const liveDismissedToken = mintedDismissed
+    ? (state.tokens.find((t) => t.id === mintedDismissed.id) ?? null)
+    : null;
+
   const onRevokeFromBanner = () => {
-    if (!mintedDismissed) return;
-    const live = state.tokens.find((t) => t.id === mintedDismissed.id);
-    // The reload() in onCloseMinted should have populated state.tokens with
-    // the new id; if it hasn't (race or vault hiccup), fall through silently
-    // — the operator can still revoke from the tokens list.
-    if (live) {
-      setRevokeTarget(live);
+    if (liveDismissedToken) {
+      setRevokeTarget(liveDismissedToken);
       setMintedDismissed(null);
     }
   };
@@ -288,7 +292,17 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
           plaintext. The plaintext is gone — vault stores only a hash. Revoke this token now and
           mint a new one if you need access.
           <div className="actions" style={{ marginTop: '0.5rem' }}>
-            <button type="button" className="danger" onClick={onRevokeFromBanner}>
+            <button
+              type="button"
+              className="danger"
+              onClick={onRevokeFromBanner}
+              disabled={!liveDismissedToken}
+              title={
+                liveDismissedToken
+                  ? undefined
+                  : 'Token no longer in current list — see tokens table below'
+              }
+            >
               Revoke {mintedDismissed.label}
             </button>
             <button
