@@ -93,9 +93,7 @@ describe('forwardToVault', () => {
   });
 
   it('mirrors a 401 from the vault — caller surfaces it for consent prompt', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(jsonResponse(401, { error: 'missing vault:work:admin' }));
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(401, { error: 'missing vault:work:admin' }));
     const result = await forwardToVault({
       method: 'GET',
       vaultBaseUrl: 'https://h/vault/work',
@@ -121,9 +119,7 @@ describe('forwardToVault', () => {
   });
 
   it('handles a non-JSON body without throwing', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(new Response('<!DOCTYPE html>504 from edge', { status: 504 }));
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('<!DOCTYPE html>504 from edge', { status: 504 }));
     const result = await forwardToVault({
       method: 'GET',
       vaultBaseUrl: 'https://h/vault/work',
