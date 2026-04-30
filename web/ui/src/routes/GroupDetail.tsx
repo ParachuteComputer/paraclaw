@@ -138,6 +138,12 @@ export function GroupDetail() {
     setSubmitting(true);
     setFlash(null);
     try {
+      // No `authExtraScopes` here on purpose — this surface isn't vault-
+      // scoped (the agent group may be attached to any vault) so we can't
+      // cleanly thread `vault:<name>:admin`. A 403 falls back to the broad
+      // re-auth set, which is the pre-paraclaw#56 behavior. The narrow-
+      // scope path lives on the per-vault detail page (VaultDetail.tsx),
+      // where the vault name is known at the call site.
       const result = await detachVault(folder);
       setGroup(result.group);
       setFlash({
