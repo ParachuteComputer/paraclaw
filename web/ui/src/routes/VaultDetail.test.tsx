@@ -192,6 +192,7 @@ describe('VaultDetail — detach modal', () => {
       expect(api.detachVault).toHaveBeenCalledWith('research', {
         mcpName: 'parachute-vault',
         revokeToken: true,
+        authExtraScopes: ['vault:work:admin'],
       });
     });
   });
@@ -224,6 +225,7 @@ describe('VaultDetail — detach modal', () => {
       expect(api.detachVault).toHaveBeenCalledWith('research', {
         mcpName: 'parachute-vault',
         revokeToken: false,
+        authExtraScopes: ['vault:work:admin'],
       });
     });
   });
