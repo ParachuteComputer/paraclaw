@@ -72,7 +72,13 @@ export function VaultDetail() {
   useEffect(() => {
     if (!name) return;
     let cancelled = false;
-    setState({ kind: 'loading' });
+    // Skip the loading-skeleton transition on reloads — keep the existing
+    // LoadedView mounted so its ephemeral local state (mintedDismissed,
+    // pre-targeted modals, etc.) survives the round-trip. Initial mount
+    // still shows the skeleton because state starts as { kind: 'loading' }.
+    setState((prev) =>
+      prev.kind === 'ok' || prev.kind === 'auth-gate' ? prev : { kind: 'loading' },
+    );
 
     (async () => {
       // Load detail (claw:read) and tokens (claw:admin + vault:<name>:admin)
@@ -222,7 +228,10 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
   const [detachTarget, setDetachTarget] = useState<VaultAttachedGroup | null>(null);
   const [minted, setMinted] = useState<MintedVaultToken | null>(null);
   const [mintedCopied, setMintedCopied] = useState(false);
-  const [mintedDismissed, setMintedDismissed] = useState<{ token: MintedVaultToken } | null>(null);
+  // Only id + label here — the full MintedVaultToken carries the plaintext,
+  // and we only need the label for display + id to look up the live
+  // VaultToken if the operator clicks the inline 'Revoke' shortcut.
+  const [mintedDismissed, setMintedDismissed] = useState<{ id: string; label: string } | null>(null);
 
   const onMinted = (token: MintedVaultToken) => {
     setMinted(token);
@@ -233,11 +242,23 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
   const onCloseMinted = (copied: boolean) => {
     if (minted && !copied) {
-      setMintedDismissed({ token: minted });
+      setMintedDismissed({ id: minted.id, label: minted.label });
     }
     setMinted(null);
     setMintedCopied(false);
     reload();
+  };
+
+  const onRevokeFromBanner = () => {
+    if (!mintedDismissed) return;
+    const live = state.tokens.find((t) => t.id === mintedDismissed.id);
+    // The reload() in onCloseMinted should have populated state.tokens with
+    // the new id; if it hasn't (race or vault hiccup), fall through silently
+    // — the operator can still revoke from the tokens list.
+    if (live) {
+      setRevokeTarget(live);
+      setMintedDismissed(null);
+    }
   };
 
   return (
@@ -263,10 +284,13 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
       {mintedDismissed && (
         <div className="warn-banner" style={{ marginTop: '1rem' }}>
-          Token <code>{mintedDismissed.token.label}</code> was minted but you didn't copy the
+          Token <code>{mintedDismissed.label}</code> was minted but you didn't copy the
           plaintext. The plaintext is gone — vault stores only a hash. Revoke this token now and
           mint a new one if you need access.
           <div className="actions" style={{ marginTop: '0.5rem' }}>
+            <button type="button" className="danger" onClick={onRevokeFromBanner}>
+              Revoke {mintedDismissed.label}
+            </button>
             <button
               type="button"
               className="secondary"
@@ -842,13 +866,15 @@ function DetachModal({
   const detach = async (revokeToken: boolean) => {
     setBusy(true);
     try {
-      // Thread the narrow per-vault admin scope so a 403 on the server-side
-      // revoke path triggers re-auth with the right scope (paraclaw#56) —
-      // only matters when revokeToken is true, but harmless otherwise.
+      // Thread the narrow per-vault admin scope only when we're actually
+      // calling vault — Keep-token (revokeToken=false) just hits the
+      // paraclaw-side claw:write check, which the broad re-auth set
+      // already covers. Asking for vault:<name>:admin on the Keep path
+      // would be a no-op extra scope on the consent screen.
       const result = await detachVault(target.folder, {
         mcpName: target.mcpName,
         revokeToken,
-        authExtraScopes: [`vault:${vaultName}:admin`],
+        authExtraScopes: revokeToken ? [`vault:${vaultName}:admin`] : undefined,
       });
       onClose({
         group: result.group.folder,
@@ -904,6 +930,7 @@ function DetachModal({
               onClick={() => void detach(false)}
               disabled={busy}
               autoFocus
+              style={{ cursor: 'default' }}
             >
               Keep token
             </button>

@@ -391,9 +391,17 @@ async function handleApi(
           // Implicit mint: forward operator's JWT to the vault. The shell-out
           // path that used to live here (`mintVaultToken`) is gone — see
           // docs/design/2026-04-29-vault-management-ui.md § Admin auth model.
+          // Defense-in-depth — gate() ahead of this should have rejected an
+          // unauth'd request, but if the header is somehow empty, fail loud
+          // here rather than forwarding `Authorization: ` to vault.
+          const authHeader = req.headers.authorization ?? '';
+          if (!authHeader) {
+            error(res, 401, 'auto-mint requires Authorization header');
+            return;
+          }
           const minted = await mintVaultTokenHttp({
             vaultBaseUrl,
-            authHeader: req.headers.authorization ?? '',
+            authHeader,
             label: tokenLabel,
             scopes: [scope],
           });
@@ -494,9 +502,14 @@ async function handleApi(
 
         let token = body.token;
         if (!token) {
+          const authHeader = req.headers.authorization ?? '';
+          if (!authHeader) {
+            error(res, 401, 'auto-mint requires Authorization header');
+            return;
+          }
           const minted = await mintVaultTokenHttp({
             vaultBaseUrl,
-            authHeader: req.headers.authorization ?? '',
+            authHeader,
             label: tokenLabel,
             scopes: [scope],
           });
@@ -610,7 +623,19 @@ async function handleApi(
             return;
           }
           const tokens = (list.body as { tokens?: { id: string; label: string }[] }).tokens ?? [];
-          const match = tokens.find((t) => t.label === attachment.tokenLabel);
+          const matches = tokens.filter((t) => t.label === attachment.tokenLabel);
+          // Vault labels are not unique at the protocol level. If two tokens
+          // share this label, picking the first is deterministic but silent —
+          // log so the operator has signal on the host side.
+          if (matches.length > 1) {
+            log.warn('vault detach: ambiguous token label, revoking first match', {
+              folder,
+              tokenLabel: attachment.tokenLabel,
+              matchCount: matches.length,
+              ids: matches.map((m) => m.id),
+            });
+          }
+          const match = matches[0] ?? null;
           if (!match) {
             // Label has no matching token — already revoked or never minted.
             // Continue with detach but report the discrepancy in the response.
