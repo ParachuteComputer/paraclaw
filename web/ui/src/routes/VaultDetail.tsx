@@ -322,6 +322,7 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
       {detachTarget && (
         <DetachModal
+          vaultName={name}
           target={detachTarget}
           onClose={(result) => {
             setDetachTarget(null);
@@ -817,10 +818,12 @@ interface DetachOutcome {
 }
 
 function DetachModal({
+  vaultName,
   target,
   onClose,
   onError,
 }: {
+  vaultName: string;
   target: VaultAttachedGroup;
   onClose: (result: DetachOutcome | null) => void;
   onError: (message: string) => void;
@@ -839,9 +842,13 @@ function DetachModal({
   const detach = async (revokeToken: boolean) => {
     setBusy(true);
     try {
+      // Thread the narrow per-vault admin scope so a 403 on the server-side
+      // revoke path triggers re-auth with the right scope (paraclaw#56) —
+      // only matters when revokeToken is true, but harmless otherwise.
       const result = await detachVault(target.folder, {
         mcpName: target.mcpName,
         revokeToken,
+        authExtraScopes: [`vault:${vaultName}:admin`],
       });
       onClose({
         group: result.group.folder,

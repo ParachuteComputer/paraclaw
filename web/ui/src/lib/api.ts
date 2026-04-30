@@ -81,14 +81,16 @@ async function doFetch(
 }
 
 // Hub's scope-validation 403 (cli#71) responds with a body like
-// `{"error":"This endpoint requires the claw:admin scope"}`. We match the
-// substring rather than the exact phrase so a future copy tweak doesn't
-// silently disable re-auth. Reads via .clone() so readError() can still
-// consume the original body if the caller falls through to throw.
+// `{"error":"This endpoint requires the claw:admin scope"}`; the vault
+// uses single-quoted scope names: `requires the 'vault:work:admin' scope
+// (or 'vault:work:admin')`. We match either quoting so paraclaw#56's
+// vault path doesn't slip past the gate. Reads via .clone() so
+// readError() can still consume the original body if the caller falls
+// through to throw.
 async function isScopeMismatch(res: Response): Promise<boolean> {
   try {
     const text = await res.clone().text();
-    return /requires the [\w:]+ scope/.test(text);
+    return /requires the ['"]?[\w:]+['"]? scope/.test(text);
   } catch {
     return false;
   }
@@ -122,11 +124,25 @@ export class HttpError extends Error {
   }
 }
 
-export async function request<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+/**
+ * `authExtraScopes` is forwarded to `beginLogin` if this call triggers a
+ * re-auth (401-after-refresh-failure or 403 scope-mismatch). Use it on
+ * endpoints that gate on a per-resource narrow scope the broad
+ * REQUESTED_SCOPES set doesn't carry — e.g. vault token mgmt requires
+ * `vault:<name>:admin` on top of `claw:admin`. Without this hint the
+ * re-auth would loop with the same broad-only JWT (paraclaw#56).
+ */
+export interface RequestInitWithAuth extends RequestInit {
+  json?: unknown;
+  authExtraScopes?: string[];
+}
+
+export async function request<T>(path: string, init?: RequestInitWithAuth): Promise<T> {
+  const extraScopes = init?.authExtraScopes;
   let bearer = getAccessToken();
   if (!bearer) {
     // No token at all — kick off the OAuth dance. beginLogin() never returns.
-    await beginLogin();
+    await beginLogin(extraScopes);
   }
   let res = await doFetch(path, init, bearer);
   if (res.status === 401) {
@@ -138,7 +154,7 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
     if (res.status === 401) {
       // Refresh failed or post-refresh still 401 — drop tokens and re-auth.
       clearTokens();
-      await beginLogin();
+      await beginLogin(extraScopes);
     }
   }
   // 403 with a scope-mismatch body means the cached token was minted before
@@ -146,10 +162,12 @@ export async function request<T>(path: string, init?: RequestInit & { json?: unk
   // users were stuck behind a manual `localStorage.clear()` after the Phase 1
   // wizard bumped REQUESTED_SCOPES to include claw:admin. Refresh won't help
   // (refresh tokens carry the original scope set), so drop straight to
-  // re-auth — beginLogin() will request the new scope set.
+  // re-auth — beginLogin() will request the new scope set, plus any
+  // narrow per-resource scope the caller threaded via authExtraScopes
+  // (paraclaw#56).
   if (res.status === 403 && (await isScopeMismatch(res))) {
     clearTokens();
-    await beginLogin();
+    await beginLogin(extraScopes);
   }
   if (!res.ok) {
     throw new HttpError(res.status, await readError(res));
@@ -325,11 +343,16 @@ export interface DetachVaultResult {
 
 export async function detachVault(
   folder: string,
-  options: { mcpName?: string; revokeToken?: boolean } = {},
+  options: { mcpName?: string; revokeToken?: boolean; authExtraScopes?: string[] } = {},
 ): Promise<DetachVaultResult> {
+  // `authExtraScopes` is opt-in: the route key is the agent-group folder, so
+  // the helper itself doesn't know the target vault. Callers on a vault-scoped
+  // page (VaultDetail) pass `[\`vault:\${name}:admin\`]` so a 403 from the
+  // server-side revoke step triggers a narrow-scoped re-auth (paraclaw#56).
   return request<DetachVaultResult>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
     method: 'POST',
     json: { mcpName: options.mcpName, revokeToken: options.revokeToken === true },
+    authExtraScopes: options.authExtraScopes,
   });
 }
 
@@ -394,15 +417,20 @@ export interface MintedVaultToken {
 }
 
 export async function mintVaultToken(name: string, input: MintVaultTokenInput): Promise<MintedVaultToken> {
+  // Vault enforces `vault:<name>:admin` on this endpoint; thread it through
+  // so a 403 scope-mismatch triggers re-auth with the narrow scope appended,
+  // not just the broad REQUESTED_SCOPES set (paraclaw#56).
   return request<MintedVaultToken>(`/vaults/${encodeURIComponent(name)}/tokens`, {
     method: 'POST',
     json: input,
+    authExtraScopes: [`vault:${name}:admin`],
   });
 }
 
 export async function revokeVaultToken(name: string, id: string): Promise<void> {
   return request<void>(`/vaults/${encodeURIComponent(name)}/tokens/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    authExtraScopes: [`vault:${name}:admin`],
   });
 }
 
