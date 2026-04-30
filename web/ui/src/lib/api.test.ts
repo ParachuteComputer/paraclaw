@@ -25,6 +25,13 @@ vi.mock('./auth.ts', () => ({
 }));
 
 beforeEach(() => {
+  // Each test does `await import('./api.ts')` after stubbing fetch. Without
+  // resetModules, vitest hands back the already-evaluated module from the
+  // first test in the file, so later tests see the *first* test's stubbed
+  // fetch — leading to false greens or confusing failures when one body
+  // shape is tested while another should fire. Reset between tests so
+  // every dynamic import re-evaluates against the current global stub.
+  vi.resetModules();
   vi.mocked(auth.getAccessToken).mockReturnValue('cached-token');
   // Reject so the `await beginLogin(...)` in request<T> resolves the chain
   // and the caller's promise settles — letting us await + assert.
