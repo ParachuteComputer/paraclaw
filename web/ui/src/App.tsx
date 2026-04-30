@@ -9,6 +9,7 @@ import { OAuthCallback } from "./routes/OAuthCallback.tsx";
 import { SecretsList } from "./routes/SecretsList.tsx";
 import { SessionsList } from "./routes/SessionsList.tsx";
 import { SetupWizard } from "./routes/SetupWizard.tsx";
+import { VaultsList } from "./routes/VaultsList.tsx";
 
 export function App() {
   // The OAuth callback page is intentionally chrome-free — the user is
@@ -35,6 +36,7 @@ export function App() {
         <Link to="/">Agent groups</Link>
         <Link to="/sessions">Sessions</Link>
         <Link to="/channels">Channels</Link>
+        <Link to="/vaults">Vaults</Link>
         <Link to="/secrets">Secrets</Link>
         <Link to="/apps">Apps</Link>
         <Link to="/approvals">Approvals</Link>
@@ -52,6 +54,16 @@ export function App() {
         <Route path="/" element={<GroupList />} />
         <Route path="/secrets" element={<SecretsList />} />
         <Route path="/sessions" element={<SessionsList />} />
+        <Route path="/vaults" element={<VaultsList />} />
+        <Route
+          path="/vaults/:name"
+          element={
+            <div className="empty">
+              Vault detail + mint flow lands in Phase 3 (paraclaw#38).{' '}
+              <Link to="/vaults">Back to vaults</Link>
+            </div>
+          }
+        />
         <Route path="/channels" element={<ChannelsList />} />
         <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />

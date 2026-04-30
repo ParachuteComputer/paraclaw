@@ -222,6 +222,62 @@ export async function listVaults(): Promise<VaultListing[]> {
   return r.vaults;
 }
 
+/**
+ * POST /api/vaults/refresh — clears the 30s discovery cache and re-fetches
+ * the well-known list. The Refresh button on `/vaults` calls this when the
+ * operator just installed a new vault and doesn't want to wait out the cache.
+ */
+export async function refreshVaults(): Promise<VaultListing[]> {
+  const r = await request<{ vaults: VaultListing[] }>('/vaults/refresh', { method: 'POST', json: {} });
+  return r.vaults;
+}
+
+export interface VaultAttachedGroup {
+  folder: string;
+  mcpName: string;
+  scope: string;
+  tokenLabel: string;
+  attachedAt: string;
+}
+
+export interface VaultDetail {
+  vault: VaultListing;
+  attachedGroups: VaultAttachedGroup[];
+}
+
+/** GET /api/vaults/:name — listing entry + attached-group derivation. claw:read. */
+export async function getVaultDetail(name: string): Promise<VaultDetail> {
+  return request<VaultDetail>(`/vaults/${encodeURIComponent(name)}`);
+}
+
+/**
+ * Tolerant token-count probe for the index page. Returns null when the
+ * operator's session JWT lacks `vault:<name>:admin` (the vault 401s) so the
+ * row can render a placeholder instead of trapping the user in a re-auth
+ * loop — the consent prompt is meant to fire on the detail page, not here.
+ * Bypasses `request<T>` on purpose; do not reuse for endpoints that should
+ * surface auth errors.
+ */
+export async function tryListVaultTokenCount(name: string): Promise<number | null> {
+  const bearer = getAccessToken();
+  if (!bearer) return null;
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/vaults/${encodeURIComponent(name)}/tokens`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${bearer}` },
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  try {
+    const body = (await res.json()) as { tokens?: unknown[] };
+    return Array.isArray(body.tokens) ? body.tokens.length : 0;
+  } catch {
+    return null;
+  }
+}
+
 export async function attachVault(
   folder: string,
   input: {
