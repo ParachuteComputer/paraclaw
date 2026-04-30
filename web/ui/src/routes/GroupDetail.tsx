@@ -138,11 +138,11 @@ export function GroupDetail() {
     setSubmitting(true);
     setFlash(null);
     try {
-      const updated = await detachVault(folder);
-      setGroup(updated);
+      const result = await detachVault(folder);
+      setGroup(result.group);
       setFlash({
         kind: 'ok',
-        text: 'Vault detached. To revoke the token: parachute vault tokens revoke <label>',
+        text: 'Vault detached. To revoke the token: parachute vault tokens revoke <label> (or use the Vault detail page)',
       });
     } catch (err) {
       setFlash({

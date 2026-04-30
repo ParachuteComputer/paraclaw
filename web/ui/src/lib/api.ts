@@ -309,12 +309,101 @@ export async function attachVault(
   );
 }
 
-export async function detachVault(folder: string, mcpName?: string): Promise<AgentGroupView> {
-  const r = await request<{ group: AgentGroupView }>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
+/**
+ * Result of a detach call. `revokedTokenId` is non-null when the caller
+ * passed `revokeToken: true` AND the vault delete succeeded; `revokeError`
+ * is non-null when revoke was requested but the matching token couldn't
+ * be located (already revoked, never minted via this label) — the detach
+ * still proceeded paraclaw-side. Mirrors the shape returned by
+ * `src/web/server.ts` at the `/detach-vault` handler.
+ */
+export interface DetachVaultResult {
+  group: AgentGroupView;
+  revokedTokenId: string | null;
+  revokeError: string | null;
+}
+
+export async function detachVault(
+  folder: string,
+  options: { mcpName?: string; revokeToken?: boolean } = {},
+): Promise<DetachVaultResult> {
+  return request<DetachVaultResult>(`/groups/${encodeURIComponent(folder)}/detach-vault`, {
     method: 'POST',
-    json: { mcpName },
+    json: { mcpName: options.mcpName, revokeToken: options.revokeToken === true },
   });
-  return r.group;
+}
+
+// --- Vault tokens (admin-gated, requires vault:<name>:admin via JWT forward) ---
+
+/**
+ * Per-token row returned by `GET /api/vaults/:name/tokens`. paraclaw merges
+ * `attachedTo` paraclaw-side from the parachute.json walk; the rest is the
+ * vault's verbatim row. `scopes` and `permission` are mutually-exclusive in
+ * practice (legacy tokens carry `permission`, current tokens carry
+ * `scopes`) — the UI handles both via `legacyPermissionToScopes` rules.
+ */
+export interface VaultTokenAttachment {
+  folder: string;
+  scope: string;
+}
+
+export interface VaultToken {
+  id: string;
+  label: string;
+  scopes?: string[];
+  permission?: string;
+  expires_at?: string | null;
+  created_at?: string;
+  last_used_at?: string | null;
+  attachedTo: VaultTokenAttachment[];
+}
+
+/**
+ * GET /api/vaults/:name/tokens — listing + attached-to merge. paraclaw-side
+ * scope is `claw:admin`; vault-side `vault:<name>:admin` is enforced by the
+ * vault itself and a 401/403 from the vault is mirrored verbatim. Callers
+ * use `HttpError.status` to detect the vault-narrow-scope-missing case and
+ * trigger a consent prompt (Phase 3 detail page only).
+ */
+export async function listVaultTokens(name: string): Promise<VaultToken[]> {
+  const r = await request<{ tokens: VaultToken[] }>(`/vaults/${encodeURIComponent(name)}/tokens`);
+  return r.tokens;
+}
+
+export interface MintVaultTokenInput {
+  label: string;
+  scopes: string[];
+  /** ISO8601, optional. Vault interprets null/missing as "never". */
+  expires_at?: string | null;
+}
+
+/**
+ * Plaintext `pvt_…` token returned exactly once on mint. paraclaw passes it
+ * through from the vault unmodified; the UI must hold it in component
+ * state, render it once with a copy button, and never persist it.
+ */
+export interface MintedVaultToken {
+  /** The raw `pvt_…` plaintext — only present on the mint response, never re-fetched. */
+  token: string;
+  id: string;
+  label: string;
+  scopes?: string[];
+  permission?: string;
+  created_at?: string;
+  expires_at?: string | null;
+}
+
+export async function mintVaultToken(name: string, input: MintVaultTokenInput): Promise<MintedVaultToken> {
+  return request<MintedVaultToken>(`/vaults/${encodeURIComponent(name)}/tokens`, {
+    method: 'POST',
+    json: input,
+  });
+}
+
+export async function revokeVaultToken(name: string, id: string): Promise<void> {
+  return request<void>(`/vaults/${encodeURIComponent(name)}/tokens/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
 }
 
 // --- Sessions ---

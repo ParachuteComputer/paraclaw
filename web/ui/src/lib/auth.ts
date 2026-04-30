@@ -138,8 +138,18 @@ async function makePkcePair(): Promise<{ verifier: string; challenge: string }> 
   return { verifier, challenge };
 }
 
-/** Kick off the OAuth dance. Top-level navigation; never returns. */
-export async function beginLogin(): Promise<never> {
+/**
+ * Kick off the OAuth dance. Top-level navigation; never returns.
+ *
+ * `extraScopes` lets a caller request narrow per-vault scopes
+ * (`vault:<name>:admin`) on top of `REQUESTED_SCOPES`. The vault detail
+ * page (paraclaw#38 Phase 3) uses this when the operator's existing JWT
+ * doesn't carry admin for the targeted vault — re-running the OAuth flow
+ * with the narrow scope appended produces a JWT that does, without
+ * widening every other operator's grant. Duplicates are de-duped so the
+ * hub's consent screen doesn't show the same scope twice.
+ */
+export async function beginLogin(extraScopes: string[] = []): Promise<never> {
   const { hubOrigin } = await getDiscovery();
   const clientId = await ensureClient(hubOrigin);
   const { verifier, challenge } = await makePkcePair();
@@ -152,11 +162,16 @@ export async function beginLogin(): Promise<never> {
     hub_origin: hubOrigin,
   };
   writeJson(sessionStorage, FLOW_KEY, flow);
+  const scopes = new Set(REQUESTED_SCOPES.split(/\s+/).filter(Boolean));
+  for (const s of extraScopes) {
+    const trimmed = s.trim();
+    if (trimmed) scopes.add(trimmed);
+  }
   const u = new URL(`${hubOrigin}/oauth/authorize`);
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirectUri);
   u.searchParams.set("response_type", "code");
-  u.searchParams.set("scope", REQUESTED_SCOPES);
+  u.searchParams.set("scope", Array.from(scopes).join(" "));
   u.searchParams.set("code_challenge", challenge);
   u.searchParams.set("code_challenge_method", "S256");
   u.searchParams.set("state", state);
