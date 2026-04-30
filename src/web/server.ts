@@ -22,7 +22,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 
 import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR } from '../config.js';
 import { openDb, type Database } from '../db/connection.js';
@@ -52,7 +51,6 @@ import {
   type AuthResult,
   type ClawScope,
 } from './auth.js';
-import { fetchHubVaults } from './hub-discovery.js';
 import { handleMcpHttp } from '../mcp/http.js';
 import { handleAppsRoute } from './routes/apps.js';
 import { handleApprovalsRoute } from './routes/approvals.js';
@@ -62,6 +60,8 @@ import { handleOauthProvidersRoute } from './routes/oauth-providers.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
+import { handleVaultsRoute } from './routes/vaults.js';
+import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
@@ -134,39 +134,6 @@ function getAgentGroup(folder: string): AgentGroupView | null {
   } finally {
     db.close();
   }
-}
-
-/**
- * Shell out to `parachute vault tokens create`. Captures stdout, parses the
- * `pvt_…` line. Used by the attach flow so the user never types/pastes a
- * raw token through the UI.
- */
-function mintVaultToken(opts: { scope: VaultScope; label: string }): Promise<{ token: string; label: string }> {
-  return new Promise((resolve, reject) => {
-    const args = ['vault', 'tokens', 'create', '--scope', opts.scope, '--label', opts.label];
-    const proc = spawn('parachute', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-    proc.on('error', (err) => reject(err));
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`parachute vault tokens create exited ${code}: ${stderr.trim() || stdout.trim()}`));
-        return;
-      }
-      const m = stdout.match(/Token:\s+(pvt_[A-Za-z0-9_-]+)/);
-      if (!m) {
-        reject(new Error(`could not parse pvt_… from CLI output:\n${stdout}`));
-        return;
-      }
-      resolve({ token: m[1], label: opts.label });
-    });
-  });
 }
 
 const json = (res: http.ServerResponse, status: number, body: unknown): void => {
@@ -354,15 +321,27 @@ async function handleApi(
     return;
   }
 
-  if (pathname === '/api/vaults' && method === 'GET') {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+  if (pathname === '/api/vaults' || pathname.startsWith('/api/vaults/')) {
+    // /tokens and /tokens/:id forward to the vault — admin-gated. Refresh
+    // and detail views are claw:read. Refer to § API surface in
+    // docs/design/2026-04-29-vault-management-ui.md for the full table.
+    const isTokenPath = /\/tokens(\/[^/]+)?$/.test(pathname);
+    const required: ClawScope = isTokenPath ? SCOPE_CLAW_ADMIN : SCOPE_CLAW_READ;
+    if (!(await gate(req, res, required))) return;
     try {
-      const vaults = await fetchHubVaults();
-      json(res, 200, { vaults });
+      const handled = await handleVaultsRoute({
+        pathname,
+        method,
+        url,
+        req,
+        res,
+        authHeader: req.headers.authorization ?? '',
+      });
+      if (handled) return;
     } catch (err) {
-      error(res, 502, err instanceof Error ? err.message : String(err));
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
     }
-    return;
   }
 
   if (pathname === '/api/groups' && method === 'POST') {
@@ -406,15 +385,36 @@ async function handleApi(
           return;
         }
         const tokenLabel = body.vault.tokenLabel ?? `claw-${folder}`;
+        const vaultBaseUrl = body.vault.vaultBaseUrl ?? 'http://127.0.0.1:1940/vault/default';
         let token = body.vault.token;
         if (!token) {
-          const minted = await mintVaultToken({ scope, label: tokenLabel });
-          token = minted.token;
+          // Implicit mint: forward operator's JWT to the vault. The shell-out
+          // path that used to live here (`mintVaultToken`) is gone — see
+          // docs/design/2026-04-29-vault-management-ui.md § Admin auth model.
+          const minted = await mintVaultTokenHttp({
+            vaultBaseUrl,
+            authHeader: req.headers.authorization ?? '',
+            label: tokenLabel,
+            scopes: [scope],
+          });
+          if (minted.status >= 400) {
+            const msg =
+              (minted.body as { error?: string; message?: string }).message ??
+              (minted.body as { error?: string }).error ??
+              `vault returned ${minted.status}`;
+            error(res, minted.status, `vault token mint failed: ${msg}`);
+            return;
+          }
+          token = (minted.body as { token?: string }).token;
+          if (!token) {
+            error(res, 502, 'vault mint response missing token');
+            return;
+          }
           mintedVaultToken = true;
         }
         vaultArg = {
           scope,
-          vaultBaseUrl: body.vault.vaultBaseUrl,
+          vaultBaseUrl,
           tokenLabel,
           token,
           mcpName: body.vault.mcpName,
@@ -494,8 +494,25 @@ async function handleApi(
 
         let token = body.token;
         if (!token) {
-          const minted = await mintVaultToken({ scope, label: tokenLabel });
-          token = minted.token;
+          const minted = await mintVaultTokenHttp({
+            vaultBaseUrl,
+            authHeader: req.headers.authorization ?? '',
+            label: tokenLabel,
+            scopes: [scope],
+          });
+          if (minted.status >= 400) {
+            const msg =
+              (minted.body as { error?: string; message?: string }).message ??
+              (minted.body as { error?: string }).error ??
+              `vault returned ${minted.status}`;
+            error(res, minted.status, `vault token mint failed: ${msg}`);
+            return;
+          }
+          token = (minted.body as { token?: string }).token;
+          if (!token) {
+            error(res, 502, 'vault mint response missing token');
+            return;
+          }
         }
 
         attachVaultToGroup({
@@ -561,10 +578,65 @@ async function handleApi(
 
     if (sub === '/detach-vault' && method === 'POST') {
       try {
-        const body = await readJsonBody<{ mcpName?: string }>(req);
-        detachVaultFromGroup(folder, body.mcpName ?? DEFAULT_VAULT_MCP_NAME);
+        const body = await readJsonBody<{ mcpName?: string; revokeToken?: boolean }>(req);
+        const mcpName = body.mcpName ?? DEFAULT_VAULT_MCP_NAME;
+
+        // Optional revoke-on-detach: forward operator's JWT to vault. Read
+        // the attachment record before detaching so we still have its
+        // tokenLabel/vaultBaseUrl. We do NOT cross-resolve the vault name
+        // from the hub's well-known — the attachment carries the canonical
+        // base URL already, so we forward directly.
+        let revokedTokenId: string | null = null;
+        let revokeError: string | null = null;
+        if (body.revokeToken) {
+          const attachment = readVaultAttachment(folder, mcpName);
+          if (!attachment) {
+            error(res, 409, `cannot revoke: no vault attachment found for group ${folder}`);
+            return;
+          }
+          // Look up the token id by label — vault revoke is by id, not label.
+          const list = await forwardToVault({
+            method: 'GET',
+            vaultBaseUrl: attachment.vaultBaseUrl,
+            subpath: '/tokens',
+            authHeader: req.headers.authorization ?? '',
+          });
+          if (list.status >= 400) {
+            const msg =
+              (list.body as { error?: string; message?: string }).message ??
+              (list.body as { error?: string }).error ??
+              `vault returned ${list.status}`;
+            error(res, list.status, `vault token list failed: ${msg}`);
+            return;
+          }
+          const tokens = (list.body as { tokens?: { id: string; label: string }[] }).tokens ?? [];
+          const match = tokens.find((t) => t.label === attachment.tokenLabel);
+          if (!match) {
+            // Label has no matching token — already revoked or never minted.
+            // Continue with detach but report the discrepancy in the response.
+            revokeError = `no vault token matched label ${attachment.tokenLabel}`;
+          } else {
+            const del = await forwardToVault({
+              method: 'DELETE',
+              vaultBaseUrl: attachment.vaultBaseUrl,
+              subpath: `/tokens/${encodeURIComponent(match.id)}`,
+              authHeader: req.headers.authorization ?? '',
+            });
+            if (del.status >= 400) {
+              const msg =
+                (del.body as { error?: string; message?: string }).message ??
+                (del.body as { error?: string }).error ??
+                `vault returned ${del.status}`;
+              error(res, del.status, `vault revoke failed: ${msg}`);
+              return;
+            }
+            revokedTokenId = match.id;
+          }
+        }
+
+        detachVaultFromGroup(folder, mcpName);
         const updated = getAgentGroup(folder);
-        json(res, 200, { group: updated });
+        json(res, 200, { group: updated, revokedTokenId, revokeError });
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));
       }

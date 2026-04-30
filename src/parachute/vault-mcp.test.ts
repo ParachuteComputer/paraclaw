@@ -6,10 +6,14 @@
  * reachable from inside the Docker container, where loopback would
  * otherwise resolve to the container itself.
  */
-import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { GROUPS_DIR } from '../config.js';
 import type { ContainerConfig } from '../container-config.js';
-import { localhostToContainerHost, rewriteMcpUrlsForContainer } from './vault-mcp.js';
+import { listVaultAttachments, localhostToContainerHost, rewriteMcpUrlsForContainer } from './vault-mcp.js';
 
 describe('localhostToContainerHost', () => {
   it('rewrites 127.0.0.1 → host.docker.internal, preserving port + path + scheme', () => {
@@ -147,5 +151,101 @@ describe('rewriteMcpUrlsForContainer', () => {
     expect((out.mcpServers.vault as { url: string }).url).toBe('http://host.docker.internal:1940/vault/default/mcp');
     expect((out.mcpServers.notes as { url: string }).url).toBe('http://host.docker.internal:1942/notes/mcp');
     expect((out.mcpServers.public as { url: string }).url).toBe('https://api.example.com/mcp');
+  });
+});
+
+describe('listVaultAttachments', () => {
+  const created: string[] = [];
+
+  function makeGroup(folder: string, parachuteJson: object | null): string {
+    const dir = path.join(GROUPS_DIR, folder);
+    fs.mkdirSync(dir, { recursive: true });
+    if (parachuteJson !== null) {
+      fs.writeFileSync(path.join(dir, 'parachute.json'), JSON.stringify(parachuteJson, null, 2));
+    }
+    created.push(dir);
+    return folder;
+  }
+
+  afterEach(() => {
+    while (created.length > 0) {
+      const dir = created.pop()!;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns one entry per (folder, mcpName) for folders with attachments', () => {
+    const a = makeGroup(`vmtest-a-${Date.now()}`, {
+      vault: {
+        'parachute-vault': {
+          vaultBaseUrl: 'https://h/vault/work',
+          scope: 'vault:read',
+          tokenLabel: 'claw-a',
+          attachedAt: '2026-04-29T00:00:00Z',
+        },
+      },
+    });
+    const b = makeGroup(`vmtest-b-${Date.now()}`, {
+      vault: {
+        'parachute-vault': {
+          vaultBaseUrl: 'https://h/vault/personal',
+          scope: 'vault:write',
+          tokenLabel: 'claw-b',
+          attachedAt: '2026-04-29T00:00:00Z',
+        },
+      },
+    });
+    const entries = listVaultAttachments([a, b]);
+    expect(entries).toHaveLength(2);
+    expect(entries.find((e) => e.folder === a)?.attachment.tokenLabel).toBe('claw-a');
+    expect(entries.find((e) => e.folder === b)?.attachment.tokenLabel).toBe('claw-b');
+  });
+
+  it('skips folders without parachute.json (forgiveness for unattached groups)', () => {
+    const a = makeGroup(`vmtest-noattach-${Date.now()}`, null);
+    const b = makeGroup(`vmtest-attach-${Date.now()}`, {
+      vault: {
+        'parachute-vault': {
+          vaultBaseUrl: 'https://h/vault/work',
+          scope: 'vault:read',
+          tokenLabel: 'claw-x',
+          attachedAt: '2026-04-29T00:00:00Z',
+        },
+      },
+    });
+    const entries = listVaultAttachments([a, b]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.folder).toBe(b);
+  });
+
+  it('silently skips malformed parachute.json — never throws', () => {
+    const folder = `vmtest-bad-${Date.now()}`;
+    const dir = path.join(GROUPS_DIR, folder);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'parachute.json'), 'not json {{{');
+    created.push(dir);
+    expect(listVaultAttachments([folder])).toEqual([]);
+  });
+
+  it('returns one entry per mcpName when a folder has multiple attachments', () => {
+    const folder = makeGroup(`vmtest-multi-${Date.now()}`, {
+      vault: {
+        'parachute-vault': {
+          vaultBaseUrl: 'https://h/vault/work',
+          scope: 'vault:read',
+          tokenLabel: 'claw-work',
+          attachedAt: '2026-04-29T00:00:00Z',
+        },
+        'parachute-vault-personal': {
+          vaultBaseUrl: 'https://h/vault/personal',
+          scope: 'vault:write',
+          tokenLabel: 'claw-personal',
+          attachedAt: '2026-04-29T00:00:00Z',
+        },
+      },
+    });
+    const entries = listVaultAttachments([folder]);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((e) => e.mcpName).sort()).toEqual(['parachute-vault', 'parachute-vault-personal']);
   });
 });
