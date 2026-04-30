@@ -222,7 +222,10 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
   const [detachTarget, setDetachTarget] = useState<VaultAttachedGroup | null>(null);
   const [minted, setMinted] = useState<MintedVaultToken | null>(null);
   const [mintedCopied, setMintedCopied] = useState(false);
-  const [mintedDismissed, setMintedDismissed] = useState<{ token: MintedVaultToken } | null>(null);
+  // Only id + label here — the full MintedVaultToken carries the plaintext,
+  // and we only need the label for display + id to look up the live
+  // VaultToken if the operator clicks the inline 'Revoke' shortcut.
+  const [mintedDismissed, setMintedDismissed] = useState<{ id: string; label: string } | null>(null);
 
   const onMinted = (token: MintedVaultToken) => {
     setMinted(token);
@@ -233,11 +236,23 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
   const onCloseMinted = (copied: boolean) => {
     if (minted && !copied) {
-      setMintedDismissed({ token: minted });
+      setMintedDismissed({ id: minted.id, label: minted.label });
     }
     setMinted(null);
     setMintedCopied(false);
     reload();
+  };
+
+  const onRevokeFromBanner = () => {
+    if (!mintedDismissed) return;
+    const live = state.tokens.find((t) => t.id === mintedDismissed.id);
+    // The reload() in onCloseMinted should have populated state.tokens with
+    // the new id; if it hasn't (race or vault hiccup), fall through silently
+    // — the operator can still revoke from the tokens list.
+    if (live) {
+      setRevokeTarget(live);
+      setMintedDismissed(null);
+    }
   };
 
   return (
@@ -263,10 +278,13 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
       {mintedDismissed && (
         <div className="warn-banner" style={{ marginTop: '1rem' }}>
-          Token <code>{mintedDismissed.token.label}</code> was minted but you didn't copy the
+          Token <code>{mintedDismissed.label}</code> was minted but you didn't copy the
           plaintext. The plaintext is gone — vault stores only a hash. Revoke this token now and
           mint a new one if you need access.
           <div className="actions" style={{ marginTop: '0.5rem' }}>
+            <button type="button" className="danger" onClick={onRevokeFromBanner}>
+              Revoke {mintedDismissed.label}
+            </button>
             <button
               type="button"
               className="secondary"
