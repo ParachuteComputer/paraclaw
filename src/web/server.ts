@@ -66,6 +66,8 @@ import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
 import { getChannelAdapter } from '../channels/channel-registry.js';
+import { validateDiscordBotToken } from './discord-validate.js';
+import { validateTelegramBotToken } from './telegram-validate.js';
 
 const PROJECT_ROOT = process.cwd();
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
@@ -222,6 +224,28 @@ async function handleApi(
       error(res, 500, err instanceof Error ? err.message : String(err));
       return;
     }
+  }
+
+  // Token validation — pre-install, no DB writes, the wizard hits this from
+  // /channels/new before persisting anything. claw:write is enough; the
+  // /api/channels/* CRUD block below is admin-gated and would over-reject.
+  if (
+    method === 'POST' &&
+    (pathname === '/api/channels/discord/test' || pathname === '/api/channels/telegram/test')
+  ) {
+    if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
+    try {
+      const body = await readJsonBody<{ token?: string }>(req);
+      const token = body.token ?? '';
+      const result =
+        pathname === '/api/channels/discord/test'
+          ? await validateDiscordBotToken(token)
+          : await validateTelegramBotToken(token);
+      json(res, result.ok ? 200 : result.status, result);
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+    }
+    return;
   }
 
   if (pathname === '/api/channels' || pathname.startsWith('/api/channels/')) {
