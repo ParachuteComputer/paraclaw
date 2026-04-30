@@ -136,6 +136,52 @@ describe('VaultDetail — mint flow', () => {
   });
 });
 
+describe('VaultDetail — dismiss without copying', () => {
+  it('renders the warn-banner when the operator closes the card without copying', async () => {
+    const minted: api.MintedVaultToken = {
+      token: 'pvt_uncopied_secret',
+      id: 't_unc',
+      label: 'claw-uncopied',
+      scopes: ['vault:read'],
+      created_at: '2026-04-29T10:00:00Z',
+    };
+    vi.mocked(api.mintVaultToken).mockResolvedValue(minted);
+
+    const user = userEvent.setup();
+    renderAt('/vaults/work');
+
+    await waitFor(() => {
+      expect(screen.getByText('Mint new token')).toBeInTheDocument();
+    });
+
+    const labelInput = screen.getByLabelText('Label') as HTMLInputElement;
+    await user.clear(labelInput);
+    await user.type(labelInput, 'claw-uncopied');
+    await user.click(screen.getByRole('button', { name: 'Mint token' }));
+
+    // Plaintext appears in the copy-card
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('pvt_uncopied_secret')).toBeInTheDocument();
+    });
+
+    // Operator closes the card WITHOUT clicking Copy.
+    await user.click(screen.getByRole('button', { name: 'Close without copying' }));
+
+    // Warn-banner appears, naming the token by label, with both inline
+    // Revoke and Dismiss CTAs.
+    await waitFor(() => {
+      expect(
+        screen.getByText(/was minted but you didn't copy the plaintext/),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Revoke claw-uncopied' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+
+    // Plaintext is gone from the DOM — vault stored only a hash.
+    expect(screen.queryByDisplayValue('pvt_uncopied_secret')).not.toBeInTheDocument();
+  });
+});
+
 describe('VaultDetail — revoke modal', () => {
   it('opens confirm modal with one-way copy and only revokes on explicit click', async () => {
     vi.mocked(api.revokeVaultToken).mockResolvedValue(undefined);
