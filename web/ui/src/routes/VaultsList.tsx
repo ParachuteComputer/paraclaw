@@ -24,10 +24,20 @@ import {
   listVaults,
   refreshVaults,
   tryListVaultTokenCount,
+  type TokenCountProbe,
   type VaultListing,
 } from '../lib/api.ts';
 
-type CountState = number | null | 'unauthorized';
+/**
+ * `null` is in-flight (initial load before the per-row enrichment Promise
+ * settles). `'unauthorized'` only fires for the token-count column when
+ * the vault returns 401/403 — i.e. the operator hasn't consented to
+ * `vault:<name>:admin` yet — and renders a Manage-to-grant hint.
+ * `'error'` is the catch-all for everything else (network blip, 5xx,
+ * malformed body) so we don't mislabel a server failure as an auth
+ * problem the operator can fix by clicking Manage.
+ */
+type CountState = number | null | 'unauthorized' | 'error';
 
 interface VaultRow {
   vault: VaultListing;
@@ -61,14 +71,14 @@ export function VaultsList() {
             if (r.vault.name !== name) return r;
             return {
               ...r,
+              // getVaultDetail only requires `claw:read`, which the session
+              // already has if the operator hit /vaults at all. A 401/403
+              // here would be re-auth'd by `request<T>` before throwing,
+              // so a rejected promise is a 5xx / network blip — not an
+              // auth issue. Don't mislabel it as unauthorized.
               attachedGroupsCount:
-                detail.status === 'fulfilled' ? detail.value.attachedGroups.length : 'unauthorized',
-              tokenCount:
-                count.status === 'fulfilled'
-                  ? count.value === null
-                    ? 'unauthorized'
-                    : count.value
-                  : 'unauthorized',
+                detail.status === 'fulfilled' ? detail.value.attachedGroups.length : 'error',
+              tokenCount: tokenProbeToCountState(count),
             };
           }),
         };
@@ -100,7 +110,21 @@ export function VaultsList() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+        const message = err instanceof Error ? err.message : String(err);
+        if (isRefresh) {
+          // Refresh-while-data-shown: don't blow the page away. Keep the
+          // (now-stale) table visible and surface the failure as a banner
+          // above it so the operator can read the cause and retry. If the
+          // page was already in `error` (initial load failed and user hit
+          // Retry), update the error message in place so the full-page
+          // error UI reflects the latest cause instead of a stale one.
+          setRefreshError(message);
+          setState((prev) => (prev.kind === 'error' ? { kind: 'error', message } : prev));
+        } else {
+          // Initial load with no data yet — full-page error is the
+          // honest state; nothing to preserve.
+          setState({ kind: 'error', message });
+        }
       })
       .finally(() => {
         if (cancelled) return;
@@ -225,11 +249,25 @@ function VaultRowView({ row }: { row: VaultRow }) {
   );
 }
 
+function tokenProbeToCountState(
+  result: PromiseSettledResult<TokenCountProbe>,
+): CountState {
+  if (result.status === 'rejected') return 'error';
+  switch (result.value.kind) {
+    case 'count':
+      return result.value.value;
+    case 'unauthorized':
+      return 'unauthorized';
+    case 'error':
+      return 'error';
+  }
+}
+
 function CountBadge({ label, value }: { label: string; value: CountState }) {
   if (value === null) {
     return (
       <span className="tag muted" title={`Loading ${label}…`}>
-        {label}: …
+        {`${label}: …`}
       </span>
     );
   }
@@ -242,9 +280,16 @@ function CountBadge({ label, value }: { label: string; value: CountState }) {
         className="tag muted"
         title={`Click Manage to grant vault:${label} access.`}
       >
-        {label}: —
+        {`${label}: —`}
       </span>
     );
   }
-  return <span className="tag muted">{label}: {value}</span>;
+  if (value === 'error') {
+    return (
+      <span className="tag muted" title={`Couldn't load ${label} — vault may be down. Click Refresh from hub or Manage to retry.`}>
+        {`${label}: ?`}
+      </span>
+    );
+  }
+  return <span className="tag muted">{`${label}: ${value}`}</span>;
 }
