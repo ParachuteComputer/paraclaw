@@ -842,13 +842,15 @@ function DetachModal({
   const detach = async (revokeToken: boolean) => {
     setBusy(true);
     try {
-      // Thread the narrow per-vault admin scope so a 403 on the server-side
-      // revoke path triggers re-auth with the right scope (paraclaw#56) —
-      // only matters when revokeToken is true, but harmless otherwise.
+      // Thread the narrow per-vault admin scope only when we're actually
+      // calling vault — Keep-token (revokeToken=false) just hits the
+      // paraclaw-side claw:write check, which the broad re-auth set
+      // already covers. Asking for vault:<name>:admin on the Keep path
+      // would be a no-op extra scope on the consent screen.
       const result = await detachVault(target.folder, {
         mcpName: target.mcpName,
         revokeToken,
-        authExtraScopes: [`vault:${vaultName}:admin`],
+        authExtraScopes: revokeToken ? [`vault:${vaultName}:admin`] : undefined,
       });
       onClose({
         group: result.group.folder,
