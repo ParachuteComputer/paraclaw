@@ -163,6 +163,41 @@ export function readVaultAttachment(folder: string, mcpName = DEFAULT_VAULT_MCP_
 }
 
 /**
+ * Read every vault attachment record across the given folders. Used by the
+ * `/claw/vaults` UI to compute "this token is attached to these groups" by
+ * matching `tokenLabel` against the vault's listed tokens.
+ *
+ * Returns one entry per (folder, mcpName) — a single group can have multiple
+ * attachments under different MCP names, though in practice we only use
+ * `parachute-vault`. Folders without a parachute.json or with malformed JSON
+ * are silently skipped (same forgiveness as `readVaultAttachment`).
+ */
+export interface VaultAttachmentEntry {
+  folder: string;
+  mcpName: string;
+  attachment: VaultAttachment;
+}
+
+export function listVaultAttachments(folders: string[]): VaultAttachmentEntry[] {
+  const out: VaultAttachmentEntry[] = [];
+  for (const folder of folders) {
+    const p = parachuteJsonPath(folder);
+    if (!fs.existsSync(p)) continue;
+    let raw: { vault?: Record<string, VaultAttachment> };
+    try {
+      raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!raw.vault) continue;
+    for (const [mcpName, attachment] of Object.entries(raw.vault)) {
+      out.push({ folder, mcpName, attachment });
+    }
+  }
+  return out;
+}
+
+/**
  * Detach a vault from an agent group. Removes the MCP entry from
  * `container.json` and the attach record from `parachute.json`. Does NOT
  * revoke the vault token — caller is responsible for `parachute vault
