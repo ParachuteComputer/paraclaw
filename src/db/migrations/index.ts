@@ -29,6 +29,24 @@ export interface Migration {
   version: number;
   name: string;
   up: (db: Database) => void;
+  /**
+   * Set true for migrations that recreate a parent table (the SQLite
+   * "build new + copy + drop + rename" dance). The runner toggles
+   * `PRAGMA foreign_keys = OFF` connection-scope BEFORE entering the
+   * wrapping transaction and re-enables it after.
+   *
+   * `PRAGMA defer_foreign_keys = TRUE` is NOT enough — it only delays
+   * the FK check to commit-time, where any pre-existing orphan row in a
+   * referencing table (e.g. a dangling `sessions.agent_group_id` left
+   * over from pre-FK-enforcement days) will still fail the migration on
+   * a real install. SQLite forbids changing `foreign_keys` mid-txn, so
+   * the toggle has to live in the runner, not the migration body.
+   *
+   * Migrations setting this MUST NOT introduce new orphan rows; the
+   * fix-existing-orphans question is separate (and out of scope for a
+   * schema-shape migration like 025).
+   */
+  disableForeignKeys?: boolean;
 }
 
 const migrations: Migration[] = [
@@ -82,16 +100,24 @@ export function runMigrations(db: Database): void {
   log.info('Running migrations', { count: pending.length });
 
   for (const m of pending) {
-    db.transaction(() => {
-      m.up(db);
-      const next = (db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS v FROM schema_version').get() as { v: number })
-        .v;
-      db.prepare('INSERT INTO schema_version (version, name, applied) VALUES (?, ?, ?)').run(
-        next,
-        m.name,
-        new Date().toISOString(),
-      );
-    })();
+    if (m.disableForeignKeys) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        m.up(db);
+        const next = (
+          db.prepare('SELECT COALESCE(MAX(version), 0) + 1 AS v FROM schema_version').get() as {
+            v: number;
+          }
+        ).v;
+        db.prepare('INSERT INTO schema_version (version, name, applied) VALUES (?, ?, ?)').run(
+          next,
+          m.name,
+          new Date().toISOString(),
+        );
+      })();
+    } finally {
+      if (m.disableForeignKeys) db.exec('PRAGMA foreign_keys = ON');
+    }
     log.info('Migration applied', { name: m.name });
   }
 }
