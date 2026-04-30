@@ -217,11 +217,22 @@ export interface CreateGroupInput {
   };
 }
 
-export async function createGroup(input: CreateGroupInput): Promise<{
+export async function createGroup(
+  input: CreateGroupInput,
+  // Same scope-threading rationale as `attachVault`: when `input.vault` is
+  // set, the create handler runs the implicit-mint via the operator's JWT
+  // and 403s if it lacks `vault:<name>:admin`. NewGroupWizard knows the
+  // picked vault name and threads it; an attach-less create can omit it.
+  options: { authExtraScopes?: string[] } = {},
+): Promise<{
   group: AgentGroupView;
   mintedVaultToken: boolean;
 }> {
-  return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(`/groups`, { method: 'POST', json: input });
+  return request<{ group: AgentGroupView; mintedVaultToken: boolean }>(`/groups`, {
+    method: 'POST',
+    json: input,
+    authExtraScopes: options.authExtraScopes,
+  });
 }
 
 // --- Vaults ---
@@ -320,10 +331,17 @@ export async function attachVault(
     token?: string;
     mcpName?: string;
   },
+  // The server-side `/attach-vault` handler forwards the operator's JWT to
+  // the vault for the implicit-mint step. If the JWT is missing
+  // `vault:<name>:admin`, the vault 403s — and a re-auth without the narrow
+  // scope just loops (paraclaw#56). Callers that know the picked vault name
+  // (GroupDetail, NewGroupWizard) thread it here so consent grants the
+  // right scope.
+  options: { authExtraScopes?: string[] } = {},
 ): Promise<{ group: AgentGroupView; mintedToken: boolean }> {
   return request<{ group: AgentGroupView; mintedToken: boolean }>(
     `/groups/${encodeURIComponent(folder)}/attach-vault`,
-    { method: 'POST', json: input },
+    { method: 'POST', json: input, authExtraScopes: options.authExtraScopes },
   );
 }
 

@@ -128,6 +128,69 @@ describe('detachVault — auth gate on 403', () => {
   });
 });
 
+describe('attachVault — auth gate on 403', () => {
+  it('threads authExtraScopes from caller through to beginLogin (paraclaw#65)', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(403, {
+        error: "vault token mint failed: This endpoint requires the 'vault:techne:admin' scope",
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    await expect(
+      api.attachVault(
+        'techne',
+        { scope: 'vault:read', vaultBaseUrl: 'https://example/vault/techne' },
+        { authExtraScopes: ['vault:techne:admin'] },
+      ),
+    ).rejects.toThrow(/beginLogin called/);
+
+    expect(auth.beginLogin).toHaveBeenCalledWith(['vault:techne:admin']);
+  });
+
+  it('omits scope hint when caller did not supply one', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(403, {
+        error: "vault token mint failed: This endpoint requires the 'vault:techne:admin' scope",
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    await expect(
+      api.attachVault('techne', { scope: 'vault:read', vaultBaseUrl: 'https://example/vault/techne' }),
+    ).rejects.toThrow(/beginLogin called/);
+
+    expect(auth.beginLogin).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe('createGroup — auth gate on 403', () => {
+  it('threads authExtraScopes when create-with-attach 403s on vault scope (paraclaw#65)', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(403, {
+        error: "vault token mint failed: This endpoint requires the 'vault:techne:admin' scope",
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    await expect(
+      api.createGroup(
+        {
+          name: 'Techne',
+          folder: 'techne',
+          vault: { scope: 'vault:read', vaultBaseUrl: 'https://example/vault/techne' },
+        },
+        { authExtraScopes: ['vault:techne:admin'] },
+      ),
+    ).rejects.toThrow(/beginLogin called/);
+
+    expect(auth.beginLogin).toHaveBeenCalledWith(['vault:techne:admin']);
+  });
+});
+
 describe('non-scope 403 does NOT trigger re-auth', () => {
   it('throws HttpError(403) when body is unrelated', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(403, { error: 'forbidden' }));

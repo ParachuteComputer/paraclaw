@@ -80,12 +80,24 @@ export function GroupDetail() {
     setSubmitting(true);
     setFlash(null);
     try {
-      const result = await attachVault(folder, {
-        scope,
-        vaultBaseUrl: vaultBaseUrl.trim().replace(/\/+$/, ''),
-        tokenLabel: tokenLabel.trim() || undefined,
-        token: pasteToken.trim() || undefined,
-      });
+      // Thread the picked vault name into re-auth on 403. The server's
+      // implicit-mint forwards our JWT to the vault, which 403s on missing
+      // `vault:<name>:admin` — without this hint, beginLogin would re-auth
+      // with broad scopes only, the new JWT would still lack the narrow
+      // scope, and we'd loop. (Detach below intentionally omits this — the
+      // detach path doesn't know its target vault from the call site.)
+      const result = await attachVault(
+        folder,
+        {
+          scope,
+          vaultBaseUrl: vaultBaseUrl.trim().replace(/\/+$/, ''),
+          tokenLabel: tokenLabel.trim() || undefined,
+          token: pasteToken.trim() || undefined,
+        },
+        {
+          authExtraScopes: pickedVaultName ? [`vault:${pickedVaultName}:admin`] : undefined,
+        },
+      );
       setGroup(result.group);
       setFlash({
         kind: 'ok',
