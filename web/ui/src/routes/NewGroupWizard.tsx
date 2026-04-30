@@ -101,19 +101,28 @@ export function NewGroupWizard() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const result = await createGroup({
-        name: name.trim(),
-        folder,
-        instructions: instructions.trim() || undefined,
-        vault: attachVault
-          ? {
-              scope,
-              vaultBaseUrl: vaultBaseUrl.trim().replace(/\/+$/, ''),
-              tokenLabel: tokenLabel.trim() || undefined,
-              token: pasteToken.trim() || undefined,
-            }
-          : undefined,
-      });
+      const result = await createGroup(
+        {
+          name: name.trim(),
+          folder,
+          instructions: instructions.trim() || undefined,
+          vault: attachVault
+            ? {
+                scope,
+                vaultBaseUrl: vaultBaseUrl.trim().replace(/\/+$/, ''),
+                tokenLabel: tokenLabel.trim() || undefined,
+                token: pasteToken.trim() || undefined,
+              }
+            : undefined,
+        },
+        {
+          // Same scope-threading as GroupDetail's attach: the create handler
+          // forwards our JWT to the vault for the implicit-mint, and a 403
+          // without this hint would loop on re-auth (paraclaw#56).
+          authExtraScopes:
+            attachVault && pickedVaultName ? [`vault:${pickedVaultName}:admin`] : undefined,
+        },
+      );
       navigate(`/groups/${encodeURIComponent(result.group.folder)}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
