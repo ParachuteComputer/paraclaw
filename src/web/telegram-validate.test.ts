@@ -21,12 +21,9 @@ function fakeFetch(impl: (url: string) => { status?: number; body: unknown }): t
 
 describe('validateTelegramBotToken', () => {
   it('rejects an empty token without fetching', async () => {
-    const result = await validateTelegramBotToken(
-      '   ',
-      (() => {
-        throw new Error('fetch should not be called');
-      }) as unknown as typeof fetch,
-    );
+    const result = await validateTelegramBotToken('   ', (() => {
+      throw new Error('fetch should not be called');
+    }) as unknown as typeof fetch);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(400);
@@ -35,12 +32,9 @@ describe('validateTelegramBotToken', () => {
   });
 
   it('rejects a malformed token shape without fetching', async () => {
-    const result = await validateTelegramBotToken(
-      'not-a-real-token',
-      (() => {
-        throw new Error('fetch should not be called');
-      }) as unknown as typeof fetch,
-    );
+    const result = await validateTelegramBotToken('not-a-real-token', (() => {
+      throw new Error('fetch should not be called');
+    }) as unknown as typeof fetch);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(400);
