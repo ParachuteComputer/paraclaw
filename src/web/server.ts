@@ -234,13 +234,21 @@ async function handleApi(
   // to HTTP 400 so the SPA's auth wrapper doesn't mistake an upstream
   // identity rejection for our hub-JWT being expired and trigger a
   // re-auth loop. Body still carries the precise validator status field.
-  if (method === 'POST' && (pathname === '/api/channels/discord/test' || pathname === '/api/channels/telegram/test')) {
+  if (method === 'POST' && /^\/api\/channels\/[^/]+\/test$/.test(pathname)) {
     if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
+    const adapter = pathname.split('/')[3];
+    if (adapter !== 'discord' && adapter !== 'telegram') {
+      // Without this branch, slack/whatsapp/etc fall through to the
+      // /api/channels/:id CRUD block and the operator sees a misleading
+      // "channel wire not found" instead of a clean unknown-adapter 404.
+      error(res, 404, `unknown adapter: ${adapter}`);
+      return;
+    }
     try {
       const body = await readJsonBody<{ token?: string }>(req);
       const token = body.token ?? '';
       const result =
-        pathname === '/api/channels/discord/test'
+        adapter === 'discord'
           ? await validateDiscordBotToken(token)
           : await validateTelegramBotToken(token);
       const httpStatus = result.ok ? 200 : result.status === 401 ? 400 : result.status;
