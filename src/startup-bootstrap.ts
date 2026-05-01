@@ -54,9 +54,7 @@ export function channelTokenSecretName(channelType: string, botId: string): stri
  * no `.env` mapping or no resolved botId.
  */
 export function bootstrapChannelTokensToSecrets(): void {
-  const envVars = Object.values(TOKEN_ENV_FOR_CHANNEL).filter(
-    (v): v is string => typeof v === 'string',
-  );
+  const envVars = Object.values(TOKEN_ENV_FOR_CHANNEL).filter((v): v is string => typeof v === 'string');
   const env = readEnvFile(envVars);
   for (const adapter of getActiveAdapters()) {
     if (!adapter.botId) continue;
@@ -103,9 +101,7 @@ export function backfillMessagingGroupsToV2(): number {
        FROM messaging_groups
       WHERE channel_type = @channel_type`,
   );
-  const update = getDb().prepare(
-    `UPDATE messaging_groups SET platform_id = @platform_id WHERE id = @id`,
-  );
+  const update = getDb().prepare(`UPDATE messaging_groups SET platform_id = @platform_id WHERE id = @id`);
   let totalUpgraded = 0;
   for (const adapter of adapters) {
     const channel = adapter.channelType;

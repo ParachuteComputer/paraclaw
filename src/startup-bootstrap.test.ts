@@ -10,10 +10,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  _resetActiveAdaptersForTest,
-  _setActiveAdapterForTest,
-} from './channels/channel-registry.js';
+import { _resetActiveAdaptersForTest, _setActiveAdapterForTest } from './channels/channel-registry.js';
 import type { ChannelAdapter } from './channels/adapter.js';
 import { createMessagingGroup, getMessagingGroup } from './db/messaging-groups.js';
 import { closeDb, initTestDb } from './db/connection.js';
