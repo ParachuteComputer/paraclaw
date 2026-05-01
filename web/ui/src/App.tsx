@@ -11,6 +11,7 @@ import { SessionsList } from "./routes/SessionsList.tsx";
 import { SetupWizard } from "./routes/SetupWizard.tsx";
 import { VaultDetail } from "./routes/VaultDetail.tsx";
 import { VaultsList } from "./routes/VaultsList.tsx";
+import { WireChannelPage } from "./routes/WireChannelPage.tsx";
 
 export function App() {
   // The OAuth callback page is intentionally chrome-free — the user is
@@ -58,6 +59,7 @@ export function App() {
         <Route path="/vaults" element={<VaultsList />} />
         <Route path="/vaults/:name" element={<VaultDetail />} />
         <Route path="/channels" element={<ChannelsList />} />
+        <Route path="/channels/new" element={<WireChannelPage />} />
         <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />
         <Route path="/setup" element={<SetupWizard />} />

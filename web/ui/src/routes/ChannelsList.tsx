@@ -127,15 +127,15 @@ export function ChannelsList() {
     <div>
       <div className="list-header">
         <h2>Channel wirings ({state.wires.length})</h2>
-        <Link to="/setup">
+        <Link to="/channels/new">
           <button className="secondary">+ Wire a new channel</button>
         </Link>
       </div>
 
       <p className="muted">
         Each wire binds a messaging thread (DM, channel, chat) to an agent group with routing rules. New wirings go
-        through the <Link to="/setup">setup wizard</Link> so the channel token can be validated and the platform id
-        captured.
+        through the <Link to="/channels/new">wire-channel page</Link> so the channel token can be validated and the
+        platform id captured.
       </p>
 
       {actionError && <div className="error-banner">{actionError}</div>}
@@ -144,7 +144,7 @@ export function ChannelsList() {
         <div className="empty empty-rich" style={{ marginTop: '1rem' }}>
           <p className="empty-headline">No channels wired yet.</p>
           <p className="muted">
-            Run <Link to="/setup">/setup</Link> to install + wire Discord or Telegram.
+            <Link to="/channels/new">Wire a new channel</Link> to route Discord or Telegram DMs into an agent group.
           </p>
         </div>
       )}
