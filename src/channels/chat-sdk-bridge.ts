@@ -20,6 +20,7 @@ import { log } from '../log.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
+import { encodePlatformId } from '../platform-id.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 
@@ -46,6 +47,16 @@ export type ReplyContextExtractor = (raw: Record<string, any>) => ReplyContext |
 export interface ChatSdkBridgeConfig {
   adapter: Adapter;
   concurrency?: ConcurrencyStrategy;
+  /**
+   * Bot identity for v2 platform_id encoding. The bridge prefixes inbound
+   * platform_ids with `<botId>` so multiple bots on the same channel
+   * (e.g. two Telegram bots in the same install) route to distinct
+   * messaging_groups rows. Outbound deliveries strip the bot dim back out
+   * before handing to the SDK adapter, which only knows the v1 form.
+   *
+   * Rationale: see src/platform-id.ts module comment.
+   */
+  botId: string;
   /** Bot token for authenticating forwarded Gateway events (required for interaction handling). */
   botToken?: string;
   /** Platform-specific reply context extraction. */
@@ -118,8 +129,37 @@ export function splitForLimit(text: string, limit: number): string[] {
 }
 
 export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter {
-  const { adapter } = config;
+  const { adapter, botId } = config;
   const transformText = (t: string): string => (config.transformOutboundText ? config.transformOutboundText(t) : t);
+
+  /**
+   * Insert the bot id into a v1 platform_id from the SDK.
+   * `<channel>:<native>` → `<channel>:<botId>:<native>`.
+   * If the input does not start with `<channel>:` (defensive — shouldn't
+   * happen for Chat-SDK-namespaced ids), it is returned unchanged.
+   */
+  function withBot(sdkPlatformId: string): string {
+    const colon = sdkPlatformId.indexOf(':');
+    if (colon === -1) return sdkPlatformId;
+    const channel = sdkPlatformId.slice(0, colon);
+    const native = sdkPlatformId.slice(colon + 1);
+    return encodePlatformId(channel, botId, native);
+  }
+
+  /**
+   * Inverse of {@link withBot}: strip the bot id from a v2 platform_id so
+   * the SDK adapter sees the form it produced. Tolerates already-v1 input
+   * (legacy queue rows that haven't been backfilled) — passes through.
+   */
+  function withoutBot(v2PlatformId: string): string {
+    const colon = v2PlatformId.indexOf(':');
+    if (colon === -1) return v2PlatformId;
+    const rest = v2PlatformId.slice(colon + 1);
+    if (rest.startsWith(`${botId}:`)) {
+      return `${v2PlatformId.slice(0, colon + 1)}${rest.slice(botId.length + 1)}`;
+    }
+    return v2PlatformId;
+  }
   let chat: Chat;
   let state: SqliteStateAdapter;
   let setupConfig: ChannelSetup;
@@ -219,7 +259,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // engaged. Carry the SDK's `message.isMention` through so mention-mode
       // wirings still fire on in-thread mentions.
       chat.onSubscribedMessage(async (thread, message) => {
-        const channelId = adapter.channelIdFromThreadId(thread.id);
+        const channelId = withBot(adapter.channelIdFromThreadId(thread.id));
         await setupConfig.onInbound(
           channelId,
           thread.id,
@@ -229,7 +269,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
       // @mention in an unsubscribed thread — SDK-confirmed bot mention.
       chat.onNewMention(async (thread, message) => {
-        const channelId = adapter.channelIdFromThreadId(thread.id);
+        const channelId = withBot(adapter.channelIdFromThreadId(thread.id));
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, true));
       });
 
@@ -238,7 +278,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // inside a DM). Router collapses DM sub-threads to one session via
       // is_group=0 short-circuit.
       chat.onDirectMessage(async (thread, message) => {
-        const channelId = adapter.channelIdFromThreadId(thread.id);
+        const channelId = withBot(adapter.channelIdFromThreadId(thread.id));
         log.info('Inbound DM received', {
           adapter: adapter.name,
           channelId,
@@ -259,7 +299,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // so forwarding every one is cheap enough to not need a bridge-side
       // flood gate.
       chat.onNewMessage(/./, async (thread, message) => {
-        const channelId = adapter.channelIdFromThreadId(thread.id);
+        const channelId = withBot(adapter.channelIdFromThreadId(thread.id));
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });
 
@@ -349,9 +389,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     },
 
     async deliver(platformId: string, threadId: string | null, message): Promise<string | undefined> {
-      // platformId is already in the adapter's encoded format (e.g. "telegram:6037840640",
-      // "discord:guildId:channelId") — use it directly as the thread ID
-      const tid = threadId ?? platformId;
+      // platformId arrives in v2 form (`<channel>:<botId>:<native>`); the SDK
+      // adapter only understands v1 (`<channel>:<native>`), so strip the bot
+      // dim before using it as the thread id. threadId, when present, is
+      // already an SDK-native thread id and goes through unchanged.
+      const tid = threadId ?? withoutBot(platformId);
       const content = message.content as Record<string, unknown>;
 
       if (content.operation === 'edit' && content.messageId) {
@@ -437,7 +479,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     },
 
     async setTyping(platformId: string, threadId: string | null) {
-      const tid = threadId ?? platformId;
+      const tid = threadId ?? withoutBot(platformId);
       await adapter.startTyping(tid);
     },
 
@@ -474,7 +516,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
   if (adapter.openDM) {
     bridge.openDM = async (userHandle: string): Promise<string> => {
       const threadId = await adapter.openDM!(userHandle);
-      return adapter.channelIdFromThreadId(threadId);
+      return withBot(adapter.channelIdFromThreadId(threadId));
     };
   }
 

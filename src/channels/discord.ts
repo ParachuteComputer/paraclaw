@@ -22,17 +22,21 @@ registerChannelAdapter('discord', {
   factory: () => {
     const env = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_PUBLIC_KEY', 'DISCORD_APPLICATION_ID']);
     if (!env.DISCORD_BOT_TOKEN) return null;
+    if (!env.DISCORD_APPLICATION_ID) return null;
+    const botId = env.DISCORD_APPLICATION_ID;
     const discordAdapter = createDiscordAdapter({
       botToken: env.DISCORD_BOT_TOKEN,
       publicKey: env.DISCORD_PUBLIC_KEY,
       applicationId: env.DISCORD_APPLICATION_ID,
     });
-    return createChatSdkBridge({
+    const bridge = createChatSdkBridge({
       adapter: discordAdapter,
+      botId,
       concurrency: 'concurrent',
       botToken: env.DISCORD_BOT_TOKEN,
       extractReplyContext,
       supportsThreads: true,
     });
+    return { ...bridge, botId };
   },
 });

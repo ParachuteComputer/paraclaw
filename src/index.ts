@@ -57,7 +57,11 @@ import './channels/index.js';
 import './modules/index.js';
 
 import type { ChannelAdapter, ChannelSetup } from './channels/adapter.js';
-import { initChannelAdapters, teardownChannelAdapters, getChannelAdapter } from './channels/channel-registry.js';
+import {
+  initChannelAdapters,
+  teardownChannelAdapters,
+  getChannelAdapterForPlatformId,
+} from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
   log.info('Paraclaw starting');
@@ -143,15 +147,15 @@ async function main(): Promise<void> {
       content: string,
       files?: import('./channels/adapter.js').OutboundFile[],
     ): Promise<string | undefined> {
-      const adapter = getChannelAdapter(channelType);
+      const adapter = getChannelAdapterForPlatformId(channelType, platformId);
       if (!adapter) {
-        log.warn('No adapter for channel type', { channelType });
+        log.warn('No adapter for channel type', { channelType, platformId });
         return;
       }
       return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
     },
     async setTyping(channelType: string, platformId: string, threadId: string | null): Promise<void> {
-      const adapter = getChannelAdapter(channelType);
+      const adapter = getChannelAdapterForPlatformId(channelType, platformId);
       await adapter?.setTyping?.(platformId, threadId);
     },
   };
