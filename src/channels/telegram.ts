@@ -262,4 +262,18 @@ registerChannelAdapter('telegram', {
     if (!env.TELEGRAM_BOT_TOKEN) return null;
     return spawnTelegramAdapter(env.TELEGRAM_BOT_TOKEN);
   },
+  /**
+   * The token is the only thing Telegram needs — the bot's id and username
+   * are recovered via getMe inside spawnTelegramAdapter. The secretName's
+   * trailing segment IS the botId, but we don't need to parse it; the adapter
+   * resolves identity itself.
+   */
+  spawnFromSecret: async (_secretName, secretValue) => {
+    try {
+      return await spawnTelegramAdapter(secretValue);
+    } catch (err) {
+      log.error('Telegram spawnFromSecret failed', { err });
+      return null;
+    }
+  },
 });

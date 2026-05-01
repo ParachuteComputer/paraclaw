@@ -63,12 +63,24 @@ export function bootstrapChannelTokensToSecrets(): void {
     const value = env[envVar];
     if (!value) continue;
     const name = channelTokenSecretName(adapter.channelType, adapter.botId);
-    if (getSecret(name) === value) continue;
+    const existing = getSecret(name);
+    if (existing === value) continue;
     putSecret(name, value, { kind: 'channel-token', agent_group_id: null });
-    log.info('Bootstrapped channel bot token to secrets', {
-      channelType: adapter.channelType,
-      botId: adapter.botId,
-    });
+    if (existing === undefined) {
+      log.info('Bootstrapped channel bot token to secrets', {
+        channelType: adapter.channelType,
+        botId: adapter.botId,
+      });
+    } else {
+      // `.env` value diverged from what we previously stored — operator
+      // rotated the token. Single line so token-rotation events show up
+      // in `logs/paraclaw.log` without needing a separate observability
+      // surface.
+      log.info('Channel bot token rotated', {
+        channelType: adapter.channelType,
+        botId: adapter.botId,
+      });
+    }
   }
 }
 

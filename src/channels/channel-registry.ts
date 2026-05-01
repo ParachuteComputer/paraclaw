@@ -7,6 +7,7 @@
 import type { ChannelAdapter, ChannelRegistration, ChannelSetup } from './adapter.js';
 import { log } from '../log.js';
 import { decodePlatformIdAs } from '../platform-id.js';
+import { listSecrets, getSecret } from '../secrets/index.js';
 
 const SETUP_RETRY_DELAYS_MS = [2000, 5000, 10000];
 
@@ -27,6 +28,15 @@ const registry = new Map<string, ChannelRegistration>();
  * botId.
  */
 const activeAdapters = new Map<string, ChannelAdapter>();
+
+/**
+ * Cached host-callbacks builder, set by {@link initChannelAdapters} the
+ * first time it runs. Reused by {@link spawnSecretsBackedBots} (boot scan)
+ * and {@link registerBotAdapter} (dynamic per-bot adds via the HTTP
+ * register-bot endpoint) so every adapter — primary or dynamic — wires
+ * inbound through the same router callbacks.
+ */
+let cachedSetupFn: ((adapter: ChannelAdapter) => ChannelSetup) | null = null;
 
 function adapterKey(channelType: string, botId: string | null | undefined): string {
   return `${channelType}\0${botId ?? ''}`;
@@ -82,10 +92,44 @@ export function getChannelContainerConfig(name: string): ChannelRegistration['co
 }
 
 /**
+ * Run an adapter's setup with NetworkError retry — the same retry loop both
+ * {@link initChannelAdapters} and the dynamic register helpers share so
+ * boot-time and runtime adds get identical resilience semantics.
+ */
+async function setupAdapterWithRetry(
+  adapter: ChannelAdapter,
+  setup: ChannelSetup,
+  label: string,
+): Promise<void> {
+  let attempt = 0;
+  while (true) {
+    try {
+      await adapter.setup(setup);
+      return;
+    } catch (err) {
+      if (isNetworkError(err) && attempt < SETUP_RETRY_DELAYS_MS.length) {
+        const delay = SETUP_RETRY_DELAYS_MS[attempt]!;
+        log.warn('Channel adapter setup failed with network error, retrying', {
+          channel: label,
+          attempt: attempt + 1,
+          delayMs: delay,
+          err: err.message,
+        });
+        await sleep(delay);
+        attempt += 1;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
  * Instantiate and set up all registered channel adapters.
  * Skips adapters that return null (missing credentials).
  */
 export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => ChannelSetup): Promise<void> {
+  cachedSetupFn = setupFn;
   for (const [name, registration] of registry) {
     try {
       const adapter = await registration.factory();
@@ -94,32 +138,11 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
         continue;
       }
 
-      const setup = setupFn(adapter);
       // Transient network failures during adapter init (e.g. Telegram deleteWebhook
       // hitting a DNS hiccup at boot) would otherwise leave the channel permanently
       // dead until manual restart. Retry only on NetworkError so misconfigs (bad
       // tokens, etc.) still fail fast.
-      let attempt = 0;
-      while (true) {
-        try {
-          await adapter.setup(setup);
-          break;
-        } catch (err) {
-          if (isNetworkError(err) && attempt < SETUP_RETRY_DELAYS_MS.length) {
-            const delay = SETUP_RETRY_DELAYS_MS[attempt]!;
-            log.warn('Channel adapter setup failed with network error, retrying', {
-              channel: name,
-              attempt: attempt + 1,
-              delayMs: delay,
-              err: err.message,
-            });
-            await sleep(delay);
-            attempt += 1;
-            continue;
-          }
-          throw err;
-        }
-      }
+      await setupAdapterWithRetry(adapter, setupFn(adapter), name);
       activeAdapters.set(adapterKey(adapter.channelType, adapter.botId), adapter);
       log.info('Channel adapter started', {
         channel: name,
@@ -128,6 +151,96 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
       });
     } catch (err) {
       log.error('Failed to start channel adapter', { channel: name, err });
+    }
+  }
+}
+
+/**
+ * Register an adapter for a specific bot at runtime — used by the
+ * `POST /api/channels/{channel}/register-bot` endpoint after the operator
+ * pastes a token via the wire-channel UI.
+ *
+ * Resolves the channel's `spawnFromSecret` hook to build the adapter, runs
+ * setup with the same callbacks the primary adapter uses, and slots it into
+ * `activeAdapters` keyed by `(channelType, botId)`. Idempotent: if an
+ * adapter is already active for this `(channelType, botId)` it returns the
+ * existing one instead of double-registering.
+ *
+ * Throws if the channel doesn't expose `spawnFromSecret` (single-bot
+ * channel) or if `initChannelAdapters` hasn't run yet (no cached setup
+ * callbacks). Returns null if the spawn hook itself returns null (token
+ * rejected at the platform).
+ */
+export async function registerBotAdapter(
+  channelType: string,
+  secretName: string,
+  secretValue: string,
+): Promise<ChannelAdapter | null> {
+  const registration = registry.get(channelType);
+  if (!registration) throw new Error(`unknown channel: ${channelType}`);
+  if (!registration.spawnFromSecret) {
+    throw new Error(`channel does not support multi-bot operation: ${channelType}`);
+  }
+  if (!cachedSetupFn) {
+    throw new Error('initChannelAdapters has not run yet — cannot register dynamic bot');
+  }
+  const adapter = await registration.spawnFromSecret(secretName, secretValue);
+  if (!adapter) return null;
+  const key = adapterKey(adapter.channelType, adapter.botId);
+  const existing = activeAdapters.get(key);
+  if (existing) {
+    log.info('Channel adapter already active for bot, skipping re-setup', {
+      channel: channelType,
+      botId: adapter.botId ?? null,
+    });
+    return existing;
+  }
+  await setupAdapterWithRetry(adapter, cachedSetupFn(adapter), channelType);
+  activeAdapters.set(key, adapter);
+  log.info('Channel adapter registered dynamically', {
+    channel: channelType,
+    botId: adapter.botId ?? null,
+  });
+  return adapter;
+}
+
+/**
+ * Boot-time scan that brings up adapters for every persisted
+ * `CHANNEL_BOT_TOKEN:<channel>:<botId>` secret whose adapter isn't already
+ * active. Run AFTER `initChannelAdapters` (which seeds the primary `.env`
+ * adapter) and AFTER `runStartupBootstrap` (which copies `.env` tokens into
+ * the secrets table); the combination ensures the primary bot stays primary
+ * while every additional bot the operator has registered comes back online
+ * across restarts.
+ *
+ * Skips channels with no `spawnFromSecret` hook and skips secrets whose
+ * `(channelType, botId)` is already covered by an active adapter (the
+ * primary). Logs but doesn't throw on individual spawn failures — one bad
+ * token shouldn't keep the rest offline.
+ */
+export async function spawnSecretsBackedBots(): Promise<void> {
+  const tokens = listSecrets(null).filter((s) => s.kind === 'channel-token' && s.name.startsWith('CHANNEL_BOT_TOKEN:'));
+  for (const row of tokens) {
+    const parts = row.name.split(':');
+    if (parts.length < 3) continue;
+    const channelType = parts[1]!;
+    const botId = parts.slice(2).join(':');
+    if (!channelType || !botId) continue;
+    const registration = registry.get(channelType);
+    if (!registration?.spawnFromSecret) continue;
+    if (activeAdapters.has(adapterKey(channelType, botId))) continue;
+    const value = getSecret(row.name);
+    if (!value) {
+      log.warn('Channel bot secret has no value, skipping', { secret: row.name });
+      continue;
+    }
+    try {
+      const adapter = await registerBotAdapter(channelType, row.name, value);
+      if (!adapter) {
+        log.warn('Secrets-backed bot spawn returned null', { channel: channelType, botId });
+      }
+    } catch (err) {
+      log.error('Failed to spawn secrets-backed bot', { channel: channelType, botId, err });
     }
   }
 }
