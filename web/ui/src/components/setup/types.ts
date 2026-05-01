@@ -90,7 +90,7 @@ export const ADAPTER_LABELS: Record<ChannelAdapter, string> = {
   telegram: 'Telegram',
 };
 
-export const SETUP_STORAGE_KEY = 'paraclaw.setupWizard.v1';
+export const SETUP_STORAGE_KEY = 'paraclaw.setupWizard.v2';
 
 export interface StepProps {
   state: SetupState;
