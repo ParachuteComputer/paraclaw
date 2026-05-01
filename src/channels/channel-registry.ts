@@ -57,10 +57,7 @@ export function getChannelAdapter(channelType: string): ChannelAdapter | undefin
  * v1 ids (botId === null) so deliveries against not-yet-backfilled rows
  * still go somewhere sensible during the rollout window.
  */
-export function getChannelAdapterForPlatformId(
-  channelType: string,
-  platformId: string,
-): ChannelAdapter | undefined {
+export function getChannelAdapterForPlatformId(channelType: string, platformId: string): ChannelAdapter | undefined {
   const decoded = decodePlatformIdAs(platformId, 'v2');
   if (decoded.botId !== null) {
     const exact = activeAdapters.get(adapterKey(channelType, decoded.botId));
@@ -133,6 +130,19 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
       log.error('Failed to start channel adapter', { channel: name, err });
     }
   }
+}
+
+/**
+ * Test-only: inject a fake active adapter so functions that read the
+ * registry (e.g. startup-bootstrap) can run without a full setup. Caller
+ * is responsible for calling {@link _resetActiveAdaptersForTest} after.
+ */
+export function _setActiveAdapterForTest(adapter: ChannelAdapter): void {
+  activeAdapters.set(adapterKey(adapter.channelType, adapter.botId), adapter);
+}
+
+export function _resetActiveAdaptersForTest(): void {
+  activeAdapters.clear();
 }
 
 /** Tear down all active adapters. */

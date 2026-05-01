@@ -17,6 +17,7 @@ import { routeInbound } from './router.js';
 import { migrateSessionsDir } from './session-manager.js';
 import { startWebServer } from './web/server.js';
 import { log } from './log.js';
+import { runStartupBootstrap } from './startup-bootstrap.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
 // circular import cycle: src/index.ts imports src/modules/index.js for side
@@ -136,6 +137,11 @@ async function main(): Promise<void> {
       },
     };
   });
+
+  // 3b. Runtime-state migrations that need adapter botIds — copy `.env`
+  // tokens into the secrets table and rewrite legacy v1 messaging_groups
+  // platform_ids to the v2 form. Idempotent; safe across restarts.
+  runStartupBootstrap();
 
   // 4. Delivery adapter bridge — dispatches to channel adapters
   const deliveryAdapter = {
