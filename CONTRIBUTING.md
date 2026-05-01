@@ -125,7 +125,7 @@ The frontend bundle in `web/ui/` is intentionally outside the pnpm workspace (th
 cd web/ui && pnpm install --ignore-workspace && pnpm test
 ```
 
-Otherwise the runner exits with `ERR_MODULE_NOT_FOUND: @vitejs/plugin-react`.
+Otherwise the test runner exits with a missing-dependency error (the exact symptom — module-not-found on `@vitejs/plugin-react`, missing test framework, etc. — depends on which entry point your package manager hits first).
 
 ## Pull Requests
 

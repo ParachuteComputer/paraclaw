@@ -67,18 +67,18 @@ export function WireChannelPage() {
     setValidateError(null);
     try {
       const trimmed = token.trim();
-      // Hit the per-adapter validator first so the user-facing error from a
-      // bad token names the platform's rejection ("telegram rejected token:
-      // …") rather than a 502 from the register-bot path. Then immediately
-      // register-bot, which persists the token to /secrets and brings up the
-      // adapter at runtime — a single user gesture covers both.
-      const validated = await adapter.validate(trimmed);
+      // Single hop: register-bot validates upstream, persists to /secrets,
+      // and brings the adapter live in one server round-trip. The server
+      // surfaces the upstream platform's rejection message via the standard
+      // `{ error }` shape on bad tokens, so we don't need a separate /test
+      // pre-call.
+      //
+      // Re-posting the same bot's secret with a new token persists the
+      // rotation immediately but the live polling loop keeps the old token
+      // until the next host restart — same as a `.env` rotation. Operators
+      // doing a forced rotation should restart paraclaw.
       const registered = await registerChannelBot(adapter.key, trimmed);
-      // Server's register-bot is authoritative on botId — for Discord the
-      // validator returns the user.id which matches application.id for bot
-      // accounts, but in case they ever drift we trust whatever the live
-      // adapter resolved.
-      setIdentity({ id: registered.botId, username: registered.username || validated.username });
+      setIdentity({ id: registered.botId, username: registered.username });
       setToken('');
     } catch (err) {
       setValidateError(err instanceof Error ? err.message : String(err));

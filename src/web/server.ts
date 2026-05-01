@@ -279,12 +279,16 @@ async function handleApi(
         return;
       }
       // Validate first so we have a botId for the secret name and can fail
-      // fast on bad tokens without writing anything to the DB.
+      // fast on bad tokens without writing anything to the DB. We emit the
+      // error via the standard `{ error }` shape so the client's request<>
+      // wrapper extracts it cleanly — this endpoint is the SPA's only
+      // upstream-validation hop now that WireChannelPage skips the separate
+      // /test call.
       const validation =
         adapter === 'discord' ? await validateDiscordBotToken(token) : await validateTelegramBotToken(token);
       if (!validation.ok) {
         const httpStatus = validation.status === 401 ? 400 : validation.status;
-        json(res, httpStatus, validation);
+        error(res, httpStatus, validation.error);
         return;
       }
       const botId = String(validation.identity.id);
