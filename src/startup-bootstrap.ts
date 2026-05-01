@@ -24,18 +24,20 @@
  *      starts emitting v2 ids.
  *
  * Idempotency strategy: detect already-v2 rows by checking whether their
- * second segment equals the active adapter's botId. v1 rows have either
- * no second segment (Telegram `telegram:<chatId>`) or a different second
- * segment (Discord `discord:<guildId>:<channelId>`). The collision case
- * (a chat_id that happens to match the bot's own user id) is vanishingly
- * unlikely given Telegram's id-allocation pattern.
+ * second segment matches *any* known bot id for the channel — the union of
+ * active adapters + every botId persisted under `CHANNEL_BOT_TOKEN:<channel>:`
+ * in the secrets table. Comparing against only the iteration's adapter
+ * misclassifies rows already-v2 for a *secondary* bot as v1 and re-prefixes
+ * them, producing a 4-segment garbage id; consulting secrets too means even
+ * pre-spawn secondary bots (Proposal A defers adapter spawn until wire) are
+ * recognized.
  */
 import { getDb } from './db/connection.js';
 import { readEnvFile } from './env.js';
 import { log } from './log.js';
 import { encodePlatformId } from './platform-id.js';
 import { getActiveAdapters } from './channels/channel-registry.js';
-import { getSecret, putSecret } from './secrets/index.js';
+import { getSecret, listSecrets, putSecret } from './secrets/index.js';
 
 /** `.env` var name carrying each channel's bot token. Empty for channels
  *  paraclaw doesn't manage credentials for in `.env` (CLI, native channels). */
@@ -91,22 +93,60 @@ interface MessagingGroupRow {
 }
 
 /**
- * True if the platform_id's bot segment is already the given bot's id.
+ * True if the platform_id's bot segment matches *any* known bot id for this
+ * channel — not just the active adapter's. The set must be the union of
+ * every botId the install has ever registered (active adapters + persisted
+ * `CHANNEL_BOT_TOKEN:<channel>:<botId>` secrets), or rows already-v2 for a
+ * secondary bot get re-prefixed under the iteration's primary botId and end
+ * up with a 4-segment platform_id like `telegram:primary:secondary:chat`.
  *
- * Collision case: if a v1 row's first native segment happens to equal this
- * bot's botId (a Telegram chat_id matching the bot's own user_id, or a
- * Discord guild id matching its application id), it would be misclassified
+ * Collision case: if a v1 row's first native segment happens to equal one
+ * of the known bot ids (a Telegram chat_id matching a bot's own user_id, or
+ * a Discord guild id matching an application id), it would be misclassified
  * as already-v2 and skipped. Vanishingly unlikely given how those id spaces
  * are allocated — flagged here so a future operator hitting the case knows
  * where to look.
  */
-function isAlreadyV2(channelType: string, platformId: string, botId: string): boolean {
+function isAlreadyV2(channelType: string, platformId: string, knownBotIds: ReadonlySet<string>): boolean {
   const prefix = `${channelType}:`;
   if (!platformId.startsWith(prefix)) return false;
   const after = platformId.slice(prefix.length);
   const colon = after.indexOf(':');
   const slot1 = colon === -1 ? after : after.slice(0, colon);
-  return slot1 === botId;
+  return knownBotIds.has(slot1);
+}
+
+/**
+ * Union of every known bot id per channel: the live adapters + every botId
+ * that appears in a `CHANNEL_BOT_TOKEN:<channel>:<botId>` secret name. We
+ * consult secrets because at boot only the `.env` primary is yet active;
+ * secondary bots persisted via `/register-bot` haven't been adapter-spawned
+ * yet (Proposal A defers spawn until `/wire-channel`), but their tokens are
+ * already in the secrets table — and rows pointing at them are already v2.
+ */
+function knownBotIdsPerChannel(): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const add = (channel: string, botId: string) => {
+    let set = out.get(channel);
+    if (!set) {
+      set = new Set();
+      out.set(channel, set);
+    }
+    set.add(botId);
+  };
+  for (const a of getActiveAdapters()) {
+    if (a.botId) add(a.channelType, a.botId);
+  }
+  for (const s of listSecrets(null)) {
+    if (s.kind !== 'channel-token') continue;
+    const parts = s.name.split(':');
+    if (parts.length < 3 || parts[0] !== 'CHANNEL_BOT_TOKEN') continue;
+    const channel = parts[1];
+    const botId = parts.slice(2).join(':');
+    if (!channel || !botId) continue;
+    add(channel, botId);
+  }
+  return out;
 }
 
 /**
@@ -117,6 +157,7 @@ function isAlreadyV2(channelType: string, platformId: string, botId: string): bo
 export function backfillMessagingGroupsToV2(): number {
   const adapters = getActiveAdapters().filter((a) => a.botId);
   if (adapters.length === 0) return 0;
+  const knownByChannel = knownBotIdsPerChannel();
   const select = getDb().prepare<MessagingGroupRow>(
     `SELECT id, channel_type, platform_id
        FROM messaging_groups
@@ -127,10 +168,11 @@ export function backfillMessagingGroupsToV2(): number {
   for (const adapter of adapters) {
     const channel = adapter.channelType;
     const botId = adapter.botId!;
+    const known = knownByChannel.get(channel) ?? new Set([botId]);
     const rows = select.all({ channel_type: channel });
     let upgraded = 0;
     for (const row of rows) {
-      if (isAlreadyV2(channel, row.platform_id, botId)) continue;
+      if (isAlreadyV2(channel, row.platform_id, known)) continue;
       const prefix = `${channel}:`;
       if (!row.platform_id.startsWith(prefix)) continue;
       const native = row.platform_id.slice(prefix.length);
