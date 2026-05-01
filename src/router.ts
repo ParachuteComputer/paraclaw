@@ -18,14 +18,18 @@
  * for policy refusals.
  */
 import { getChannelAdapter } from './channels/channel-registry.js';
+import { consumeTrustHint } from './channels/trust-hint.js';
 import { gateCommand } from './command-gate.js';
-import { getAgentGroup } from './db/agent-groups.js';
+import { getAgentGroup, getAllAgentGroups } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
   createMessagingGroup,
   getMessagingGroupAgents,
   getMessagingGroupWithAgentCount,
+  updateMessagingGroup,
 } from './db/messaging-groups.js';
+import { decodePlatformIdAs } from './platform-id.js';
+import { wireDmToAgent } from './web/wire-channel.js';
 import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
@@ -204,12 +208,50 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       return;
     }
 
-    const parsed = safeParseContent(event.message.content);
+    const parsedUnwired = safeParseContent(event.message.content);
+
+    // Trust hint: if the operator just wired this bot at /channels/new and
+    // is now DM'ing it, treat the message as trusted self-traffic instead
+    // of escalating through the channel-registration approval flow. The
+    // hint is single-use and bound to (channelType, botId, operatorUserId)
+    // — Discord wires record no hint (no operator user id captured), so
+    // this branch only fires for Telegram self-DMs in the trust window.
+    const decoded = decodePlatformIdAs(event.platformId, 'v2');
+    const senderId = parsedUnwired.senderId;
+    if (decoded.botId && senderId && consumeTrustHint(event.channelType, decoded.botId, senderId)) {
+      const targetGroups = getAllAgentGroups();
+      if (targetGroups.length > 0) {
+        const target = targetGroups[0]!;
+        log.info('Channel inbound auto-wired via operator trust hint', {
+          messagingGroupId: mg.id,
+          channelType: event.channelType,
+          botId: decoded.botId,
+          targetAgentGroupId: target.id,
+        });
+        // Drop the auto-created request_approval row in favor of a fresh
+        // wire built with the trusted defaults (strict policy, all-senders
+        // MGA). wireDmToAgent is idempotent — if we beat it to a wire that
+        // already exists, it returns the existing rows.
+        updateMessagingGroup(mg.id, { unknown_sender_policy: 'strict' });
+        wireDmToAgent({
+          channelType: event.channelType as 'discord' | 'telegram',
+          agentGroup: target,
+          botId: decoded.botId,
+          botUserId: decoded.native,
+        });
+        // Re-run the standard route from the now-wired path so engage
+        // checks, sender resolution, and session creation behave exactly
+        // as if this were a normal message on a pre-wired channel.
+        await routeInbound(event);
+        return;
+      }
+    }
+
     recordDroppedMessage({
       channel_type: event.channelType,
       platform_id: event.platformId,
       user_id: null,
-      sender_name: parsed.sender ?? null,
+      sender_name: parsedUnwired.sender ?? null,
       reason: 'no_agent_wired',
       messaging_group_id: mg.id,
       agent_group_id: null,

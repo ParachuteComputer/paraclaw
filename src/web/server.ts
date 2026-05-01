@@ -65,7 +65,8 @@ import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
-import { getChannelAdapter, registerBotAdapter } from '../channels/channel-registry.js';
+import { getChannelAdapterByBotId, registerBotAdapter } from '../channels/channel-registry.js';
+import { recordTrustHint } from '../channels/trust-hint.js';
 import { validateDiscordBotToken } from './discord-validate.js';
 import { validateTelegramBotToken } from './telegram-validate.js';
 import { getSecret, putSecret } from '../secrets/index.js';
@@ -259,11 +260,13 @@ async function handleApi(
     return;
   }
 
-  // Persist + bring up an additional bot adapter at runtime. The wire-
-  // channel UI hits this after a successful /test so the operator can wire
-  // a NEW bot's token without restarting the host. Idempotent on
-  // (channelType, botId): re-posting the same token just refreshes the
-  // ciphertext and returns the already-active adapter's identity.
+  // Validate a bot token + persist it to the secrets table. This DOES NOT
+  // bring the adapter up — adapter spawn is deferred to /wire-channel so
+  // the bot can't start polling before the operator has actually wired it
+  // to an agent group. (The polling loop is what receives messages and,
+  // pre-wire, races into the unwired-channel approval flow that surprised
+  // operators wiring a second bot.) Idempotent: re-posting the same
+  // (channelType, botId) just refreshes the stored ciphertext.
   if (method === 'POST' && /^\/api\/channels\/[^/]+\/register-bot$/.test(pathname)) {
     if (!(await gate(req, res, SCOPE_CLAW_ADMIN))) return;
     const adapter = pathname.split('/')[3];
@@ -278,12 +281,6 @@ async function handleApi(
         error(res, 400, 'token is required');
         return;
       }
-      // Validate first so we have a botId for the secret name and can fail
-      // fast on bad tokens without writing anything to the DB. We emit the
-      // error via the standard `{ error }` shape so the client's request<>
-      // wrapper extracts it cleanly — this endpoint is the SPA's only
-      // upstream-validation hop now that WireChannelPage skips the separate
-      // /test call.
       const validation =
         adapter === 'discord' ? await validateDiscordBotToken(token) : await validateTelegramBotToken(token);
       if (!validation.ok) {
@@ -293,17 +290,10 @@ async function handleApi(
       }
       const botId = String(validation.identity.id);
       const username = validation.identity.username;
-      // Persist before bringing up the adapter so a crash mid-setup still
-      // leaves the token recoverable on next boot's spawnSecretsBackedBots.
       const secretName = channelTokenSecretName(adapter, botId);
       const existing = getSecret(secretName);
       const isRotation = existing !== undefined && existing !== token;
       putSecret(secretName, token, { kind: 'channel-token', agent_group_id: null });
-      const live = await registerBotAdapter(adapter, secretName, token);
-      if (!live) {
-        error(res, 502, `${adapter} register-bot: spawnFromSecret returned null after a successful validate`);
-        return;
-      }
       log.info(isRotation ? 'Channel bot token rotated' : 'Channel bot registered', { adapter, botId });
       json(res, 200, { ok: true, botId, username });
     } catch (err) {
@@ -654,38 +644,69 @@ async function handleApi(
       try {
         const body = await readJsonBody<{
           channelType?: 'discord' | 'telegram';
+          botId?: string;
           botUserId?: string;
+          operatorUserId?: string;
           displayName?: string;
         }>(req);
         if (!body.channelType || (body.channelType !== 'discord' && body.channelType !== 'telegram')) {
           error(res, 400, `channelType must be "discord" or "telegram"`);
           return;
         }
+        const botId = (body.botId ?? '').trim();
+        if (!botId) {
+          error(res, 400, `botId is required`);
+          return;
+        }
         if (!body.botUserId || !body.botUserId.trim()) {
           error(res, 400, `botUserId is required`);
           return;
         }
-        // Read the bot id from the active adapter so the v2 platform_id
-        // matches what the bridge will emit on inbound. If the adapter
-        // hasn't started (missing token, getMe failed), refuse to wire —
-        // a wire that disagrees with the eventual inbound encoding would
-        // silently drop messages once the adapter does come up.
-        const activeAdapter = getChannelAdapter(body.channelType);
-        if (!activeAdapter || !activeAdapter.botId) {
+        // The bot must either be already-live (the .env-seeded primary
+        // adapter the host spawned at boot) OR have a persisted token via
+        // /register-bot. Without one of those, the post-wire spawn step
+        // would have nothing to spawn from, and the operator would face
+        // a silently dead bot on the next host restart.
+        const secretName = channelTokenSecretName(body.channelType, botId);
+        const tokenValue = getSecret(secretName);
+        const liveAdapter = getChannelAdapterByBotId(body.channelType, botId);
+        if (!tokenValue && !liveAdapter) {
           error(
             res,
             409,
-            `cannot wire ${body.channelType}: adapter is not active (missing or unhealthy bot credentials)`,
+            `cannot wire ${body.channelType}: bot ${botId} has no persisted token and no live adapter (call /register-bot first)`,
           );
           return;
         }
         const result = wireDmToAgent({
           channelType: body.channelType,
           agentGroup: { id: group.id, name: group.name, folder: group.folder } as never,
-          botId: activeAdapter.botId,
+          botId,
           botUserId: body.botUserId,
           displayName: body.displayName,
         });
+        // Bring the adapter up after the MGA exists so the polling loop's
+        // first inbound lands on a wired channel instead of racing into the
+        // unwired-channel approval flow. registerBotAdapter is idempotent
+        // on (channelType, botId) — re-wiring the same bot to a second
+        // group leaves the existing live adapter in place. Skip when
+        // there's no token to spawn from but the adapter is already
+        // live (.env-seeded primary).
+        if (tokenValue) {
+          try {
+            await registerBotAdapter(body.channelType, secretName, tokenValue);
+          } catch (err) {
+            log.error('Failed to spawn adapter after wire', {
+              channel: body.channelType,
+              botId,
+              err,
+            });
+          }
+        }
+        // Record the operator-self-wire trust hint so the operator's first
+        // DM to a freshly-wired Telegram bot bypasses any backlog-driven
+        // approval cascade. No-op for Discord (no operator user id captured).
+        recordTrustHint(body.channelType, botId, (body.operatorUserId ?? '').trim());
         json(res, 200, result);
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));

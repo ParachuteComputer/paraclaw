@@ -5,6 +5,7 @@
  * to instantiate and set up all registered adapters.
  */
 import type { ChannelAdapter, ChannelRegistration, ChannelSetup } from './adapter.js';
+import { getDb } from '../db/connection.js';
 import { log } from '../log.js';
 import { decodePlatformIdAs } from '../platform-id.js';
 import { listSecrets, getSecret } from '../secrets/index.js';
@@ -59,6 +60,11 @@ export function getChannelAdapter(channelType: string): ChannelAdapter | undefin
     if (key.startsWith(`${channelType}\0`)) return adapter;
   }
   return undefined;
+}
+
+/** Resolve a live adapter by exact `(channelType, botId)`. Returns undefined if no adapter for that bot is active. */
+export function getChannelAdapterByBotId(channelType: string, botId: string): ChannelAdapter | undefined {
+  return activeAdapters.get(adapterKey(channelType, botId));
 }
 
 /**
@@ -202,17 +208,23 @@ export async function registerBotAdapter(
 
 /**
  * Boot-time scan that brings up adapters for every persisted
- * `CHANNEL_BOT_TOKEN:<channel>:<botId>` secret whose adapter isn't already
- * active. Run AFTER `initChannelAdapters` (which seeds the primary `.env`
- * adapter) and AFTER `runStartupBootstrap` (which copies `.env` tokens into
- * the secrets table); the combination ensures the primary bot stays primary
- * while every additional bot the operator has registered comes back online
- * across restarts.
+ * `CHANNEL_BOT_TOKEN:<channel>:<botId>` secret that (a) has at least one
+ * wired messaging_group_agents row and (b) isn't already covered by the
+ * `.env`-seeded primary adapter. Run AFTER `initChannelAdapters` and
+ * AFTER `runStartupBootstrap`.
  *
- * Skips channels with no `spawnFromSecret` hook and skips secrets whose
- * `(channelType, botId)` is already covered by an active adapter (the
- * primary). Logs but doesn't throw on individual spawn failures — one bad
- * token shouldn't keep the rest offline.
+ * Orphan rule (paraclaw#67 Proposal A): a secret with no MGA wiring is
+ * "registered but inert" — the operator validated a token but never
+ * committed it to a group. We deliberately don't spawn its adapter at
+ * boot, because doing so would re-introduce the validate-then-poll race
+ * that pre-A behavior had: an adapter polling without a wire feeds
+ * inbounds straight into the unwired-channel approval cascade. Operators
+ * recover by completing the wire from `/claw/channels/new` (the wire
+ * endpoint spawns the adapter atomically with the MGA insert).
+ *
+ * Skips channels with no `spawnFromSecret` hook. Logs but doesn't throw
+ * on individual spawn failures — one bad token shouldn't keep the rest
+ * offline.
  */
 export async function spawnSecretsBackedBots(): Promise<void> {
   const tokens = listSecrets(null).filter((s) => s.kind === 'channel-token' && s.name.startsWith('CHANNEL_BOT_TOKEN:'));
@@ -225,6 +237,10 @@ export async function spawnSecretsBackedBots(): Promise<void> {
     const registration = registry.get(channelType);
     if (!registration?.spawnFromSecret) continue;
     if (activeAdapters.has(adapterKey(channelType, botId))) continue;
+    if (!hasWiringForBot(channelType, botId)) {
+      log.info('Skipping orphan channel bot secret (no wiring)', { channel: channelType, botId });
+      continue;
+    }
     const value = getSecret(row.name);
     if (!value) {
       log.warn('Channel bot secret has no value, skipping', { secret: row.name });
@@ -239,6 +255,35 @@ export async function spawnSecretsBackedBots(): Promise<void> {
       log.error('Failed to spawn secrets-backed bot', { channel: channelType, botId, err });
     }
   }
+}
+
+/**
+ * Returns true iff at least one messaging_group_agents row exists wired
+ * through a messaging_groups row whose platform_id encodes the given
+ * `(channelType, botId)` pair (v2 format `<channel>:<botId>:<native>`).
+ *
+ * v1 rows (no bot dimension) for the same channel match nothing here —
+ * the secrets-backed scan only runs for bots that have a botId in their
+ * secret name, and v1 wires don't carry one. That's the correct
+ * conservative answer: a v1 wire could belong to *any* bot on that
+ * channel, so we can't safely auto-attribute it to this secret.
+ */
+function hasWiringForBot(channelType: string, botId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1
+         FROM messaging_groups mg
+         JOIN messaging_group_agents mga ON mga.messaging_group_id = mg.id
+        WHERE mg.channel_type = ?
+          AND mg.platform_id LIKE ? ESCAPE '\\'
+        LIMIT 1`,
+    )
+    .get(channelType, `${channelType}:${escapeLike(botId)}:%`);
+  return row !== undefined;
+}
+
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 /**

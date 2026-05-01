@@ -347,7 +347,7 @@ describe('multi-bot routing via dynamic register-bot', () => {
     );
   });
 
-  it('spawnSecretsBackedBots brings up persisted bots after restart', async () => {
+  it('spawnSecretsBackedBots brings up only bots that have at least one MGA wiring', async () => {
     const {
       registerChannelAdapter,
       initChannelAdapters,
@@ -356,6 +356,8 @@ describe('multi-bot routing via dynamic register-bot', () => {
       _resetActiveAdaptersForTest,
     } = await import('./channel-registry.js');
     const { putSecret } = await import('../secrets/index.js');
+    const { createMessagingGroup, createMessagingGroupAgent } = await import('../db/messaging-groups.js');
+    const { createAgentGroup } = await import('../db/agent-groups.js');
 
     registerChannelAdapter('boot-mock', {
       factory: () => null,
@@ -366,9 +368,42 @@ describe('multi-bot routing via dynamic register-bot', () => {
       },
     });
 
-    // Persist two tokens as if a previous boot had registered them.
+    // Persist two tokens — only one is wired to a group. The other is an
+    // orphan that the scan must skip (paraclaw#67 Proposal A: registered
+    // but inert bots don't auto-spawn at boot, because doing so re-opens
+    // the validate-then-poll race the deferred-spawn rework was meant to
+    // remove).
     putSecret('CHANNEL_BOT_TOKEN:boot-mock:bot-1', 'tok-1', { kind: 'channel-token', agent_group_id: null });
     putSecret('CHANNEL_BOT_TOKEN:boot-mock:bot-2', 'tok-2', { kind: 'channel-token', agent_group_id: null });
+
+    createAgentGroup({
+      id: 'ag-test',
+      folder: 'test-group',
+      name: 'Test',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-bot1',
+      channel_type: 'boot-mock',
+      platform_id: 'boot-mock:bot-1:dm',
+      name: null,
+      is_group: 0,
+      unknown_sender_policy: 'strict',
+      created_at: now(),
+    });
+    createMessagingGroupAgent({
+      id: 'mga-bot1',
+      messaging_group_id: 'mg-bot1',
+      agent_group_id: 'ag-test',
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'all',
+      ignored_message_policy: 'drop',
+      session_mode: 'shared',
+      priority: 0,
+      created_at: now(),
+    });
 
     await initChannelAdapters(() => ({
       onInbound: () => {},
@@ -381,6 +416,6 @@ describe('multi-bot routing via dynamic register-bot', () => {
     _resetActiveAdaptersForTest();
     await spawnSecretsBackedBots();
     const active = getActiveAdapters().filter((x) => x.channelType === 'boot-mock');
-    expect(active.map((x) => x.botId).sort()).toEqual(['bot-1', 'bot-2']);
+    expect(active.map((x) => x.botId).sort()).toEqual(['bot-1']);
   });
 });
