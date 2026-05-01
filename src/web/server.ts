@@ -229,10 +229,12 @@ async function handleApi(
   // Token validation — pre-install, no DB writes, the wizard hits this from
   // /channels/new before persisting anything. claw:write is enough; the
   // /api/channels/* CRUD block below is admin-gated and would over-reject.
-  if (
-    method === 'POST' &&
-    (pathname === '/api/channels/discord/test' || pathname === '/api/channels/telegram/test')
-  ) {
+  //
+  // We remap a validator status of 401 ("bot token rejected by upstream")
+  // to HTTP 400 so the SPA's auth wrapper doesn't mistake an upstream
+  // identity rejection for our hub-JWT being expired and trigger a
+  // re-auth loop. Body still carries the precise validator status field.
+  if (method === 'POST' && (pathname === '/api/channels/discord/test' || pathname === '/api/channels/telegram/test')) {
     if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
     try {
       const body = await readJsonBody<{ token?: string }>(req);
@@ -241,7 +243,8 @@ async function handleApi(
         pathname === '/api/channels/discord/test'
           ? await validateDiscordBotToken(token)
           : await validateTelegramBotToken(token);
-      json(res, result.ok ? 200 : result.status, result);
+      const httpStatus = result.ok ? 200 : result.status === 401 ? 400 : result.status;
+      json(res, httpStatus, result);
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
     }
