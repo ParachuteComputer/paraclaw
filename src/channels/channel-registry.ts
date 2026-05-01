@@ -96,11 +96,7 @@ export function getChannelContainerConfig(name: string): ChannelRegistration['co
  * {@link initChannelAdapters} and the dynamic register helpers share so
  * boot-time and runtime adds get identical resilience semantics.
  */
-async function setupAdapterWithRetry(
-  adapter: ChannelAdapter,
-  setup: ChannelSetup,
-  label: string,
-): Promise<void> {
+async function setupAdapterWithRetry(adapter: ChannelAdapter, setup: ChannelSetup, label: string): Promise<void> {
   let attempt = 0;
   while (true) {
     try {
