@@ -226,3 +226,36 @@ describe('happy path — 200 returns parsed body and skips auth', () => {
     expect(auth.beginLogin).not.toHaveBeenCalled();
   });
 });
+
+describe('wireChannelToGroup — body contract with server', () => {
+  // Server keys on `channelType` (matches DB column + WireDmInput). Helper
+  // accepts `channel` for ergonomics; this test pins the wire boundary so
+  // a future rename can't silently regress to "channelType must be …" 400s.
+  it('serializes input.channel as channelType in the request body', async () => {
+    const result = {
+      messagingGroupId: 'mg_1',
+      messagingGroupAgentId: 'mga_1',
+      platformId: 'telegram:42',
+      created: { messagingGroup: true, wiring: true },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, result));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    await api.wireChannelToGroup('forge', {
+      channel: 'telegram',
+      botUserId: '42',
+      displayName: 'Forge DM',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({
+      channelType: 'telegram',
+      botUserId: '42',
+      displayName: 'Forge DM',
+    });
+    expect(body.channel).toBeUndefined();
+  });
+});

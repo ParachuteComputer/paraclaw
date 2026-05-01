@@ -951,8 +951,15 @@ export async function wireChannelToGroup(
   folder: string,
   input: { channel: ChannelKind; botUserId: string; displayName?: string },
 ): Promise<WireChannelResult> {
+  // Server's body parser keys on `channelType` (matches the DB column
+  // and the wire-channel.ts WireDmInput interface). The helper accepts
+  // `channel` for caller ergonomics — translate at the wire boundary.
   return request<WireChannelResult>(`/groups/${encodeURIComponent(folder)}/wire-channel`, {
     method: 'POST',
-    json: input,
+    json: {
+      channelType: input.channel,
+      botUserId: input.botUserId,
+      displayName: input.displayName,
+    },
   });
 }

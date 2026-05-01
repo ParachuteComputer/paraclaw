@@ -248,9 +248,7 @@ async function handleApi(
       const body = await readJsonBody<{ token?: string }>(req);
       const token = body.token ?? '';
       const result =
-        adapter === 'discord'
-          ? await validateDiscordBotToken(token)
-          : await validateTelegramBotToken(token);
+        adapter === 'discord' ? await validateDiscordBotToken(token) : await validateTelegramBotToken(token);
       const httpStatus = result.ok ? 200 : result.status === 401 ? 400 : result.status;
       json(res, httpStatus, result);
     } catch (err) {
