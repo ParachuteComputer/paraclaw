@@ -46,12 +46,13 @@ describe('createChatSdkBridge', () => {
   it('omits openDM when the underlying Chat SDK adapter has none', () => {
     const bridge = createChatSdkBridge({
       adapter: stubAdapter({}),
+      botId: 'bot-1',
       supportsThreads: false,
     });
     expect(bridge.openDM).toBeUndefined();
   });
 
-  it('exposes openDM when the underlying adapter has one, and delegates directly', async () => {
+  it('exposes openDM when the underlying adapter has one, and encodes the bot dim', async () => {
     const openDMCalls: string[] = [];
     const bridge = createChatSdkBridge({
       adapter: stubAdapter({
@@ -61,18 +62,21 @@ describe('createChatSdkBridge', () => {
         },
         channelIdFromThreadId: (threadId: string) => `stub:${threadId.replace(/^thread::/, '')}`,
       }),
+      botId: 'bot-1',
       supportsThreads: false,
     });
     expect(bridge.openDM).toBeDefined();
     const platformId = await bridge.openDM!('user-42');
-    // Delegation: adapter.openDM → adapter.channelIdFromThreadId, no chat.openDM in between.
+    // Delegation: adapter.openDM → adapter.channelIdFromThreadId, then bridge
+    // wraps with the bot id so messaging_groups gets the v2 form.
     expect(openDMCalls).toEqual(['user-42']);
-    expect(platformId).toBe('stub:user-42');
+    expect(platformId).toBe('stub:bot-1:user-42');
   });
 
   it('exposes subscribe (lets the router initiate thread subscription on mention-sticky engage)', () => {
     const bridge = createChatSdkBridge({
       adapter: stubAdapter({}),
+      botId: 'bot-1',
       supportsThreads: true,
     });
     expect(typeof bridge.subscribe).toBe('function');

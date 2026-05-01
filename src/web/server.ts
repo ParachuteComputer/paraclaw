@@ -65,6 +65,7 @@ import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
+import { getChannelAdapter } from '../channels/channel-registry.js';
 
 const PROJECT_ROOT = process.cwd();
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
@@ -576,9 +577,24 @@ async function handleApi(
           error(res, 400, `botUserId is required`);
           return;
         }
+        // Read the bot id from the active adapter so the v2 platform_id
+        // matches what the bridge will emit on inbound. If the adapter
+        // hasn't started (missing token, getMe failed), refuse to wire —
+        // a wire that disagrees with the eventual inbound encoding would
+        // silently drop messages once the adapter does come up.
+        const activeAdapter = getChannelAdapter(body.channelType);
+        if (!activeAdapter || !activeAdapter.botId) {
+          error(
+            res,
+            409,
+            `cannot wire ${body.channelType}: adapter is not active (missing or unhealthy bot credentials)`,
+          );
+          return;
+        }
         const result = wireDmToAgent({
           channelType: body.channelType,
           agentGroup: { id: group.id, name: group.name, folder: group.folder } as never,
+          botId: activeAdapter.botId,
           botUserId: body.botUserId,
           displayName: body.displayName,
         });

@@ -44,6 +44,7 @@ import {
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
 } from '../db/messaging-groups.js';
+import { encodePlatformId } from '../platform-id.js';
 import type { AgentGroup, MessagingGroup } from '../types.js';
 
 export type ChannelKind = 'discord' | 'telegram';
@@ -56,9 +57,22 @@ export interface WireDmInput {
   channelType: ChannelKind;
   agentGroup: AgentGroup;
   /**
-   * For Discord: the BOT's own user id (snowflake) — forms `discord:@me:<id>`.
-   * For Telegram: the OPERATOR's user id (positive int as string) — forms
-   * `telegram:<id>` (DM chat_id == user_id in Telegram).
+   * Bot identity used as the second segment of the v2 platform_id
+   * (`<channel>:<botId>:<native>`). For Discord this is the bot
+   * application id (DISCORD_APPLICATION_ID). For Telegram this is the
+   * `id` returned by `getMe`. Resolved by the caller from the active
+   * adapter at wire time.
+   */
+  botId: string;
+  /**
+   * For Discord: the BOT's own user id (snowflake) — forms the native
+   * segment `@me:<botUserId>` of `discord:<botId>:@me:<botUserId>`. For most
+   * Discord bots this equals `botId`, but it is kept distinct because
+   * application-id and user-id can diverge for legacy bot accounts.
+   *
+   * For Telegram: the OPERATOR's user id (positive int as string). The
+   * native segment is the chat_id, and Telegram DM chat_id == user_id, so
+   * this is what we wire as the third segment of `telegram:<botId>:<id>`.
    */
   botUserId: string;
   /** Optional display name for the messaging_groups row. */
@@ -73,20 +87,21 @@ export interface WireDmResult {
   created: { messagingGroup: boolean; wiring: boolean };
 }
 
-function platformIdFor(channelType: ChannelKind, userId: string): string {
+function platformIdFor(channelType: ChannelKind, botId: string, userId: string): string {
   switch (channelType) {
     case 'discord':
-      // Canonical Discord DM platform_id format (matches the example in
-      // scripts/init-first-agent.ts: `--platform-id discord:@me:<userId>`).
-      // We construct it directly because `namespacedPlatformId` would
-      // short-circuit on the `@` and skip the `discord:` prefix.
-      return `discord:@me:${userId}`;
+      // v2 Discord DM platform_id: `discord:<botId>:@me:<botUserId>`. The
+      // native segment (`@me:<botUserId>`) is what the Chat SDK adapter
+      // produces from `channelIdFromThreadId` for a bot DM channel; the
+      // bridge prepends `<botId>` so messaging_groups keys per-bot.
+      return encodePlatformId('discord', botId, `@me:${userId}`);
     case 'telegram':
-      // Canonical Telegram DM platform_id is `telegram:<chatId>` where the
+      // v2 Telegram DM platform_id: `telegram:<botId>:<chatId>` where the
       // chat_id of a bot-↔-user DM equals the user's Telegram user id.
-      // Verified against src/channels/chat-sdk-bridge.ts (line 470 comment),
-      // src/delivery.test.ts, and the permissions tests on main.
-      return `telegram:${userId}`;
+      // Encoding the bot id as the second segment is what makes two
+      // Telegram bots' identical DM chat_ids resolve to distinct
+      // messaging_groups rows (see src/platform-id.ts module comment).
+      return encodePlatformId('telegram', botId, userId);
   }
 }
 
@@ -96,13 +111,16 @@ function platformIdFor(channelType: ChannelKind, userId: string): string {
  * we leave it alone and report `created: false`.
  */
 export function wireDmToAgent(input: WireDmInput): WireDmResult {
-  const { channelType, agentGroup, botUserId, displayName } = input;
+  const { channelType, agentGroup, botId, botUserId, displayName } = input;
   if (!botUserId.trim()) {
     throw new Error('botUserId is required');
   }
+  if (!botId.trim()) {
+    throw new Error('botId is required');
+  }
 
   const userId = botUserId.trim();
-  const platformId = platformIdFor(channelType, userId);
+  const platformId = platformIdFor(channelType, botId.trim(), userId);
   const now = new Date().toISOString();
 
   let mg: MessagingGroup | undefined = getMessagingGroupByPlatform(channelType, platformId);

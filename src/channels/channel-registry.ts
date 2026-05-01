@@ -6,6 +6,7 @@
  */
 import type { ChannelAdapter, ChannelRegistration, ChannelSetup } from './adapter.js';
 import { log } from '../log.js';
+import { decodePlatformIdAs } from '../platform-id.js';
 
 const SETUP_RETRY_DELAYS_MS = [2000, 5000, 10000];
 
@@ -19,16 +20,50 @@ function isNetworkError(err: unknown): err is Error {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const registry = new Map<string, ChannelRegistration>();
+/**
+ * Active adapters keyed by `<channelType>\0<botId>` so two adapters on the
+ * same channel type but different bots (e.g. two Telegram bots) can coexist.
+ * Adapters without a bot dimension (CLI admin transport) key under empty
+ * botId.
+ */
 const activeAdapters = new Map<string, ChannelAdapter>();
+
+function adapterKey(channelType: string, botId: string | null | undefined): string {
+  return `${channelType}\0${botId ?? ''}`;
+}
 
 /** Register a channel adapter factory. Called by channel modules on import. */
 export function registerChannelAdapter(name: string, registration: ChannelRegistration): void {
   registry.set(name, registration);
 }
 
-/** Get a live adapter by channel type. */
+/**
+ * Get a live adapter by channel type. Returns the first adapter registered
+ * under that type — meaningful only in single-bot-per-platform installs
+ * (the current state through PR A). Multi-bot callers must use
+ * {@link getChannelAdapterForPlatformId} so the right bot's adapter is
+ * selected by the v2 platform_id's bot dimension.
+ */
 export function getChannelAdapter(channelType: string): ChannelAdapter | undefined {
-  return activeAdapters.get(channelType);
+  for (const [key, adapter] of activeAdapters) {
+    if (key.startsWith(`${channelType}\0`)) return adapter;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the adapter responsible for a given v2 platform_id by decoding
+ * its bot segment. Falls back to the channel-type-only lookup for legacy
+ * v1 ids (botId === null) so deliveries against not-yet-backfilled rows
+ * still go somewhere sensible during the rollout window.
+ */
+export function getChannelAdapterForPlatformId(channelType: string, platformId: string): ChannelAdapter | undefined {
+  const decoded = decodePlatformIdAs(platformId, 'v2');
+  if (decoded.botId !== null) {
+    const exact = activeAdapters.get(adapterKey(channelType, decoded.botId));
+    if (exact) return exact;
+  }
+  return getChannelAdapter(channelType);
 }
 
 /** Get all active adapters. */
@@ -85,22 +120,39 @@ export async function initChannelAdapters(setupFn: (adapter: ChannelAdapter) => 
           throw err;
         }
       }
-      activeAdapters.set(adapter.channelType, adapter);
-      log.info('Channel adapter started', { channel: name, type: adapter.channelType });
+      activeAdapters.set(adapterKey(adapter.channelType, adapter.botId), adapter);
+      log.info('Channel adapter started', {
+        channel: name,
+        type: adapter.channelType,
+        botId: adapter.botId ?? null,
+      });
     } catch (err) {
       log.error('Failed to start channel adapter', { channel: name, err });
     }
   }
 }
 
+/**
+ * Test-only: inject a fake active adapter so functions that read the
+ * registry (e.g. startup-bootstrap) can run without a full setup. Caller
+ * is responsible for calling {@link _resetActiveAdaptersForTest} after.
+ */
+export function _setActiveAdapterForTest(adapter: ChannelAdapter): void {
+  activeAdapters.set(adapterKey(adapter.channelType, adapter.botId), adapter);
+}
+
+export function _resetActiveAdaptersForTest(): void {
+  activeAdapters.clear();
+}
+
 /** Tear down all active adapters. */
 export async function teardownChannelAdapters(): Promise<void> {
-  for (const [name, adapter] of activeAdapters) {
+  for (const [key, adapter] of activeAdapters) {
     try {
       await adapter.teardown();
-      log.info('Channel adapter stopped', { channel: name });
+      log.info('Channel adapter stopped', { key, type: adapter.channelType });
     } catch (err) {
-      log.error('Failed to stop channel adapter', { channel: name, err });
+      log.error('Failed to stop channel adapter', { key, type: adapter.channelType, err });
     }
   }
   activeAdapters.clear();

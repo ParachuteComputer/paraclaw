@@ -113,6 +113,16 @@ export interface ChannelAdapter {
   channelType: string;
 
   /**
+   * Stable per-bot identity used as the second segment of v2 platform_ids
+   * (`<channel>:<botId>:<native>`). Null/undefined for adapters that have
+   * no bot dimension at all (CLI admin transport). Resolved at adapter
+   * factory time — Telegram via `getMe.id`, Discord via
+   * `DISCORD_APPLICATION_ID`. Used by the registry to look up the right
+   * adapter when delivering a v2 platform_id back out.
+   */
+  botId?: string | null;
+
+  /**
    * Whether this adapter models conversations as threads.
    *
    * true  — adapter's platform uses threads as the primary conversation unit
@@ -166,7 +176,7 @@ export interface ChannelAdapter {
 }
 
 /** Factory function that creates a channel adapter (returns null if credentials missing). */
-export type ChannelAdapterFactory = () => ChannelAdapter | Promise<ChannelAdapter> | null;
+export type ChannelAdapterFactory = () => ChannelAdapter | null | Promise<ChannelAdapter | null>;
 
 /** Registration entry for a channel adapter. */
 export interface ChannelRegistration {

@@ -48,21 +48,35 @@ function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
   };
 }
 
-/** Look up the bot username via Telegram getMe. Cached after first call. */
-async function fetchBotUsername(token: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    const json = (await res.json()) as { ok: boolean; result?: { username?: string } };
-    return json.ok ? (json.result?.username ?? null) : null;
-  } catch (err) {
-    log.warn('Telegram getMe failed', { err });
-    return null;
+interface BotIdentity {
+  botId: string;
+  username: string | null;
+}
+
+/**
+ * Look up the bot's id and username via Telegram `getMe`. Required up-front so
+ * the bridge can encode v2 platform_ids (`<channel>:<botId>:<native>`) before
+ * any inbound traffic arrives. Throws on failure — paraclaw can't operate a
+ * Telegram channel adapter without a bot identity for keying.
+ */
+async function fetchBotIdentity(token: string): Promise<BotIdentity> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+  const json = (await res.json()) as {
+    ok: boolean;
+    result?: { id?: number; username?: string };
+    description?: string;
+  };
+  if (!json.ok || !json.result?.id) {
+    throw new Error(`Telegram getMe failed: ${json.description ?? 'no result'}`);
   }
+  return { botId: String(json.result.id), username: json.result.username ?? null };
 }
 
 function isGroupPlatformId(platformId: string): boolean {
-  // platformId is "telegram:<chatId>". Negative chat IDs are groups/channels.
-  const id = platformId.split(':').pop() ?? '';
+  // platformId is v2 (`telegram:<botId>:<chatId>`); the chat id is the third
+  // segment. Negative chat IDs are groups/channels.
+  const parts = platformId.split(':');
+  const id = parts.length >= 3 ? parts[2] : (parts.pop() ?? '');
   return id.startsWith('-');
 }
 
@@ -91,7 +105,10 @@ function readInboundFields(message: InboundMessage): InboundFields {
  * pairing or trigger the interceptor's fail-open path.
  */
 async function sendPairingConfirmation(token: string, platformId: string): Promise<void> {
-  const chatId = platformId.split(':').slice(1).join(':');
+  // platformId is v2 (`telegram:<botId>:<chatId>`); the chat id is everything
+  // after the second colon. Slice past those two segments before posting.
+  const parts = platformId.split(':');
+  const chatId = parts.length >= 3 ? parts.slice(2).join(':') : parts.slice(1).join(':');
   if (!chatId) return;
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -111,13 +128,12 @@ async function sendPairingConfirmation(token: string, platformId: string): Promi
 }
 
 function createPairingInterceptor(
-  botUsernamePromise: Promise<string | null>,
+  botUsername: string | null,
   hostOnInbound: ChannelSetup['onInbound'],
   token: string,
 ): ChannelSetup['onInbound'] {
   return async (platformId, threadId, message) => {
     try {
-      const botUsername = await botUsernamePromise;
       if (!botUsername) {
         hostOnInbound(platformId, threadId, message);
         return;
@@ -196,30 +212,41 @@ function createPairingInterceptor(
 }
 
 registerChannelAdapter('telegram', {
-  factory: () => {
+  factory: async () => {
     const env = readEnvFile(['TELEGRAM_BOT_TOKEN']);
     if (!env.TELEGRAM_BOT_TOKEN) return null;
     const token = env.TELEGRAM_BOT_TOKEN;
+
+    // Resolve the bot identity (id + username) eagerly. The id keys the v2
+    // platform_id encoding and the registry slot, so we cannot defer it the
+    // way the old code lazily fetched the username for pairing — paraclaw
+    // would otherwise route all inbound traffic before knowing how to encode
+    // it. If getMe fails we surface the error so initChannelAdapters logs
+    // a clear "Failed to start channel adapter" instead of silently routing
+    // to the wrong key.
+    const identity = await withRetry(() => fetchBotIdentity(token), 'getMe');
+    const { botId, username } = identity;
+
     const telegramAdapter = createTelegramAdapter({
       botToken: token,
       mode: 'polling',
     });
     const bridge = createChatSdkBridge({
       adapter: telegramAdapter,
+      botId,
       concurrency: 'concurrent',
       extractReplyContext,
       supportsThreads: false,
       transformOutboundText: sanitizeTelegramLegacyMarkdown,
     });
 
-    const botUsernamePromise = fetchBotUsername(token);
-
     const wrapped: ChannelAdapter = {
       ...bridge,
+      botId,
       async setup(hostConfig: ChannelSetup) {
         const intercepted: ChannelSetup = {
           ...hostConfig,
-          onInbound: createPairingInterceptor(botUsernamePromise, hostConfig.onInbound, token),
+          onInbound: createPairingInterceptor(username, hostConfig.onInbound, token),
         };
         return withRetry(() => bridge.setup(intercepted), 'bridge.setup');
       },
