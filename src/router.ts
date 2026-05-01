@@ -144,6 +144,11 @@ function safeParseContent(raw: string): { text?: string; sender?: string; sender
 export async function routeInbound(event: InboundEvent): Promise<void> {
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
   //    WhatsApp, iMessage, email) collapse threads to the channel.
+  //    By-channel-type (not by-bot) lookup is correct here: we only read
+  //    `supportsThreads`, which is a property of the channel itself, not of
+  //    a specific bot identity. Per-bot resolution (`getChannelAdapterForPlatformId`)
+  //    is reserved for delivery, where the outbound adapter must match the
+  //    bot dimension encoded in the v2 platform_id.
   const adapter = getChannelAdapter(event.channelType);
   if (adapter && !adapter.supportsThreads) {
     event = { ...event, threadId: null };

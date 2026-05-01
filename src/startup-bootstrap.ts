@@ -78,7 +78,16 @@ interface MessagingGroupRow {
   platform_id: string;
 }
 
-/** True if the platform_id's bot segment is already the given bot's id. */
+/**
+ * True if the platform_id's bot segment is already the given bot's id.
+ *
+ * Collision case: if a v1 row's first native segment happens to equal this
+ * bot's botId (a Telegram chat_id matching the bot's own user_id, or a
+ * Discord guild id matching its application id), it would be misclassified
+ * as already-v2 and skipped. Vanishingly unlikely given how those id spaces
+ * are allocated — flagged here so a future operator hitting the case knows
+ * where to look.
+ */
 function isAlreadyV2(channelType: string, platformId: string, botId: string): boolean {
   const prefix = `${channelType}:`;
   if (!platformId.startsWith(prefix)) return false;
