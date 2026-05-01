@@ -244,7 +244,9 @@ describe('wireChannelToGroup — body contract with server', () => {
     const api = await import('./api.ts');
     await api.wireChannelToGroup('forge', {
       channel: 'telegram',
+      botId: '7654321',
       botUserId: '42',
+      operatorUserId: '42',
       displayName: 'Forge DM',
     });
 
@@ -253,7 +255,9 @@ describe('wireChannelToGroup — body contract with server', () => {
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toEqual({
       channelType: 'telegram',
+      botId: '7654321',
       botUserId: '42',
+      operatorUserId: '42',
       displayName: 'Forge DM',
     });
     expect(body.channel).toBeUndefined();

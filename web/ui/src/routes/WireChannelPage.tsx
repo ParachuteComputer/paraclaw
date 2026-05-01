@@ -117,7 +117,9 @@ export function WireChannelPage() {
     try {
       const r = await wireChannelToGroup(picked.folder, {
         channel: adapter.key,
+        botId: identity.id,
         botUserId: wireId,
+        operatorUserId: operatorUserId.trim() || undefined,
         displayName: `${picked.name} DM`,
       });
       setWireResult(r);
