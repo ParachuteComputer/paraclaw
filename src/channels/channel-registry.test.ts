@@ -307,9 +307,8 @@ describe('multi-bot routing via dynamic register-bot', () => {
   });
 
   it('register-bot is idempotent on (channelType, botId)', async () => {
-    const { registerChannelAdapter, registerBotAdapter, initChannelAdapters, getActiveAdapters } = await import(
-      './channel-registry.js'
-    );
+    const { registerChannelAdapter, registerBotAdapter, initChannelAdapters, getActiveAdapters } =
+      await import('./channel-registry.js');
 
     registerChannelAdapter('idem-mock', {
       factory: () => null,
