@@ -30,7 +30,7 @@ import {
   type ChannelAdapter,
   type ResolvedIdentity,
 } from '../lib/channel-adapters.ts';
-import { wireChannelToGroup, type WireChannelResult } from '../lib/api.ts';
+import { registerChannelBot, wireChannelToGroup, type WireChannelResult } from '../lib/api.ts';
 
 export function WireChannelPage() {
   const [adapterKey, setAdapterKey] = useState<ChannelAdapter | null>(null);
@@ -66,8 +66,19 @@ export function WireChannelPage() {
     setValidating(true);
     setValidateError(null);
     try {
-      const r = await adapter.validate(token.trim());
-      setIdentity(r);
+      const trimmed = token.trim();
+      // Hit the per-adapter validator first so the user-facing error from a
+      // bad token names the platform's rejection ("telegram rejected token:
+      // …") rather than a 502 from the register-bot path. Then immediately
+      // register-bot, which persists the token to /secrets and brings up the
+      // adapter at runtime — a single user gesture covers both.
+      const validated = await adapter.validate(trimmed);
+      const registered = await registerChannelBot(adapter.key, trimmed);
+      // Server's register-bot is authoritative on botId — for Discord the
+      // validator returns the user.id which matches application.id for bot
+      // accounts, but in case they ever drift we trust whatever the live
+      // adapter resolved.
+      setIdentity({ id: registered.botId, username: registered.username || validated.username });
       setToken('');
     } catch (err) {
       setValidateError(err instanceof Error ? err.message : String(err));
@@ -191,7 +202,8 @@ export function WireChannelPage() {
         <Section step={2} title={`Bot identity — ${adapter.label}`}>
           <p className="dim" style={{ marginTop: 0 }}>
             We hit <code>{adapter.upstreamProbePath}</code> to confirm the token authenticates and the account
-            is a bot. Get a token from{' '}
+            is a bot, then encrypt-and-store it under <code>secrets</code> and bring up the adapter so
+            the bot is live across host restarts. Get a token from{' '}
             <a href={adapter.tokenHelp.href} target="_blank" rel="noreferrer">
               {adapter.tokenHelp.title}
             </a>
@@ -201,7 +213,7 @@ export function WireChannelPage() {
           {identity ? (
             <div className="empty empty-rich" style={{ marginTop: '0.5rem' }}>
               <p className="empty-headline" style={{ margin: 0 }}>
-                Bot identified: <code>@{identity.username}</code>{' '}
+                Bot registered: <code>@{identity.username}</code>{' '}
                 <span className="dim">
                   (id <code>{identity.id}</code>)
                 </span>
@@ -214,7 +226,7 @@ export function WireChannelPage() {
                   setToken('');
                 }}
               >
-                Re-validate with a different token
+                Use a different token
               </button>
             </div>
           ) : (
@@ -233,7 +245,7 @@ export function WireChannelPage() {
               {validateError && <div className="error-banner">{validateError}</div>}
               <div className="actions" style={{ marginTop: '0.5rem' }}>
                 <button onClick={onValidate} disabled={!token.trim() || validating}>
-                  {validating ? 'Validating…' : 'Validate token'}
+                  {validating ? 'Validating + registering…' : 'Validate & register bot'}
                 </button>
               </div>
             </>
