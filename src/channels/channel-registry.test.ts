@@ -233,3 +233,157 @@ describe('channel + router integration', () => {
     expect((mockAdapter.delivered[0].content as { text: string }).text).toBe('Agent response');
   });
 });
+
+describe('multi-bot routing via dynamic register-bot', () => {
+  beforeEach(async () => {
+    if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+    const { initTestDb, runMigrations } = await import('../db/index.js');
+    const db = initTestDb();
+    runMigrations(db);
+    const { _resetActiveAdaptersForTest } = await import('./channel-registry.js');
+    _resetActiveAdaptersForTest();
+  });
+
+  afterEach(async () => {
+    const { closeDb } = await import('../db/index.js');
+    const { _resetActiveAdaptersForTest } = await import('./channel-registry.js');
+    _resetActiveAdaptersForTest();
+    closeDb();
+    if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+  });
+
+  it('registers two bots on the same channel-type and routes by botId', async () => {
+    const {
+      registerChannelAdapter,
+      registerBotAdapter,
+      initChannelAdapters,
+      getActiveAdapters,
+      getChannelAdapter,
+      getChannelAdapterForPlatformId,
+    } = await import('./channel-registry.js');
+    const { encodePlatformId } = await import('../platform-id.js');
+
+    // Channel that supports multi-bot — spawnFromSecret returns a fresh
+    // adapter whose botId is parsed from the secret name's trailing segment.
+    // Mirrors discord.ts's spawnFromSecret shape; telegram would call getMe
+    // but we keep the test in-memory.
+    registerChannelAdapter('multi-mock', {
+      factory: () => null,
+      spawnFromSecret: async (secretName) => {
+        const botId = secretName.split(':').pop()!;
+        const adapter = createMockAdapter('multi-mock');
+        return { ...adapter, botId };
+      },
+    });
+
+    // Init with no .env-backed primary, then dynamically register two bots.
+    await initChannelAdapters(() => ({
+      onInbound: () => {},
+      onInboundEvent: () => {},
+      onMetadata: () => {},
+      onAction: () => {},
+    }));
+
+    const a = await registerBotAdapter('multi-mock', 'CHANNEL_BOT_TOKEN:multi-mock:bot-A', 'token-A');
+    const b = await registerBotAdapter('multi-mock', 'CHANNEL_BOT_TOKEN:multi-mock:bot-B', 'token-B');
+    expect(a?.botId).toBe('bot-A');
+    expect(b?.botId).toBe('bot-B');
+
+    // Both adapters live, keyed independently.
+    const active = getActiveAdapters().filter((x) => x.channelType === 'multi-mock');
+    expect(active).toHaveLength(2);
+    expect(active.map((x) => x.botId).sort()).toEqual(['bot-A', 'bot-B']);
+
+    // v2 platform_id's bot segment selects the right adapter.
+    const pidA = encodePlatformId('multi-mock', 'bot-A', 'chat-1');
+    const pidB = encodePlatformId('multi-mock', 'bot-B', 'chat-1');
+    expect(getChannelAdapterForPlatformId('multi-mock', pidA)).toBe(a);
+    expect(getChannelAdapterForPlatformId('multi-mock', pidB)).toBe(b);
+
+    // Channel-type-only lookup picks one (not deterministic which) — that
+    // path is for legacy v1 ids only; prove it doesn't throw.
+    expect(getChannelAdapter('multi-mock')).toBeDefined();
+  });
+
+  it('register-bot is idempotent on (channelType, botId)', async () => {
+    const { registerChannelAdapter, registerBotAdapter, initChannelAdapters, getActiveAdapters } = await import(
+      './channel-registry.js'
+    );
+
+    registerChannelAdapter('idem-mock', {
+      factory: () => null,
+      spawnFromSecret: async (secretName) => {
+        const botId = secretName.split(':').pop()!;
+        const adapter = createMockAdapter('idem-mock');
+        return { ...adapter, botId };
+      },
+    });
+
+    await initChannelAdapters(() => ({
+      onInbound: () => {},
+      onInboundEvent: () => {},
+      onMetadata: () => {},
+      onAction: () => {},
+    }));
+
+    const first = await registerBotAdapter('idem-mock', 'CHANNEL_BOT_TOKEN:idem-mock:bot-X', 'token-X');
+    const second = await registerBotAdapter('idem-mock', 'CHANNEL_BOT_TOKEN:idem-mock:bot-X', 'token-X-rotated');
+    expect(first?.botId).toBe('bot-X');
+    expect(second).toBe(first);
+    const active = getActiveAdapters().filter((x) => x.channelType === 'idem-mock');
+    expect(active).toHaveLength(1);
+  });
+
+  it('register-bot throws on a channel without spawnFromSecret', async () => {
+    const { registerChannelAdapter, registerBotAdapter, initChannelAdapters } = await import('./channel-registry.js');
+
+    registerChannelAdapter('single-only', { factory: () => null });
+    await initChannelAdapters(() => ({
+      onInbound: () => {},
+      onInboundEvent: () => {},
+      onMetadata: () => {},
+      onAction: () => {},
+    }));
+    await expect(registerBotAdapter('single-only', 'CHANNEL_BOT_TOKEN:single-only:x', 'tok')).rejects.toThrow(
+      /multi-bot/,
+    );
+  });
+
+  it('spawnSecretsBackedBots brings up persisted bots after restart', async () => {
+    const {
+      registerChannelAdapter,
+      initChannelAdapters,
+      spawnSecretsBackedBots,
+      getActiveAdapters,
+      _resetActiveAdaptersForTest,
+    } = await import('./channel-registry.js');
+    const { putSecret } = await import('../secrets/index.js');
+
+    registerChannelAdapter('boot-mock', {
+      factory: () => null,
+      spawnFromSecret: async (secretName) => {
+        const botId = secretName.split(':').pop()!;
+        const adapter = createMockAdapter('boot-mock');
+        return { ...adapter, botId };
+      },
+    });
+
+    // Persist two tokens as if a previous boot had registered them.
+    putSecret('CHANNEL_BOT_TOKEN:boot-mock:bot-1', 'tok-1', { kind: 'channel-token', agent_group_id: null });
+    putSecret('CHANNEL_BOT_TOKEN:boot-mock:bot-2', 'tok-2', { kind: 'channel-token', agent_group_id: null });
+
+    await initChannelAdapters(() => ({
+      onInbound: () => {},
+      onInboundEvent: () => {},
+      onMetadata: () => {},
+      onAction: () => {},
+    }));
+
+    // Simulate restart: clear actives, then run the boot scan.
+    _resetActiveAdaptersForTest();
+    await spawnSecretsBackedBots();
+    const active = getActiveAdapters().filter((x) => x.channelType === 'boot-mock');
+    expect(active.map((x) => x.botId).sort()).toEqual(['bot-1', 'bot-2']);
+  });
+});
