@@ -68,7 +68,7 @@ import { wireDmToAgent } from './wire-channel.js';
 import { getChannelAdapter, registerBotAdapter } from '../channels/channel-registry.js';
 import { validateDiscordBotToken } from './discord-validate.js';
 import { validateTelegramBotToken } from './telegram-validate.js';
-import { putSecret } from '../secrets/index.js';
+import { getSecret, putSecret } from '../secrets/index.js';
 import { channelTokenSecretName } from '../startup-bootstrap.js';
 
 const PROJECT_ROOT = process.cwd();
@@ -292,13 +292,15 @@ async function handleApi(
       // Persist before bringing up the adapter so a crash mid-setup still
       // leaves the token recoverable on next boot's spawnSecretsBackedBots.
       const secretName = channelTokenSecretName(adapter, botId);
+      const existing = getSecret(secretName);
+      const isRotation = existing !== undefined && existing !== token;
       putSecret(secretName, token, { kind: 'channel-token', agent_group_id: null });
       const live = await registerBotAdapter(adapter, secretName, token);
       if (!live) {
         error(res, 502, `${adapter} register-bot: spawnFromSecret returned null after a successful validate`);
         return;
       }
-      log.info('Channel bot registered', { adapter, botId });
+      log.info(isRotation ? 'Channel bot token rotated' : 'Channel bot registered', { adapter, botId });
       json(res, 200, { ok: true, botId, username });
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
