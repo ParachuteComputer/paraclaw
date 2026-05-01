@@ -23,8 +23,16 @@ export interface PendingChannelApproval {
   options_json: string;
 }
 
-export function createPendingChannelApproval(row: PendingChannelApproval): void {
-  getDb()
+/**
+ * Insert atomically; returns true iff this call won the race and inserted
+ * the row. Returns false (without throwing) if a row was already present
+ * for this messaging_group_id — the previous non-atomic check+insert pair
+ * threw `UNIQUE constraint failed` when concurrent inbounds raced past
+ * the dedup check, surfacing as ERROR-level noise on every multi-mention
+ * burst even though user-visible behavior was correct.
+ */
+export function createPendingChannelApproval(row: PendingChannelApproval): boolean {
+  const result = getDb()
     .prepare(
       `INSERT INTO pending_channel_approvals (
          messaging_group_id, agent_group_id, original_message,
@@ -33,9 +41,11 @@ export function createPendingChannelApproval(row: PendingChannelApproval): void 
        VALUES (
          @messaging_group_id, @agent_group_id, @original_message,
          @approver_user_id, @created_at, @title, @options_json
-       )`,
+       )
+       ON CONFLICT(messaging_group_id) DO NOTHING`,
     )
     .run(row);
+  return result.changes > 0;
 }
 
 export function getPendingChannelApproval(messagingGroupId: string): PendingChannelApproval | undefined {
