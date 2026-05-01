@@ -62,6 +62,7 @@ import {
   initChannelAdapters,
   teardownChannelAdapters,
   getChannelAdapterForPlatformId,
+  spawnSecretsBackedBots,
 } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
@@ -142,6 +143,13 @@ async function main(): Promise<void> {
   // tokens into the secrets table and rewrite legacy v1 messaging_groups
   // platform_ids to the v2 form. Idempotent; safe across restarts.
   runStartupBootstrap();
+
+  // 3c. Bring up adapters for every additional bot the operator has
+  // registered via the dynamic register-bot endpoint. Runs after the `.env`
+  // primary is up + bootstrap has populated the secrets table, so we know
+  // the primary's `(channelType, botId)` is already covered and won't be
+  // re-registered.
+  await spawnSecretsBackedBots();
 
   // 4. Delivery adapter bridge — dispatches to channel adapters
   const deliveryAdapter = {
