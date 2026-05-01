@@ -931,6 +931,35 @@ export async function testTelegramToken(token: string): Promise<{ identity: Tele
   });
 }
 
+// --- Dynamic bot registration (used after token validate, before wire) ---
+
+export interface RegisterChannelBotResult {
+  ok: true;
+  botId: string;
+  username: string;
+}
+
+/**
+ * Persist the validated bot token to /secrets and bring up its adapter at
+ * runtime. Idempotent on `(channel, botId)` — re-posting the same token
+ * refreshes the ciphertext and returns the already-active adapter.
+ *
+ * Run this AFTER `testDiscordToken` / `testTelegramToken` succeeds so the
+ * server can fail fast on bad tokens before any DB write. The returned
+ * `botId` is what the next `wireChannelToGroup` call should pass as
+ * `botUserId` for Discord (where botId == bot's snowflake), and as the
+ * basis of the operator-id for Telegram.
+ */
+export async function registerChannelBot(
+  channel: ChannelKind,
+  token: string,
+): Promise<RegisterChannelBotResult> {
+  return request<RegisterChannelBotResult>(`/channels/${encodeURIComponent(channel)}/register-bot`, {
+    method: 'POST',
+    json: { token },
+  });
+}
+
 // --- Channel wiring (per-group, used by wizard step 7) ---
 
 export interface WireChannelResult {
