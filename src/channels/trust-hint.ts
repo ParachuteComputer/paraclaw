@@ -35,6 +35,7 @@ function key(channelType: string, botId: string, operatorUserId: string): HintKe
 const hints = new Map<HintKey, number>();
 
 function sweep(now: number): void {
+  // O(n) sweep over active hints; n stays tiny in practice (operator-window bounded).
   for (const [k, expiresAt] of hints) {
     if (expiresAt <= now) hints.delete(k);
   }

@@ -220,7 +220,23 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     const senderId = parsedUnwired.senderId;
     if (decoded.botId && senderId && consumeTrustHint(event.channelType, decoded.botId, senderId)) {
       const targetGroups = getAllAgentGroups();
+      if (targetGroups.length === 0) {
+        // Hint already consumed (single-use) but there's no agent group to
+        // wire to. Falls through to the approval cascade below; surface a
+        // warn so an operator who hits this can correlate it with their
+        // missing agent-group setup.
+        log.warn('Trust hint consumed but no agent groups — operator message dropped', {
+          messagingGroupId: mg.id,
+          channelType: event.channelType,
+          botId: decoded.botId,
+        });
+      }
       if (targetGroups.length > 0) {
+        // Multi-agent-group installs: this picks the first group by DB
+        // insert order. Good enough for the trust-hint use case (operator
+        // just wired a bot and is DM'ing it now — usually the install only
+        // has one group anyway), but a richer "wire to the most recently
+        // wired group" or operator-prompted pick is a follow-up if needed.
         const target = targetGroups[0]!;
         log.info('Channel inbound auto-wired via operator trust hint', {
           messagingGroupId: mg.id,
