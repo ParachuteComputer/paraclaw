@@ -65,9 +65,11 @@ import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
-import { getChannelAdapter } from '../channels/channel-registry.js';
+import { getChannelAdapter, registerBotAdapter } from '../channels/channel-registry.js';
 import { validateDiscordBotToken } from './discord-validate.js';
 import { validateTelegramBotToken } from './telegram-validate.js';
+import { putSecret } from '../secrets/index.js';
+import { channelTokenSecretName } from '../startup-bootstrap.js';
 
 const PROJECT_ROOT = process.cwd();
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
@@ -251,6 +253,53 @@ async function handleApi(
         adapter === 'discord' ? await validateDiscordBotToken(token) : await validateTelegramBotToken(token);
       const httpStatus = result.ok ? 200 : result.status === 401 ? 400 : result.status;
       json(res, httpStatus, result);
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
+  // Persist + bring up an additional bot adapter at runtime. The wire-
+  // channel UI hits this after a successful /test so the operator can wire
+  // a NEW bot's token without restarting the host. Idempotent on
+  // (channelType, botId): re-posting the same token just refreshes the
+  // ciphertext and returns the already-active adapter's identity.
+  if (method === 'POST' && /^\/api\/channels\/[^/]+\/register-bot$/.test(pathname)) {
+    if (!(await gate(req, res, SCOPE_CLAW_ADMIN))) return;
+    const adapter = pathname.split('/')[3];
+    if (adapter !== 'discord' && adapter !== 'telegram') {
+      error(res, 404, `unknown adapter: ${adapter}`);
+      return;
+    }
+    try {
+      const body = await readJsonBody<{ token?: string }>(req);
+      const token = (body.token ?? '').trim();
+      if (!token) {
+        error(res, 400, 'token is required');
+        return;
+      }
+      // Validate first so we have a botId for the secret name and can fail
+      // fast on bad tokens without writing anything to the DB.
+      const validation =
+        adapter === 'discord' ? await validateDiscordBotToken(token) : await validateTelegramBotToken(token);
+      if (!validation.ok) {
+        const httpStatus = validation.status === 401 ? 400 : validation.status;
+        json(res, httpStatus, validation);
+        return;
+      }
+      const botId = String(validation.identity.id);
+      const username = validation.identity.username;
+      // Persist before bringing up the adapter so a crash mid-setup still
+      // leaves the token recoverable on next boot's spawnSecretsBackedBots.
+      const secretName = channelTokenSecretName(adapter, botId);
+      putSecret(secretName, token, { kind: 'channel-token', agent_group_id: null });
+      const live = await registerBotAdapter(adapter, secretName, token);
+      if (!live) {
+        error(res, 502, `${adapter} register-bot: spawnFromSecret returned null after a successful validate`);
+        return;
+      }
+      log.info('Channel bot registered', { adapter, botId });
+      json(res, 200, { ok: true, botId, username });
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));
     }
