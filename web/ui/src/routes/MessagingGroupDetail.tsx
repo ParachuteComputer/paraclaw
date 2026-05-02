@@ -160,8 +160,8 @@ export function MessagingGroupDetail() {
           }}
         >
           <strong>Denied channel.</strong> The owner explicitly blocked this messaging group at{' '}
-          <code>{mg.deniedAt}</code>. Wire an agent to unblock; until then the router drops messages here before the
-          policy below applies.
+          <code>{mg.deniedAt}</code>. The router drops messages here before any wiring or policy below applies — undeny
+          from the central admin surface to restore routing.
         </div>
       )}
 

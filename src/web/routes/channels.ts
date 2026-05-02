@@ -410,16 +410,14 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
         return true;
       }
       updateMessagingGroup(id, { unknown_sender_policy: validated.input.unknownSenderPolicy });
-      const after = getMessagingGroupDetail(id);
-      if (!after) {
-        error(res, 500, `messaging group ${id} disappeared after update`);
-        return true;
-      }
       log.info('messaging group policy updated via web', {
         id,
         unknownSenderPolicy: validated.input.unknownSenderPolicy,
       });
-      json(res, 200, { messagingGroup: after });
+      // Same connection, same tx, same row — the post-update re-fetch can't
+      // return null without the row being concurrently deleted, which is not
+      // a state this surface needs to guard against.
+      json(res, 200, { messagingGroup: getMessagingGroupDetail(id)! });
       return true;
     }
     error(res, 405, `method not allowed on ${pathname}: ${method}`);
