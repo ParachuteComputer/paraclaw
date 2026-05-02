@@ -109,11 +109,11 @@ function apiToDbPatch(input: PatchInput, current: MessagingGroupAgent): DbPatch 
     } else if (input.engageMode === 'pattern') {
       out.engage_mode = 'pattern';
       // Pattern body comes from input.engagePattern when present; otherwise
-      // preserve what's already on the row. We never write '.' here — that
-      // would silently re-collapse to 'all' on the next read.
+      // preserve what's already on the row. validatePatchInput already
+      // rejects bare '.' here so the next read can't silently collapse to
+      // 'all'.
       if (input.engagePattern !== undefined) {
-        out.engage_pattern =
-          input.engagePattern === ALL_MESSAGES_PATTERN_SENTINEL ? current.engage_pattern : input.engagePattern;
+        out.engage_pattern = input.engagePattern;
       }
     } else if (input.engageMode === 'mention') {
       // Preserve mention-sticky if that's what's currently on the row;
@@ -235,6 +235,15 @@ function validatePatchInput(body: unknown): { ok: true; input: PatchInput } | { 
   if ('engagePattern' in b) {
     if (b.engagePattern !== null && typeof b.engagePattern !== 'string') {
       return { ok: false, reason: 'engagePattern must be string or null' };
+    }
+    // Bare '.' is the wire-format sentinel for engageMode='all' — accepting
+    // it as a literal pattern would silently round-trip back as 'all' on the
+    // next read and lose the user's intent. Force the caller to disambiguate.
+    if (b.engagePattern === ALL_MESSAGES_PATTERN_SENTINEL) {
+      return {
+        ok: false,
+        reason: "engagePattern '.' is reserved as the 'all' sentinel — use '\\\\.' (escaped) to match a literal dot, or set engageMode to 'all'",
+      };
     }
     out.engagePattern = b.engagePattern as string | null;
   }
@@ -424,13 +433,21 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
     return true;
   }
 
-  // /api/channels/:id — PATCH or DELETE
-  const idMatch = pathname.match(/^\/api\/channels\/([^/]+)$/);
-  if (idMatch) {
-    const id = decodeURIComponent(idMatch[1]);
+  // /api/channels/mga/:id — GET (wire detail), PATCH (routing rules edit),
+  // or DELETE (unwire). The `mga/` segment matches the `mg/` convention from
+  // the messaging-group detail block above; `mga` = messaging_group_agent =
+  // one wire row.
+  const mgaMatch = pathname.match(/^\/api\/channels\/mga\/([^/]+)$/);
+  if (mgaMatch) {
+    const id = decodeURIComponent(mgaMatch[1]);
     const current = getMessagingGroupAgent(id);
     if (!current) {
       error(res, 404, `channel wire not found: ${id}`);
+      return true;
+    }
+
+    if (method === 'GET') {
+      json(res, 200, { wire: getOneWireView(id)! });
       return true;
     }
 
@@ -449,13 +466,10 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
       }
       const dbPatch = apiToDbPatch(validated.input, current);
       updateMessagingGroupAgent(id, dbPatch);
-      const after = getOneWireView(id);
-      if (!after) {
-        error(res, 500, `channel wire ${id} disappeared after update`);
-        return true;
-      }
       log.info('channel wire updated via web', { id, fields: Object.keys(dbPatch) });
-      json(res, 200, { wire: after });
+      // Same connection, same row — see channels.ts mg/:id PATCH for the
+      // non-null-assertion rationale.
+      json(res, 200, { wire: getOneWireView(id)! });
       return true;
     }
 
@@ -465,6 +479,9 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
       json(res, 200, { id, deleted: true });
       return true;
     }
+
+    error(res, 405, `method not allowed on ${pathname}: ${method}`);
+    return true;
   }
 
   return false;

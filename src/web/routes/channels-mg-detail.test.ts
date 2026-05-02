@@ -305,21 +305,20 @@ describe('handleChannelsRoute — PATCH /api/channels/mg/:id', () => {
     expect(res.statusCode).toBe(405);
   });
 
-  it('does not collide with /api/channels/:id (single-segment id) routing', async () => {
-    // Sanity: the handler treats /api/channels/foo as an mga lookup, not an
-    // mg lookup. Without the mg-prefix, it would 404 as a missing wire and
-    // never reach the mg branch.
+  it('returns false (no match) for single-segment id routing', async () => {
+    // After PR3, neither mg nor mga is reachable as a single-segment id —
+    // the handler returns false so the outer dispatcher 404s the unknown
+    // route. Asserts the handler doesn't accidentally write a response.
     seedMg({ id: 'mg_collision' });
-    expect(getDb().prepare('SELECT id FROM messaging_groups WHERE id = ?').get('mg_collision')).toBeTruthy();
 
     const res = makeRes();
-    await handleChannelsRoute({
+    const matched = await handleChannelsRoute({
       pathname: '/api/channels/mg_collision',
       method: 'GET',
       req: makeReq(),
       res,
     });
-    expect(res.statusCode).toBe(404);
-    expect(res.json()).toMatchObject({ error: expect.stringMatching(/channel wire not found/) });
+    expect(matched).toBe(false);
+    expect(res.statusCode).toBe(0);
   });
 });

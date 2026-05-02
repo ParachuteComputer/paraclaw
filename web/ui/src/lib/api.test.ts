@@ -341,3 +341,70 @@ describe('wireChannelToGroup — body contract with server', () => {
     expect(body.channel).toBeUndefined();
   });
 });
+
+describe('channel-wire helpers — pinned to /channels/mga/:id', () => {
+  // PR3 disambiguates per-MG and per-MGA detail under prefixed paths. Pin
+  // the helper paths so a future refactor can't silently fall back to the
+  // single-segment `/channels/:id` shape that PR3 deleted.
+  function wireView(over: Partial<import('./api.ts').ChannelWireView> = {}): import('./api.ts').ChannelWireView {
+    return {
+      id: 'mga_1',
+      channelType: 'telegram',
+      messagingGroupId: 'mg_1',
+      platformId: 'telegram:42:1',
+      displayName: null,
+      agentGroupId: 'ag_1',
+      agentGroupFolder: 'main',
+      agentGroupName: 'Main',
+      engageMode: 'mention',
+      engagePattern: null,
+      senderScope: 'all',
+      ignoredMessagePolicy: 'drop',
+      priority: 0,
+      createdAt: '2026-04-20T10:00:00Z',
+      ...over,
+    };
+  }
+
+  it('getChannelWireDetail GETs /channels/mga/:id and unwraps { wire }', async () => {
+    const view = wireView({ id: 'mga_x', engageMode: 'all' });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { wire: view }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    const result = await api.getChannelWireDetail('mga_x');
+
+    expect(result).toEqual(view);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/channels\/mga\/mga_x$/);
+    expect((init as RequestInit).method ?? 'GET').toBe('GET');
+  });
+
+  it('updateChannelWire PATCHes /channels/mga/:id with the input body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { wire: wireView({ engageMode: 'all' }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    await api.updateChannelWire('mga_1', { engageMode: 'all', priority: 3 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/channels\/mga\/mga_1$/);
+    expect((init as RequestInit).method).toBe('PATCH');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ engageMode: 'all', priority: 3 });
+  });
+
+  it('deleteChannelWire DELETEs /channels/mga/:id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { id: 'mga_1', deleted: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    await api.deleteChannelWire('mga_1');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/channels\/mga\/mga_1$/);
+    expect((init as RequestInit).method).toBe('DELETE');
+  });
+});
