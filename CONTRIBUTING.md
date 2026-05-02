@@ -119,10 +119,12 @@ Test your contribution on a fresh clone before submitting. For skills, run the s
 
 ### web/ui test harness
 
-The frontend bundle in `web/ui/` is intentionally outside the pnpm workspace (the `web:build` script uses `--ignore-workspace`), so a root-level `pnpm install` does **not** populate `web/ui/node_modules`. If you're running web/ui tests, install its deps first:
+The frontend bundle in `web/ui/` is intentionally outside the pnpm workspace (the `build:spa` script uses `--ignore-workspace`). A root-level `pnpm install` populates `web/ui/node_modules` and builds `web/ui/dist/` automatically via the `postinstall` hook — usually no extra step is needed.
+
+If you ran `pnpm install --ignore-scripts` (the postinstall is suppressed), or you want to run web/ui tests on their own, install its deps and run the test runner directly:
 
 ```bash
-cd web/ui && pnpm install --ignore-workspace && pnpm test
+cd web/ui && pnpm install --frozen-lockfile --ignore-workspace && pnpm test
 ```
 
 Otherwise the test runner exits with a missing-dependency error (the exact symptom — module-not-found on `@vitejs/plugin-react`, missing test framework, etc. — depends on which entry point your package manager hits first).
