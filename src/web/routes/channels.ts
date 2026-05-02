@@ -424,13 +424,21 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
     return true;
   }
 
-  // /api/channels/:id — PATCH or DELETE
-  const idMatch = pathname.match(/^\/api\/channels\/([^/]+)$/);
-  if (idMatch) {
-    const id = decodeURIComponent(idMatch[1]);
+  // /api/channels/mga/:id — GET (wire detail), PATCH (routing rules edit),
+  // or DELETE (unwire). The `mga/` segment matches the `mg/` convention from
+  // the messaging-group detail block above; `mga` = messaging_group_agent =
+  // one wire row.
+  const mgaMatch = pathname.match(/^\/api\/channels\/mga\/([^/]+)$/);
+  if (mgaMatch) {
+    const id = decodeURIComponent(mgaMatch[1]);
     const current = getMessagingGroupAgent(id);
     if (!current) {
       error(res, 404, `channel wire not found: ${id}`);
+      return true;
+    }
+
+    if (method === 'GET') {
+      json(res, 200, { wire: getOneWireView(id)! });
       return true;
     }
 
@@ -449,13 +457,10 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
       }
       const dbPatch = apiToDbPatch(validated.input, current);
       updateMessagingGroupAgent(id, dbPatch);
-      const after = getOneWireView(id);
-      if (!after) {
-        error(res, 500, `channel wire ${id} disappeared after update`);
-        return true;
-      }
       log.info('channel wire updated via web', { id, fields: Object.keys(dbPatch) });
-      json(res, 200, { wire: after });
+      // Same connection, same row — see channels.ts mg/:id PATCH for the
+      // non-null-assertion rationale.
+      json(res, 200, { wire: getOneWireView(id)! });
       return true;
     }
 
@@ -465,6 +470,9 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
       json(res, 200, { id, deleted: true });
       return true;
     }
+
+    error(res, 405, `method not allowed on ${pathname}: ${method}`);
+    return true;
   }
 
   return false;
