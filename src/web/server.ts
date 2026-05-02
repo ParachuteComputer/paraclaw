@@ -60,6 +60,7 @@ import { handleOauthProvidersRoute } from './routes/oauth-providers.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSettingsRoute } from './routes/settings.js';
+import { handleAgentProviderRoute } from './routes/agent-provider.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { handleVaultsRoute } from './routes/vaults.js';
 import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
@@ -238,6 +239,30 @@ async function handleApi(
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSettingsRoute({ pathname, method, req, res });
+      if (handled) return;
+    } catch (err) {
+      error(res, 500, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+
+  if (pathname === '/api/settings/agent-provider') {
+    // Reads return only "is this slot populated?" booleans (no secret
+    // material crosses HTTP). Writes accept and store API keys, so admin.
+    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+    const auth = await authenticate(req.headers.authorization, required);
+    if (!auth.ok) {
+      send401or403(res, auth);
+      return;
+    }
+    try {
+      const handled = await handleAgentProviderRoute({
+        pathname,
+        method,
+        req,
+        res,
+        actorSubject: auth.claims.sub ?? null,
+      });
       if (handled) return;
     } catch (err) {
       error(res, 500, err instanceof Error ? err.message : String(err));

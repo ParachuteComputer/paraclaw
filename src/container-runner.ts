@@ -34,6 +34,7 @@ import {
   type ProviderContainerContribution,
   type VolumeMount,
 } from './providers/provider-container-registry.js';
+import { getProviderCredentialsForSpawn, type ProviderSpawnEnvelope } from './modules/provider-credentials/index.js';
 import {
   heartbeatPath,
   markContainerRunning,
@@ -116,9 +117,23 @@ async function spawnContainer(session: Session): Promise<void> {
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
-  const mounts = buildMounts(agentGroup, session, containerConfig, contribution);
+  // Resolve the chosen agent-provider credential source for this spawn
+  // (paraclaw#78). Phase 1 reads only the install-default scope; Phase 2
+  // will check the agent_group_id row first. Side effects (host file
+  // re-read, fallback warnings) happen here once per spawn.
+  const credentialsEnvelope = getProviderCredentialsForSpawn(agentGroup.id);
+
+  const mounts = buildMounts(agentGroup, session, containerConfig, contribution, credentialsEnvelope);
   const containerName = `paraclaw-${agentGroup.folder}-${Date.now()}`;
-  const args = await buildContainerArgs(mounts, containerName, agentGroup, containerConfig, provider, contribution);
+  const args = await buildContainerArgs(
+    mounts,
+    containerName,
+    agentGroup,
+    containerConfig,
+    provider,
+    contribution,
+    credentialsEnvelope,
+  );
 
   log.info('Spawning container', { sessionId: session.id, agentGroup: agentGroup.name, containerName });
 
@@ -217,6 +232,7 @@ function buildMounts(
   session: Session,
   containerConfig: import('./container-config.js').ContainerConfig,
   providerContribution: ProviderContainerContribution,
+  credentialsEnvelope: ProviderSpawnEnvelope,
 ): VolumeMount[] {
   const projectRoot = process.cwd();
 
@@ -288,6 +304,18 @@ function buildMounts(
   const sharedClaudeMd = path.join(process.cwd(), 'container', 'CLAUDE.md');
   if (fs.existsSync(sharedClaudeMd)) {
     mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });
+  }
+
+  // Lay down provider-credentials files (paraclaw#78). All current sources
+  // (claude_setup_token, anthropic_api_key, external_server) inject via env
+  // vars — `files` is empty in practice today and reserved for future
+  // sources that need on-disk credential material. Files land under
+  // `claudeDir` (= /home/node/.claude inside the container). Write before
+  // the claudeDir mount is registered so the file is visible on first read.
+  for (const [filename, contents] of Object.entries(credentialsEnvelope.files)) {
+    if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
+    const target = path.join(claudeDir, filename);
+    fs.writeFileSync(target, contents, { mode: 0o600 });
   }
 
   // Per-group .claude-shared at /home/node/.claude (Claude state, settings,
@@ -415,6 +443,7 @@ async function buildContainerArgs(
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
   providerContribution: ProviderContainerContribution,
+  credentialsEnvelope: ProviderSpawnEnvelope,
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
@@ -435,14 +464,32 @@ async function buildContainerArgs(
   // beats global on name collision (handled inside resolveInjectableSecrets).
   // Plaintext lives in container env only; never logged here, never
   // written to chat context.
+  //
+  // suppressSecretEnvKeys (paraclaw#78): when the operator's chosen
+  // agent-provider source is claude_setup_token, ANTHROPIC_API_KEY /
+  // ANTHROPIC_AUTH_TOKEN secrets get dropped — Claude Code SDK prefers
+  // those over CLAUDE_CODE_OAUTH_TOKEN, so leaving them in would silently
+  // override the chosen source.
   try {
     const secrets = resolveInjectableSecrets(agentGroup.id);
+    let suppressed = 0;
     for (const [name, value] of secrets) {
+      if (credentialsEnvelope.suppressSecretEnvKeys.has(name)) {
+        suppressed++;
+        continue;
+      }
       args.push('-e', `${name}=${value}`);
     }
-    log.info('Paraclaw secrets injected', { containerName, count: secrets.size });
+    log.info('Paraclaw secrets injected', { containerName, count: secrets.size - suppressed, suppressed });
   } catch (err) {
     log.warn('Paraclaw secret injection failed — container will have no credentials', { containerName, err });
+  }
+
+  // Provider-credentials env (paraclaw#78). Pushed AFTER the secrets bag
+  // so an explicit operator choice is the last `-e` Docker sees on a
+  // given key.
+  for (const [name, value] of Object.entries(credentialsEnvelope.env)) {
+    args.push('-e', `${name}=${value}`);
   }
 
   // Host gateway

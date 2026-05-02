@@ -823,6 +823,34 @@ export async function setApprovalRoutingDefault(
   return r.row;
 }
 
+// --- Settings: agent provider ---
+
+export type AgentProviderSource = 'claude_setup_token' | 'anthropic_api_key' | 'external_server';
+
+export interface AgentProviderView {
+  source: AgentProviderSource | null;
+  hasApiKey: boolean;
+  serverUrl: string | null;
+  updatedAt: string | null;
+}
+
+export interface SetAgentProviderInput {
+  source: AgentProviderSource;
+  apiKey?: string;
+  serverUrl?: string;
+}
+
+export async function getAgentProvider(): Promise<AgentProviderView> {
+  return request<AgentProviderView>('/settings/agent-provider');
+}
+
+export async function setAgentProvider(input: SetAgentProviderInput): Promise<AgentProviderView> {
+  return request<AgentProviderView>('/settings/agent-provider', {
+    method: 'POST',
+    json: input,
+  });
+}
+
 /**
  * Per-channel native id of the install's primary operator (oldest global
  * owner). Used to pre-fill the "bot admin user" field on /channels/new so
