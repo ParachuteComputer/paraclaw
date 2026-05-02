@@ -262,6 +262,69 @@ describe('unknown-sender request_approval flow', () => {
     expect(member).toBeUndefined();
   });
 
+  it('approve_and_allow → admits the sender, flips MG policy to public, and emits an audit log', async () => {
+    const { routeInbound } = await import('../../router.js');
+    const { getResponseHandlers } = await import('../../response-registry.js');
+    const { getMessagingGroup } = await import('../../db/messaging-groups.js');
+    const { log } = await import('../../log.js');
+
+    const infoSpy = vi.spyOn(log, 'info');
+
+    await routeInbound(stranger('let everyone in'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const { getDb } = await import('../../db/connection.js');
+    const pending = getDb().prepare('SELECT id FROM pending_sender_approvals').get() as { id: string };
+    expect(pending).toBeDefined();
+
+    for (const handler of getResponseHandlers()) {
+      const claimed = await handler({
+        questionId: pending.id,
+        value: 'approve_and_allow',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      });
+      if (claimed) break;
+    }
+
+    // Sender admitted (same as 'approve' branch).
+    const member = getDb()
+      .prepare('SELECT 1 AS x FROM agent_group_members WHERE user_id = ? AND agent_group_id = ?')
+      .get('tg:stranger', 'ag-1');
+    expect(member).toBeDefined();
+
+    // MG flipped to public so future strangers skip the gate.
+    const mg = getMessagingGroup('mg-chat');
+    expect(mg?.unknown_sender_policy).toBe('public');
+
+    // Audit log entry includes operator + MG + before-state for traceability.
+    const auditCalls = infoSpy.mock.calls.filter(([, data]) => {
+      return (
+        typeof data === 'object' &&
+        data !== null &&
+        (data as { audit?: string }).audit === 'sender_approval_policy_flip'
+      );
+    });
+    expect(auditCalls).toHaveLength(1);
+    const [, auditFields] = auditCalls[0] as [string, Record<string, unknown>];
+    expect(auditFields).toMatchObject({
+      messagingGroupId: 'mg-chat',
+      agentGroupId: 'ag-1',
+      approverId: 'telegram:owner',
+      fromPolicy: 'request_approval',
+      toPolicy: 'public',
+    });
+
+    // Pending row cleared.
+    const stillPending = (getDb().prepare('SELECT COUNT(*) AS c FROM pending_sender_approvals').get() as { c: number })
+      .c;
+    expect(stillPending).toBe(0);
+
+    infoSpy.mockRestore();
+  });
+
   it('rejects clicks from an unauthorized user (prevents self-admit via forwarded card)', async () => {
     // Stranger triggers the approval flow; card goes to the owner.
     const { routeInbound } = await import('../../router.js');
