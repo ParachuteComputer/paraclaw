@@ -242,7 +242,9 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
     if (alsoAllow) {
       // Snapshot the prior policy for the audit line — read before the
       // update so the "fromPolicy" field reflects pre-flip state even if
-      // a concurrent click had already flipped it.
+      // a concurrent click had already flipped it. fromPolicy=null means
+      // the MG row was deleted between approval-creation and click; the
+      // updateMessagingGroup call below silently no-ops on a missing row.
       const mg = getMessagingGroup(row.messaging_group_id);
       const fromPolicy = mg?.unknown_sender_policy ?? null;
       if (fromPolicy !== 'public') {
