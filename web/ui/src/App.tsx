@@ -10,6 +10,7 @@ import { NewGroupWizard } from './routes/NewGroupWizard.tsx';
 import { OAuthCallback } from './routes/OAuthCallback.tsx';
 import { SecretsList } from './routes/SecretsList.tsx';
 import { SessionsList } from './routes/SessionsList.tsx';
+import { SettingsAgentProvider } from './routes/SettingsAgentProvider.tsx';
 import { SettingsApprovals } from './routes/SettingsApprovals.tsx';
 import { SetupWizard } from './routes/SetupWizard.tsx';
 import { VaultDetail } from './routes/VaultDetail.tsx';
@@ -69,6 +70,7 @@ export function App() {
         <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />
         <Route path="/settings/approvals" element={<SettingsApprovals />} />
+        <Route path="/settings/agent-provider" element={<SettingsAgentProvider />} />
         <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />
         <Route path="/groups/:folder" element={<GroupDetail />} />

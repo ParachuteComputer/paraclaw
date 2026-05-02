@@ -113,6 +113,12 @@ export function SettingsApprovals() {
         <button className="secondary" onClick={reload}>Refresh</button>
       </div>
 
+      <nav className="muted" style={{ marginBottom: '0.75rem' }}>
+        <a href="approvals">Approval routing</a>
+        {' · '}
+        <a href="agent-provider">Agent provider</a>
+      </nav>
+
       <p className="muted">
         Pick the bot that should deliver approval cards when the inbound bot can't reach you. Each
         approver has their own per-channel default. Adding a new bot? Wire it from{' '}
