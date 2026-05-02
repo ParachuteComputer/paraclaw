@@ -237,6 +237,10 @@ const cb       = `${window.location.origin}${import.meta.env.BASE_URL}oauth/call
 
 The server-side mirror lives in `web/server/src/server.ts`: `MOUNT` (from `PARACLAW_WEB_MOUNT`) is stripped uniformly before dispatch so `/api/*` and static-serve both see paths without the prefix.
 
+### SPA build is wired into install
+
+`web/ui/dist/` is gitignored. The root `package.json` runs `build:spa` from a `postinstall` hook so a fresh `pnpm install` produces a working `/claw/*` without a manual rebuild step. If `static-serve` 503s with "UI bundle not found", the install most likely fired with `--ignore-scripts` (which suppresses `postinstall` lifecycle hooks) — fall back to `pnpm run build:spa` to rebuild manually.
+
 ## CJK font support
 
 Agent containers ship without CJK fonts by default (~200MB saved). If you notice signals the user works with Chinese/Japanese/Korean content — conversing in CJK, CJK timezone (e.g., `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Seoul`, `Asia/Taipei`, `Asia/Hong_Kong`), system locale hint, or mentions of needing to render CJK in screenshots/PDFs/scraped pages — offer to enable it:
