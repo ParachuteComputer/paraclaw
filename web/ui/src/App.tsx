@@ -2,6 +2,7 @@ import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { Apps } from './routes/Apps.tsx';
 import { ApprovalsList } from './routes/ApprovalsList.tsx';
 import { ChannelsList } from './routes/ChannelsList.tsx';
+import { ChannelWireDetail } from './routes/ChannelWireDetail.tsx';
 import { GroupDetail } from './routes/GroupDetail.tsx';
 import { GroupList } from './routes/GroupList.tsx';
 import { MessagingGroupDetail } from './routes/MessagingGroupDetail.tsx';
@@ -64,6 +65,7 @@ export function App() {
         <Route path="/channels" element={<ChannelsList />} />
         <Route path="/channels/new" element={<WireChannelPage />} />
         <Route path="/channels/mg/:id" element={<MessagingGroupDetail />} />
+        <Route path="/channels/mga/:id" element={<ChannelWireDetail />} />
         <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />
         <Route path="/settings/approvals" element={<SettingsApprovals />} />

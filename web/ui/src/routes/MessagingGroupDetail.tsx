@@ -290,6 +290,12 @@ export function MessagingGroupDetail() {
                   )}{' '}
                   · senders <code>{wa.senderScope}</code> · ignored <code>{wa.ignoredMessagePolicy}</code>
                 </span>
+                <Link
+                  to={`/channels/mga/${encodeURIComponent(wa.messagingGroupAgentId)}`}
+                  style={{ marginLeft: 'auto' }}
+                >
+                  Routing rules →
+                </Link>
               </li>
             ))}
           </ul>
