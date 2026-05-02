@@ -33,9 +33,12 @@ describe('autoDetectClaudeCodeOAuth', () => {
     expect(readProviderCredentials()).toBeFalsy();
   });
 
-  it('returns "detected" and stores the snapshot when host file is present and no row exists', async () => {
+  it('returns "detected", stores the snapshot, and emits the audit line when host file is present and no row exists', async () => {
     const hostMod = await import('./host-claude-code.js');
     vi.spyOn(hostMod, 'readClaudeCodeOAuth').mockReturnValue('{"oauth":"snapshot"}');
+
+    const { log } = await import('../../log.js');
+    const infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
 
     const { autoDetectClaudeCodeOAuth } = await import('./auto-detect.js');
     expect(autoDetectClaudeCodeOAuth()).toBe('detected');
@@ -44,6 +47,18 @@ describe('autoDetectClaudeCodeOAuth', () => {
     const row = readProviderCredentials();
     expect(row?.source).toBe('claude_code_oauth');
     expect(row?.credentialsJson).toBe('{"oauth":"snapshot"}');
+
+    const auditCalls = infoSpy.mock.calls.filter(
+      (c) => (c[1] as { audit?: string } | undefined)?.audit === 'agent_provider_source_changed',
+    );
+    expect(auditCalls).toHaveLength(1);
+    const [, payload] = auditCalls[0]!;
+    expect(payload).toMatchObject({
+      audit: 'agent_provider_source_changed',
+      fromSource: null,
+      toSource: 'claude_code_oauth',
+      actor: 'auto-detect',
+    });
   });
 
   it('returns "already-configured" and never overwrites when a row already exists', async () => {

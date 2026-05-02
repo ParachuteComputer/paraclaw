@@ -151,6 +151,28 @@ describe('setAgentProvider', () => {
     expect(row?.serverUrl).toBe('https://openrouter.ai/api/v1');
   });
 
+  it('emits agent_provider_source_changed audit on every successful change', async () => {
+    const { log } = await import('../../log.js');
+    const infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
+
+    const { setAgentProvider } = await import('./agent-provider.js');
+    const ok = setAgentProvider({ source: 'anthropic_api_key', apiKey: 'sk-ant-x' }, 'telegram:42');
+    expect(ok.ok).toBe(true);
+
+    const auditCalls = infoSpy.mock.calls.filter(
+      (c) => (c[1] as { audit?: string } | undefined)?.audit === 'agent_provider_source_changed',
+    );
+    expect(auditCalls).toHaveLength(1);
+    const [, payload] = auditCalls[0]!;
+    expect(payload).toMatchObject({
+      audit: 'agent_provider_source_changed',
+      fromSource: null,
+      toSource: 'anthropic_api_key',
+      actor: 'telegram:42',
+    });
+    expect(payload).toHaveProperty('hasServerUrl');
+  });
+
   it('switching sources clears the previous source-specific fields', async () => {
     const { setAgentProvider } = await import('./agent-provider.js');
     setAgentProvider(
