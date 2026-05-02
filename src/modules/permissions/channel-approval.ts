@@ -41,8 +41,9 @@ import { getAllAgentGroups } from '../../db/agent-groups.js';
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { log } from '../../log.js';
+import { decodePlatformIdAs } from '../../platform-id.js';
 import type { InboundEvent } from '../../channels/adapter.js';
-import { pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
+import { appendFallbackNotice, pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
 import { createPendingChannelApproval, hasInFlightChannelApproval } from './db/pending-channel-approvals.js';
 
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -92,7 +93,8 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
 
   const originMg = getMessagingGroup(messagingGroupId);
   const originChannelType = originMg?.channel_type ?? '';
-  const delivery = await pickApprovalDelivery(approvers, originChannelType);
+  const originBotId = originMg ? decodePlatformIdAs(originMg.platform_id, 'v2').botId : null;
+  const delivery = await pickApprovalDelivery(approvers, originChannelType, originBotId);
   if (!delivery) {
     log.warn('Channel registration skipped — no DM channel for any approver', {
       messagingGroupId,
@@ -165,7 +167,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
         // up the pending row directly without another index.
         questionId: messagingGroupId,
         title,
-        question,
+        question: appendFallbackNotice(question, delivery.viaFallbackBot, originBotId),
         options,
       }),
     );

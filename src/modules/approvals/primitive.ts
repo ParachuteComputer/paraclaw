@@ -28,6 +28,7 @@ import { createApproval, getSession } from '../../db/sessions.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { wakeContainer } from '../../container-runner.js';
 import { log } from '../../log.js';
+import { decodePlatformIdAs } from '../../platform-id.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import type { MessagingGroup, Session } from '../../types.js';
 import { getAdminsOfAgentGroup, getGlobalAdmins, getOwners } from '../permissions/db/user-roles.js';
@@ -94,27 +95,59 @@ export function pickApprover(agentGroupId: string | null): string[] {
 }
 
 /**
- * Walk the approver list and return the first (approverId, messagingGroup)
- * pair we can actually deliver to. Returns null if nobody is reachable.
+ * Walk the approver list and return the first reachable
+ * (approverId, messagingGroup, viaFallbackBot) tuple. Returns null if
+ * nobody is reachable.
  *
- * Tie-break: prefer approvers reachable on the same channel kind as the
- * origin; else first in list. Resolution uses ensureUserDm, which may
- * trigger a platform openDM call on cache miss.
+ * Resolution order, when both `originChannelType` and `originBotId` are set:
+ *
+ *   1. Same-channel approver, exact `(channel, originBotId)` match —
+ *      best case, the card delivers via the same bot the inbound
+ *      came in on.
+ *   2. Same-channel approver, channel-default DM (`bot_id = ''` slot
+ *      in `user_dms`, configured via `/claw/settings/approvals`) —
+ *      `viaFallbackBot: true`, so callers can name the origin bot in
+ *      the card body to avoid confusion.
+ *   3. Cross-channel approver, channel-default DM — same-channel
+ *      delivery wasn't possible at all (no approver on this channel,
+ *      or none of them have any DM cached).
+ *   4. None — null.
+ *
+ * When only `originChannelType` is provided (single-bot install,
+ * legacy callers), step 1 collapses into step 2: the bot id is
+ * effectively `''` and the channel-default row is the cache.
+ *
+ * Cold-resolve at step 1 hits the adapter registered for
+ * `(channel, originBotId)` directly — see `ensureUserDm` — so a
+ * cache miss for an active secondary bot triggers `openDM` on that
+ * bot, not on whichever bot happens to be first in the registry.
  */
 export async function pickApprovalDelivery(
   approvers: string[],
   originChannelType: string,
-): Promise<{ userId: string; messagingGroup: MessagingGroup } | null> {
+  originBotId: string | null = null,
+): Promise<{ userId: string; messagingGroup: MessagingGroup; viaFallbackBot: boolean } | null> {
+  // Step 1 — same channel, exact bot match.
+  if (originChannelType && originBotId) {
+    for (const userId of approvers) {
+      if (channelTypeOf(userId) !== originChannelType) continue;
+      const mg = await ensureUserDm(userId, { botId: originBotId });
+      if (mg) return { userId, messagingGroup: mg, viaFallbackBot: false };
+    }
+  }
+  // Step 2 — same channel, channel-default DM. `viaFallbackBot` is true
+  // only when an originBotId was requested but didn't resolve.
   if (originChannelType) {
     for (const userId of approvers) {
       if (channelTypeOf(userId) !== originChannelType) continue;
       const mg = await ensureUserDm(userId);
-      if (mg) return { userId, messagingGroup: mg };
+      if (mg) return { userId, messagingGroup: mg, viaFallbackBot: !!originBotId };
     }
   }
+  // Step 3 — cross-channel any.
   for (const userId of approvers) {
     const mg = await ensureUserDm(userId);
-    if (mg) return { userId, messagingGroup: mg };
+    if (mg) return { userId, messagingGroup: mg, viaFallbackBot: !!originBotId };
   }
   return null;
 }
@@ -171,13 +204,18 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
     return;
   }
 
-  const originChannelType = session.messaging_group_id
-    ? (getMessagingGroup(session.messaging_group_id)?.channel_type ?? '')
-    : '';
+  const originMg = session.messaging_group_id ? (getMessagingGroup(session.messaging_group_id) ?? null) : null;
+  const originChannelType = originMg?.channel_type ?? '';
+  // The session's MG is paraclaw-managed and gets v2-shaped on creation
+  // (or backfilled by startup-bootstrap), so slot1 of the platform_id is
+  // the bot id. v1 rows return botId=null and we route by channel only —
+  // same path as a single-bot install.
+  const originBotId = originMg ? decodePlatformIdAs(originMg.platform_id, 'v2').botId : null;
 
-  const target = await pickApprovalDelivery(approvers, originChannelType);
+  const target = await pickApprovalDelivery(approvers, originChannelType, originBotId);
   if (!target) {
-    notifyAgent(session, `${action} failed: no DM channel found for any eligible approver.`);
+    const hint = originBotId ? ` Ask them to DM ${originBotId} once so the bot can reach them, then retry.` : '';
+    notifyAgent(session, `${action} failed: no DM channel found for any eligible approver.${hint}`);
     return;
   }
 
@@ -213,7 +251,7 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
           type: 'ask_question',
           questionId: approvalId,
           title,
-          question,
+          question: appendFallbackNotice(question, target.viaFallbackBot, originBotId),
           options: APPROVAL_OPTIONS,
         }),
       );
@@ -225,4 +263,17 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
   }
 
   log.info('Approval requested', { action, approvalId, agentName, approver: target.userId });
+}
+
+/**
+ * When `pickApprovalDelivery` falls back to the channel-default bot
+ * (because the inbound bot can't DM this approver), append a one-line
+ * notice to the card body. Surfaces the mismatch at the moment the
+ * approver is making a decision, with a pointer to where they can
+ * change the default if they want cards on the originating bot.
+ */
+export function appendFallbackNotice(question: string, viaFallbackBot: boolean, originBotId: string | null): string {
+  if (!viaFallbackBot) return question;
+  const hint = originBotId ? ` (inbound bot ${originBotId})` : '';
+  return `${question}\n\n_Routed via your default approval bot${hint}. Change in /claw/settings/approvals._`;
 }

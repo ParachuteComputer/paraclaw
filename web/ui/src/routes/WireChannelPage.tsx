@@ -20,7 +20,7 @@
  * If the user navigates away mid-flow, they restart cleanly. The setup
  * wizard remains the resumable surface; this page is the "fast path".
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { AgentGroupPicker, type PickedGroup } from '../components/AgentGroupPicker.tsx';
@@ -30,7 +30,12 @@ import {
   type ChannelAdapter,
   type ResolvedIdentity,
 } from '../lib/channel-adapters.ts';
-import { registerChannelBot, wireChannelToGroup, type WireChannelResult } from '../lib/api.ts';
+import {
+  listOperatorIdentities,
+  registerChannelBot,
+  wireChannelToGroup,
+  type WireChannelResult,
+} from '../lib/api.ts';
 
 export function WireChannelPage() {
   const [adapterKey, setAdapterKey] = useState<ChannelAdapter | null>(null);
@@ -45,6 +50,16 @@ export function WireChannelPage() {
   const [identity, setIdentity] = useState<ResolvedIdentity | null>(null);
 
   const [operatorUserId, setOperatorUserId] = useState('');
+  // Per-channel default for the "bot admin user" field, derived from the
+  // install's owner row in user_roles. Pre-fills the input when the
+  // operator picks an adapter that captures one (telegram). Loaded once
+  // on mount; null until resolved.
+  const [operatorDefaults, setOperatorDefaults] = useState<Record<string, string> | null>(null);
+  const [operatorPrefilled, setOperatorPrefilled] = useState(false);
+
+  useEffect(() => {
+    listOperatorIdentities().then(setOperatorDefaults).catch(() => setOperatorDefaults({}));
+  }, []);
 
   const [picked, setPicked] = useState<PickedGroup | null>(null);
 
@@ -58,7 +73,12 @@ export function WireChannelPage() {
     setToken('');
     setIdentity(null);
     setValidateError(null);
-    setOperatorUserId('');
+    // Pre-fill operatorUserId from the install's owner identity for this
+    // channel, if any. Operator can still edit; the prefilled flag drives
+    // the "(auto-filled)" hint so they know it came from prior setup.
+    const prefill = operatorDefaults?.[key] ?? '';
+    setOperatorUserId(prefill);
+    setOperatorPrefilled(prefill.length > 0);
   };
 
   const onValidate = async () => {
@@ -262,10 +282,19 @@ export function WireChannelPage() {
                   type="text"
                   inputMode="numeric"
                   value={operatorUserId}
-                  onChange={(e) => setOperatorUserId(e.target.value)}
+                  onChange={(e) => {
+                    setOperatorUserId(e.target.value);
+                    setOperatorPrefilled(false);
+                  }}
                   placeholder="123456789"
                 />
                 <p className="dim" style={{ marginTop: '0.25rem', fontSize: '0.8rem' }}>
+                  {operatorPrefilled && (
+                    <>
+                      <em>Auto-filled from your prior setup. Edit only if wiring on behalf of someone else.</em>
+                      <br />
+                    </>
+                  )}
                   {f.hint}
                   {f.helpHref && (
                     <>

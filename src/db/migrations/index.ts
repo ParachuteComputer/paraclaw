@@ -22,6 +22,7 @@ import { migration022 } from './022-app-connections-provider.js';
 import { migration023 } from './023-agent-group-secret-mode.js';
 import { migration024 } from './024-collapse-approvals.js';
 import { migration025 } from './025-secret-mode-check.js';
+import { migration026 } from './026-user-dms-bot-id.js';
 import { moduleApprovalsPendingApprovals } from './module-approvals-pending-approvals.js';
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 
@@ -73,6 +74,7 @@ const migrations: Migration[] = [
   migration023,
   migration024,
   migration025,
+  migration026,
 ];
 
 export function runMigrations(db: Database): void {
