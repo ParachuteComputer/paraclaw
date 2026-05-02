@@ -35,8 +35,15 @@ import type { InboundEvent } from '../../channels/adapter.js';
 import { appendFallbackNotice, pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
 import { createPendingSenderApproval, hasInFlightSenderApproval } from './db/pending-sender-approvals.js';
 
+// Three-button card per design doc PR #75 phase 4. The "always allow" branch
+// flips the messaging group's unknown_sender_policy to 'public' so future
+// strangers walk through with no gate. Shown unconditionally — even on
+// 'strict' MGs that wouldn't normally render this card — so the operator can
+// recover from a too-restrictive default with one click. The handler short-
+// circuits if the policy is already 'public', so the click is idempotent.
 const APPROVAL_OPTIONS: RawOption[] = [
   { label: 'Allow', selectedLabel: '✅ Allowed', value: 'approve' },
+  { label: 'Allow & open channel', selectedLabel: '✅ Channel opened', value: 'approve_and_allow' },
   { label: 'Deny', selectedLabel: '❌ Denied', value: 'reject' },
 ];
 
@@ -154,4 +161,5 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
  * response handler so the two sides can't drift.
  */
 export const APPROVE_VALUE = 'approve';
+export const APPROVE_AND_ALLOW_VALUE = 'approve_and_allow';
 export const REJECT_VALUE = 'reject';

@@ -262,6 +262,128 @@ describe('unknown-sender request_approval flow', () => {
     expect(member).toBeUndefined();
   });
 
+  it('approve_and_allow → admits the sender, flips MG policy to public, and emits an audit log', async () => {
+    const { routeInbound } = await import('../../router.js');
+    const { getResponseHandlers } = await import('../../response-registry.js');
+    const { getMessagingGroup } = await import('../../db/messaging-groups.js');
+    const { log } = await import('../../log.js');
+
+    const infoSpy = vi.spyOn(log, 'info');
+
+    await routeInbound(stranger('let everyone in'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const { getDb } = await import('../../db/connection.js');
+    const pending = getDb().prepare('SELECT id FROM pending_sender_approvals').get() as { id: string };
+    expect(pending).toBeDefined();
+
+    for (const handler of getResponseHandlers()) {
+      const claimed = await handler({
+        questionId: pending.id,
+        value: 'approve_and_allow',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      });
+      if (claimed) break;
+    }
+
+    // Sender admitted (same as 'approve' branch).
+    const member = getDb()
+      .prepare('SELECT 1 AS x FROM agent_group_members WHERE user_id = ? AND agent_group_id = ?')
+      .get('tg:stranger', 'ag-1');
+    expect(member).toBeDefined();
+
+    // MG flipped to public so future strangers skip the gate.
+    const mg = getMessagingGroup('mg-chat');
+    expect(mg?.unknown_sender_policy).toBe('public');
+
+    // Audit log entry includes operator + MG + before-state for traceability.
+    const auditCalls = infoSpy.mock.calls.filter(([, data]) => {
+      return (
+        typeof data === 'object' &&
+        data !== null &&
+        (data as { audit?: string }).audit === 'sender_approval_policy_flip'
+      );
+    });
+    expect(auditCalls).toHaveLength(1);
+    const [, auditFields] = auditCalls[0] as [string, Record<string, unknown>];
+    expect(auditFields).toMatchObject({
+      messagingGroupId: 'mg-chat',
+      agentGroupId: 'ag-1',
+      approverId: 'telegram:owner',
+      fromPolicy: 'request_approval',
+      toPolicy: 'public',
+    });
+
+    // Pending row cleared.
+    const stillPending = (getDb().prepare('SELECT COUNT(*) AS c FROM pending_sender_approvals').get() as { c: number })
+      .c;
+    expect(stillPending).toBe(0);
+
+    infoSpy.mockRestore();
+  });
+
+  it('approve_and_allow → idempotent on already-public MG, audit still fires with fromPolicy=public', async () => {
+    // Pre-flip the MG to public to simulate a second click after a prior
+    // always-allow has already happened. The button is shown unconditionally
+    // (Aaron's call) so this branch can fire even when policy is already
+    // public.
+    const { updateMessagingGroup, getMessagingGroup } = await import('../../db/messaging-groups.js');
+    updateMessagingGroup('mg-chat', { unknown_sender_policy: 'public' });
+
+    // With public policy, the access gate skips the unknown-sender flow —
+    // so we can't trigger the approval via routeInbound. Seed the pending
+    // row directly to exercise just the click handler. Upsert the sender
+    // user first so addMember's FK to users(id) holds.
+    upsertUser({ id: 'tg:later-stranger', kind: 'telegram', display_name: 'Later', created_at: now() });
+    const { createPendingSenderApproval } = await import('./db/pending-sender-approvals.js');
+    const approvalId = 'nsa-test-idempotent';
+    createPendingSenderApproval({
+      id: approvalId,
+      messaging_group_id: 'mg-chat',
+      agent_group_id: 'ag-1',
+      sender_identity: 'tg:later-stranger',
+      sender_name: 'Later',
+      original_message: JSON.stringify(stranger('hello again')),
+      approver_user_id: 'telegram:owner',
+      created_at: now(),
+      title: 'New sender',
+      options_json: '[]',
+    });
+
+    const { log } = await import('../../log.js');
+    const infoSpy = vi.spyOn(log, 'info');
+
+    const { getResponseHandlers } = await import('../../response-registry.js');
+    for (const handler of getResponseHandlers()) {
+      const claimed = await handler({
+        questionId: approvalId,
+        value: 'approve_and_allow',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      });
+      if (claimed) break;
+    }
+
+    // Policy stays public (no regression).
+    expect(getMessagingGroup('mg-chat')?.unknown_sender_policy).toBe('public');
+
+    // Audit log fires with fromPolicy='public' so the click is traceable
+    // even when the DB write was a no-op.
+    const auditCalls = infoSpy.mock.calls.filter(([, data]) => {
+      return typeof data === 'object' && data !== null && (data as { audit?: string }).audit === 'sender_approval_policy_flip';
+    });
+    expect(auditCalls).toHaveLength(1);
+    const [, auditFields] = auditCalls[0] as [string, Record<string, unknown>];
+    expect(auditFields).toMatchObject({ fromPolicy: 'public', toPolicy: 'public' });
+
+    infoSpy.mockRestore();
+  });
+
   it('rejects clicks from an unauthorized user (prevents self-admit via forwarded card)', async () => {
     // Stranger triggers the approval flow; card goes to the owner.
     const { routeInbound } = await import('../../router.js');

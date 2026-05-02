@@ -16,7 +16,12 @@
  * access gate is not registered and core defaults to allow-all.
  */
 import { recordDroppedMessage } from '../../db/dropped-messages.js';
-import { createMessagingGroupAgent, setMessagingGroupDeniedAt } from '../../db/messaging-groups.js';
+import {
+  createMessagingGroupAgent,
+  getMessagingGroup,
+  setMessagingGroupDeniedAt,
+  updateMessagingGroup,
+} from '../../db/messaging-groups.js';
 import {
   routeInbound,
   setAccessGate,
@@ -217,7 +222,8 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
     return true; // claim the response so it's not unclaimed-logged, but do nothing
   }
   const approverId = clickerId;
-  const approved = payload.value === 'approve';
+  const alsoAllow = payload.value === 'approve_and_allow';
+  const approved = payload.value === 'approve' || alsoAllow;
 
   if (approved) {
     addMember({
@@ -232,6 +238,28 @@ async function handleSenderApprovalResponse(payload: ResponsePayload): Promise<b
       agentGroupId: row.agent_group_id,
       approverId,
     });
+
+    if (alsoAllow) {
+      // Snapshot the prior policy for the audit line — read before the
+      // update so the "fromPolicy" field reflects pre-flip state even if
+      // a concurrent click had already flipped it. fromPolicy=null means
+      // the MG row was deleted between approval-creation and click; the
+      // updateMessagingGroup call below silently no-ops on a missing row.
+      const mg = getMessagingGroup(row.messaging_group_id);
+      const fromPolicy = mg?.unknown_sender_policy ?? null;
+      if (fromPolicy !== 'public') {
+        updateMessagingGroup(row.messaging_group_id, { unknown_sender_policy: 'public' });
+      }
+      log.info('Unknown-sender policy flipped to public via approval card', {
+        audit: 'sender_approval_policy_flip',
+        approvalId: row.id,
+        messagingGroupId: row.messaging_group_id,
+        agentGroupId: row.agent_group_id,
+        approverId,
+        fromPolicy,
+        toPolicy: 'public',
+      });
+    }
 
     // Clear the pending row BEFORE re-routing so the gate check on the
     // second attempt doesn't see the in-flight row and short-circuit.
