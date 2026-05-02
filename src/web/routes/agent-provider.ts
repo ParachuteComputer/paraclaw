@@ -78,7 +78,10 @@ export interface SetAgentProviderError {
   message: string;
 }
 
-export function setAgentProvider(body: SetAgentProviderBody, actor: string | null): SetAgentProviderResult | SetAgentProviderError {
+export function setAgentProvider(
+  body: SetAgentProviderBody,
+  actor: string | null,
+): SetAgentProviderResult | SetAgentProviderError {
   const { source, apiKey, serverUrl } = body;
   if (!source || !VALID_SOURCES.includes(source)) {
     return { ok: false, status: 400, message: `source must be one of ${VALID_SOURCES.join(', ')}` };

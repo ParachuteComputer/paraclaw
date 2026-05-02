@@ -135,10 +135,7 @@ describe('setAgentProvider', () => {
     const noUrl = setAgentProvider({ source: 'external_server', apiKey: 'k' }, 'telegram:1');
     expect(noUrl.ok).toBe(false);
 
-    const badUrl = setAgentProvider(
-      { source: 'external_server', apiKey: 'k', serverUrl: 'not a url' },
-      'telegram:1',
-    );
+    const badUrl = setAgentProvider({ source: 'external_server', apiKey: 'k', serverUrl: 'not a url' }, 'telegram:1');
     expect(badUrl.ok).toBe(false);
     if (!badUrl.ok) expect(badUrl.message).toContain('valid URL');
 

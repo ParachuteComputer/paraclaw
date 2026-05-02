@@ -9,5 +9,6 @@ export {
   type ProviderSource,
   type PutProviderCredentialsInput,
 } from './db.js';
+export { autoDetectClaudeCodeOAuth, type AutoDetectOutcome } from './auto-detect.js';
 export { CLAUDE_CODE_OAUTH_FILE, hasClaudeCodeOAuth, readClaudeCodeOAuth } from './host-claude-code.js';
 export { getProviderCredentialsForSpawn, type ProviderSpawnEnvelope } from './spawn.js';
