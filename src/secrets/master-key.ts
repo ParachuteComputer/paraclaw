@@ -9,11 +9,16 @@
  */
 import crypto from 'crypto';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
+import { CENTRAL_DB_DIR } from '../config.js';
+
 const KEY_LEN = 32;
-const KEY_DIR = path.join(os.homedir(), '.parachute', 'claw');
+// `master.key` lives next to the central DB so a single backup of
+// `<PARACHUTE_DIR>/claw/` captures both crypto material and DB state, and
+// so `PARACHUTE_HOME` overrides reroute both atoms together — sandboxes
+// that override the home dir get a fresh DB AND a fresh master.key.
+const KEY_DIR = CENTRAL_DB_DIR;
 const KEY_PATH = path.join(KEY_DIR, 'master.key');
 
 let cached: Buffer | null = null;

@@ -256,3 +256,50 @@ launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>   # macOS
 ```
 
 `container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through as a Docker build-arg. Without CJK fonts, Chromium-rendered screenshots and PDFs containing CJK text show tofu (empty rectangles) instead of characters.
+
+## ⚠ Sandbox isolation — DO NOT clobber the live install
+
+If you spin a paraclaw sandbox **on the same host as a live install**, three things must be different from the live install or you will reap its containers and clobber its DB. This bit Aaron once (paraclaw#91); guard against repeating it.
+
+### What collides
+
+| Atom | Default | Why a same-host sandbox collides |
+|------|---------|----------------------------------|
+| `INSTALL_SLUG` | `sha1(cwd)[:8]` | Same project root → same slug → `cleanupOrphans` reaps live containers via the `paraclaw-install=<slug>` label |
+| Central DB + `master.key` | `~/.parachute/claw/` | Both installs share the operator-owned home dir |
+| Webhook port | `WEBHOOK_PORT` (default 3000) | Two listeners on one port → `EADDRINUSE` |
+| Web port | `PARACLAW_WEB_PORT` (default 1944) | Same |
+
+### Safe sandbox pattern
+
+```bash
+# 1. New cwd → new INSTALL_SLUG. Use a worktree, not a fresh checkout —
+#    same-branch state, isolated filesystem.
+git worktree add /tmp/paraclaw-sandbox <branch>
+cd /tmp/paraclaw-sandbox
+
+# 2. Fresh PARACHUTE_HOME → fresh DB + fresh master.key. PARACHUTE_HOME is
+#    the canonical override (parachute-hub, vault, scribe all honor it);
+#    paraclaw joins the convention as of #91. Both atoms reroute together
+#    so the sandbox's encrypted-secret reads stay self-consistent.
+export PARACHUTE_HOME=/tmp/paraclaw-sandbox-home
+
+# 3. Different ports — pick anything free. Don't rely on default 1944/3000.
+export PARACLAW_WEB_PORT=2944
+export WEBHOOK_PORT=3944
+
+# 4. Bootstrap state programmatically (init-first-agent / API). Don't
+#    copy the live DB — defeats the isolation.
+pnpm install
+pnpm run dev
+```
+
+### Don't do
+
+- `cd <live-paraclaw>` and run sandbox there with overrides — same INSTALL_SLUG, `cleanupOrphans` reaps live containers regardless of DB-path overrides.
+- Override only `PARACLAW_CENTRAL_DB_PATH` — `master.key` still lands at `~/.parachute/claw/master.key` if `PARACHUTE_HOME` is unset, and you'll cross-decrypt against the live key.
+- Set `HOME=/tmp/...` instead of `PARACHUTE_HOME` — affects every other tool's home-dir lookup. Paraclaw honors HOME for ergonomic compat, but `PARACHUTE_HOME` is the precise knob for "reroute paraclaw's persistent state."
+
+### After the sandbox
+
+`git worktree remove /tmp/paraclaw-sandbox && rm -rf /tmp/paraclaw-sandbox-home` cleans up. Containers tagged with the sandbox's INSTALL_SLUG won't conflict with the live install's, but a long-lived sandbox accumulates them — `docker ps -a --filter label=paraclaw-install=<sandbox-slug>` to see what's left.
