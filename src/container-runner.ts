@@ -306,13 +306,12 @@ function buildMounts(
     mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });
   }
 
-  // Lay down provider-credentials files (paraclaw#78). For
-  // claude_code_oauth, this writes `.credentials.json` so the container's
-  // Claude SDK finds an OAuth token where it expects one. Files always
-  // land under `claudeDir` (= /home/node/.claude inside the container).
-  // Write before the claudeDir mount is registered so the file is visible
-  // on first read — the mount is RW so this would also work post-mount,
-  // but doing it here keeps spawn-time IO localized to one place.
+  // Lay down provider-credentials files (paraclaw#78). All current sources
+  // (claude_setup_token, anthropic_api_key, external_server) inject via env
+  // vars — `files` is empty in practice today and reserved for future
+  // sources that need on-disk credential material. Files land under
+  // `claudeDir` (= /home/node/.claude inside the container). Write before
+  // the claudeDir mount is registered so the file is visible on first read.
   for (const [filename, contents] of Object.entries(credentialsEnvelope.files)) {
     if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
     const target = path.join(claudeDir, filename);
@@ -467,9 +466,9 @@ async function buildContainerArgs(
   // written to chat context.
   //
   // suppressSecretEnvKeys (paraclaw#78): when the operator's chosen
-  // agent-provider source is claude_code_oauth, ANTHROPIC_API_KEY /
+  // agent-provider source is claude_setup_token, ANTHROPIC_API_KEY /
   // ANTHROPIC_AUTH_TOKEN secrets get dropped — Claude Code SDK prefers
-  // those over the OAuth token, so leaving them in would silently
+  // those over CLAUDE_CODE_OAUTH_TOKEN, so leaving them in would silently
   // override the chosen source.
   try {
     const secrets = resolveInjectableSecrets(agentGroup.id);

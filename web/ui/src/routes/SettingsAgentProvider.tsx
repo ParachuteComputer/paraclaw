@@ -261,6 +261,7 @@ function ExternalServerCard({
           if (ready) {
             onSubmit(apiKey.trim(), serverUrl.trim());
             setApiKey('');
+            setServerUrl('');
           }
         }}
         style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
