@@ -242,7 +242,8 @@ function validatePatchInput(body: unknown): { ok: true; input: PatchInput } | { 
     if (b.engagePattern === ALL_MESSAGES_PATTERN_SENTINEL) {
       return {
         ok: false,
-        reason: "engagePattern '.' is reserved as the 'all' sentinel — use '\\\\.' (escaped) to match a literal dot, or set engageMode to 'all'",
+        reason:
+          "engagePattern '.' is reserved as the 'all' sentinel — use '\\\\.' (escaped) to match a literal dot, or set engageMode to 'all'",
       };
     }
     out.engagePattern = b.engagePattern as string | null;

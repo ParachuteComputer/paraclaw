@@ -17,6 +17,11 @@ export interface AgentGroup {
   created_at: string;
 }
 
+/**
+ * Exact wire mirror — `UnknownSenderPolicy` in `web/ui/src/lib/api.ts` MUST
+ * stay in lock-step with this union. No translator; the values cross the
+ * wire as-is. If you add or rename a value here, update the client too.
+ */
 export type UnknownSenderPolicy = 'strict' | 'request_approval' | 'public';
 
 export interface MessagingGroup {
@@ -95,8 +100,11 @@ export interface UserDm {
   resolved_at: string;
 }
 
+// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
+// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type SenderScope = 'all' | 'known';
+// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type IgnoredMessagePolicy = 'drop' | 'accumulate';
 
 export interface MessagingGroupAgent {

@@ -375,7 +375,11 @@ describe('unknown-sender request_approval flow', () => {
     // Audit log fires with fromPolicy='public' so the click is traceable
     // even when the DB write was a no-op.
     const auditCalls = infoSpy.mock.calls.filter(([, data]) => {
-      return typeof data === 'object' && data !== null && (data as { audit?: string }).audit === 'sender_approval_policy_flip';
+      return (
+        typeof data === 'object' &&
+        data !== null &&
+        (data as { audit?: string }).audit === 'sender_approval_policy_flip'
+      );
     });
     expect(auditCalls).toHaveLength(1);
     const [, auditFields] = auditCalls[0] as [string, Record<string, unknown>];

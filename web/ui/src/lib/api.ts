@@ -902,9 +902,11 @@ export async function listOperatorIdentities(): Promise<Record<string, string>> 
 
 /**
  * The three policies the router applies to messages from senders the
- * messaging group hasn't seen / approved before. Mirrors `UnknownSenderPolicy`
- * in `src/types.ts` exactly. `public` is the value the DB uses; `open` is
- * NOT a valid value (we surface only the canonical names).
+ * messaging group hasn't seen / approved before. Exact wire mirror of
+ * `UnknownSenderPolicy` in `src/types.ts` — no translator; values cross
+ * the wire as-is. Keep this union in lock-step with the server side.
+ * `public` is the value the DB uses; `open` is NOT a valid value (we
+ * surface only the canonical names).
  *
  * - `request_approval` — pause the message and DM the operator with an
  *   approve/reject card. Default for auto-created MGs.
@@ -963,8 +965,11 @@ export async function updateMessagingGroupPolicy(
 
 export type ChannelKind = 'discord' | 'telegram' | 'cli';
 
+// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type EngageMode = 'mention' | 'pattern' | 'all';
+// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type SenderScope = 'allowlist' | 'all';
+// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type IgnoredMessagePolicy = 'drop' | 'silent';
 
 export interface ChannelWireView {
