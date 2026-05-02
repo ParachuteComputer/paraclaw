@@ -109,11 +109,11 @@ function apiToDbPatch(input: PatchInput, current: MessagingGroupAgent): DbPatch 
     } else if (input.engageMode === 'pattern') {
       out.engage_mode = 'pattern';
       // Pattern body comes from input.engagePattern when present; otherwise
-      // preserve what's already on the row. We never write '.' here — that
-      // would silently re-collapse to 'all' on the next read.
+      // preserve what's already on the row. validatePatchInput already
+      // rejects bare '.' here so the next read can't silently collapse to
+      // 'all'.
       if (input.engagePattern !== undefined) {
-        out.engage_pattern =
-          input.engagePattern === ALL_MESSAGES_PATTERN_SENTINEL ? current.engage_pattern : input.engagePattern;
+        out.engage_pattern = input.engagePattern;
       }
     } else if (input.engageMode === 'mention') {
       // Preserve mention-sticky if that's what's currently on the row;
@@ -235,6 +235,15 @@ function validatePatchInput(body: unknown): { ok: true; input: PatchInput } | { 
   if ('engagePattern' in b) {
     if (b.engagePattern !== null && typeof b.engagePattern !== 'string') {
       return { ok: false, reason: 'engagePattern must be string or null' };
+    }
+    // Bare '.' is the wire-format sentinel for engageMode='all' — accepting
+    // it as a literal pattern would silently round-trip back as 'all' on the
+    // next read and lose the user's intent. Force the caller to disambiguate.
+    if (b.engagePattern === ALL_MESSAGES_PATTERN_SENTINEL) {
+      return {
+        ok: false,
+        reason: "engagePattern '.' is reserved as the 'all' sentinel — use '\\\\.' (escaped) to match a literal dot, or set engageMode to 'all'",
+      };
     }
     out.engagePattern = b.engagePattern as string | null;
   }

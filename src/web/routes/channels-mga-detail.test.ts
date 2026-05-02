@@ -301,6 +301,51 @@ describe('handleChannelsRoute — PATCH /api/channels/mga/:id', () => {
     expect(res.json()).toMatchObject({ error: expect.stringMatching(/invalid engageMode: wave-hands/) });
   });
 
+  it("rejects engagePattern '.' with 400 — bare dot is the 'all' sentinel", async () => {
+    // Without this guard the server silently rewrites '.' as the
+    // engageMode='all' wire-format sentinel, which round-trips back as
+    // 'all' on the next read and silently swallows the user's intent.
+    // Force them to pick: \\. for a literal dot, or engageMode='all'.
+    seedFullWire();
+
+    const res = makeRes();
+    await handleChannelsRoute({
+      pathname: '/api/channels/mga/mga_routing',
+      method: 'PATCH',
+      req: makeReq({ engageMode: 'pattern', engagePattern: '.' }),
+      res,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: expect.stringMatching(/engagePattern '\.' is reserved as the 'all' sentinel/),
+    });
+
+    // Row was not modified — still 'mention' / null from the seed.
+    const persisted = getMessagingGroupAgent('mga_routing')!;
+    expect(persisted.engage_mode).toBe('mention');
+    expect(persisted.engage_pattern).toBeNull();
+  });
+
+  it("rejects engagePattern '.' even without engageMode in the body", async () => {
+    // Same swallow risk via the mode-unchanged branch in apiToDbPatch —
+    // pin the validation catches both shapes.
+    seedFullWire({ engage: { engage_mode: 'pattern', engage_pattern: '^/ask\\b' } });
+
+    const res = makeRes();
+    await handleChannelsRoute({
+      pathname: '/api/channels/mga/mga_routing',
+      method: 'PATCH',
+      req: makeReq({ engagePattern: '.' }),
+      res,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: expect.stringMatching(/engagePattern '\.' is reserved as the 'all' sentinel/),
+    });
+  });
+
   it('returns 404 when the wire does not exist', async () => {
     const res = makeRes();
     await handleChannelsRoute({
