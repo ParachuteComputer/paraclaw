@@ -118,8 +118,8 @@ async function spawnContainer(session: Session): Promise<void> {
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
 
   // Resolve the chosen agent-provider credential source for this spawn
-  // (paraclaw#78). Phase 1 reads only the install-default scope; Phase 2
-  // will check the agent_group_id row first. Side effects (host file
+  // (paraclaw#78). Two-tier lookup (paraclaw#86): per-agent-group row
+  // wins over the install-wide default sentinel. Side effects (host file
   // re-read, fallback warnings) happen here once per spawn.
   const credentialsEnvelope = getProviderCredentialsForSpawn(agentGroup.id);
 

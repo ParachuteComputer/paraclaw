@@ -32,8 +32,8 @@ describe('getProviderCredentialsForSpawn', () => {
   });
 
   it('claude_setup_token → injects CLAUDE_CODE_OAUTH_TOKEN env, suppresses ANTHROPIC_API_KEY + ANTHROPIC_AUTH_TOKEN', async () => {
-    const { putProviderCredentials } = await import('./db.js');
-    putProviderCredentials({ source: 'claude_setup_token', apiKey: 'sk-ant-oat01-paste' });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'claude_setup_token', apiKey: 'sk-ant-oat01-paste' });
 
     const { getProviderCredentialsForSpawn } = await import('./spawn.js');
     const env = getProviderCredentialsForSpawn('ag-1');
@@ -45,8 +45,8 @@ describe('getProviderCredentialsForSpawn', () => {
   });
 
   it('claude_setup_token → empty env when token missing', async () => {
-    const { putProviderCredentials } = await import('./db.js');
-    putProviderCredentials({ source: 'claude_setup_token', apiKey: null });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'claude_setup_token', apiKey: null });
 
     const { getProviderCredentialsForSpawn } = await import('./spawn.js');
     const env = getProviderCredentialsForSpawn('ag-1');
@@ -55,8 +55,8 @@ describe('getProviderCredentialsForSpawn', () => {
   });
 
   it('anthropic_api_key → injects ANTHROPIC_API_KEY env, no files, no suppress', async () => {
-    const { putProviderCredentials } = await import('./db.js');
-    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'sk-ant-api03-test' });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'sk-ant-api03-test' });
 
     const { getProviderCredentialsForSpawn } = await import('./spawn.js');
     const env = getProviderCredentialsForSpawn('ag-1');
@@ -67,8 +67,9 @@ describe('getProviderCredentialsForSpawn', () => {
   });
 
   it('external_server → injects ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL', async () => {
-    const { putProviderCredentials } = await import('./db.js');
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
     putProviderCredentials({
+      scopeId: DEFAULT_SCOPE_ID,
       source: 'external_server',
       apiKey: 'or-key',
       serverUrl: 'https://openrouter.ai/api/v1',
@@ -84,12 +85,74 @@ describe('getProviderCredentialsForSpawn', () => {
   });
 
   it('external_server → empty env when key or url missing', async () => {
-    const { putProviderCredentials } = await import('./db.js');
-    putProviderCredentials({ source: 'external_server', apiKey: 'or-key', serverUrl: null });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'external_server', apiKey: 'or-key', serverUrl: null });
 
     const { getProviderCredentialsForSpawn } = await import('./spawn.js');
     const env = getProviderCredentialsForSpawn('ag-1');
     expect(env.source).toBe('external_server');
+    expect(env.env).toEqual({});
+  });
+
+  it('per-group override wins over default (paraclaw#86)', async () => {
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    putProviderCredentials({
+      scopeId: 'ag-special',
+      source: 'external_server',
+      apiKey: 'override-key',
+      serverUrl: 'https://override.test',
+    });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const env = getProviderCredentialsForSpawn('ag-special');
+    expect(env.source).toBe('external_server');
+    expect(env.resolvedScope).toBe('group');
+    expect(env.env).toEqual({
+      ANTHROPIC_API_KEY: 'override-key',
+      ANTHROPIC_BASE_URL: 'https://override.test',
+    });
+  });
+
+  it('falls back to default when no per-group override exists (paraclaw#86)', async () => {
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'install-default-key' });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const env = getProviderCredentialsForSpawn('ag-no-override');
+    expect(env.source).toBe('anthropic_api_key');
+    expect(env.resolvedScope).toBe('default');
+    expect(env.env).toEqual({ ANTHROPIC_API_KEY: 'install-default-key' });
+  });
+
+  it("one group's override does not leak into another group (paraclaw#86)", async () => {
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    putProviderCredentials({
+      scopeId: 'ag-private',
+      source: 'claude_setup_token',
+      apiKey: 'sk-ant-oat01-private',
+    });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const privateEnv = getProviderCredentialsForSpawn('ag-private');
+    expect(privateEnv.resolvedScope).toBe('group');
+    expect(privateEnv.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-private' });
+
+    const otherEnv = getProviderCredentialsForSpawn('ag-other');
+    expect(otherEnv.resolvedScope).toBe('default');
+    expect(otherEnv.env).toEqual({ ANTHROPIC_API_KEY: 'install-default-key' });
+  });
+
+  it('group override with empty secret slot still wins (paraclaw#86)', async () => {
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    putProviderCredentials({ scopeId: 'ag-broken', source: 'claude_setup_token', apiKey: null });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const env = getProviderCredentialsForSpawn('ag-broken');
+    expect(env.source).toBe('claude_setup_token');
+    expect(env.resolvedScope).toBe('group');
     expect(env.env).toEqual({});
   });
 });
@@ -105,8 +168,10 @@ describe('provider_credentials db round-trip', () => {
   });
 
   it('encrypts api_key at rest, decrypts on read', async () => {
-    const { putProviderCredentials, readProviderCredentials, getProviderCredentialsRow } = await import('./db.js');
+    const { putProviderCredentials, readProviderCredentials, getProviderCredentialsRow, DEFAULT_SCOPE_ID } =
+      await import('./db.js');
     putProviderCredentials({
+      scopeId: DEFAULT_SCOPE_ID,
       source: 'anthropic_api_key',
       apiKey: 'sk-ant-api03-secret',
     });
@@ -120,15 +185,20 @@ describe('provider_credentials db round-trip', () => {
   });
 
   it('upsert preserves unspecified fields (undefined = no-op, null = clear)', async () => {
-    const { putProviderCredentials, readProviderCredentials } = await import('./db.js');
-    putProviderCredentials({ source: 'external_server', apiKey: 'k1', serverUrl: 'https://a.test' });
-    putProviderCredentials({ source: 'external_server', serverUrl: 'https://b.test' });
+    const { putProviderCredentials, readProviderCredentials, DEFAULT_SCOPE_ID } = await import('./db.js');
+    putProviderCredentials({
+      scopeId: DEFAULT_SCOPE_ID,
+      source: 'external_server',
+      apiKey: 'k1',
+      serverUrl: 'https://a.test',
+    });
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'external_server', serverUrl: 'https://b.test' });
 
     const plain = readProviderCredentials();
     expect(plain?.apiKey).toBe('k1');
     expect(plain?.serverUrl).toBe('https://b.test');
 
-    putProviderCredentials({ source: 'external_server', apiKey: null });
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'external_server', apiKey: null });
     const cleared = readProviderCredentials();
     expect(cleared?.apiKey).toBeNull();
     expect(cleared?.serverUrl).toBe('https://b.test');

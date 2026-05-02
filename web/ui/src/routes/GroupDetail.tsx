@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ActivityFeed } from '../components/ActivityFeed.tsx';
+import { AgentProviderCards } from '../components/AgentProviderCards.tsx';
 import { ScopeGrants, SCOPE_OPTIONS } from '../components/ScopeGrants.tsx';
 import { StatusDot, formatRelative } from '../components/StatusDot.tsx';
 import { VaultPicker } from '../components/VaultPicker.tsx';
 import {
   attachVault,
+  clearGroupAgentProvider,
   detachVault,
   getGroup,
+  getGroupAgentProvider,
+  setGroupAgentProvider,
   spawnSession,
   type AgentGroupView,
+  type AgentProviderSource,
+  type GroupAgentProviderView,
   type GroupStatus,
   type VaultScope,
 } from '../lib/api.ts';
@@ -255,160 +261,309 @@ export function GroupDetail() {
       {tab === 'activity' && folder && <ActivityFeed folder={folder} />}
 
       {tab === 'overview' && (
-      <>
-      <div className="section">
-        <h3>Agent group</h3>
-        <div className="kv">
-          <div>name</div>
-          <div>{group.name}</div>
-          <div>folder</div>
-          <div>
-            <code>{group.folder}</code>
+        <>
+          <div className="section">
+            <h3>Agent group</h3>
+            <div className="kv">
+              <div>name</div>
+              <div>{group.name}</div>
+              <div>folder</div>
+              <div>
+                <code>{group.folder}</code>
+              </div>
+              <div>id</div>
+              <div>
+                <code>{group.id}</code>
+              </div>
+              <div>provider</div>
+              <div>{group.agent_provider ?? <em className="dim">default</em>}</div>
+              <div>created</div>
+              <div>{new Date(group.created_at).toLocaleString()}</div>
+            </div>
           </div>
-          <div>id</div>
-          <div>
-            <code>{group.id}</code>
-          </div>
-          <div>provider</div>
-          <div>{group.agent_provider ?? <em className="dim">default</em>}</div>
-          <div>created</div>
-          <div>{new Date(group.created_at).toLocaleString()}</div>
-        </div>
-      </div>
 
-      {group.status && (
-        <StatusSection status={group.status} onSpawn={onSpawn} spawning={spawning} />
-      )}
+          {group.status && <StatusSection status={group.status} onSpawn={onSpawn} spawning={spawning} />}
 
-      {group.vault ? (
-        <div className="section">
-          <h3>Vault attachment</h3>
-          <div className="kv">
-            <div>vault url</div>
-            <div>
-              <code>{group.vault.vaultBaseUrl}</code>
-            </div>
-            <div>scope</div>
-            <div>
-              <span className="tag">{group.vault.scope}</span>
-            </div>
-            <div>token label</div>
-            <div>
-              <code>{group.vault.tokenLabel}</code>
-            </div>
-            <div>attached</div>
-            <div>{new Date(group.vault.attachedAt).toLocaleString()}</div>
-          </div>
-          <hr className="sep" />
-          <div className="dim" style={{ marginBottom: '0.75rem' }}>
-            The agent's container.json has a <code>parachute-vault</code> MCP entry pointing at this URL with a Bearer
-            token. Detach removes the entry; the token stays valid until you revoke it via{' '}
-            <code>parachute vault tokens revoke {group.vault.tokenLabel}</code>.
-          </div>
-          <button className="danger" onClick={onDetach} disabled={submitting}>
-            {submitting ? 'Working…' : 'Detach vault'}
-          </button>
-        </div>
-      ) : (
-        <div className="section">
-          <h3>Attach {pickedVaultName ? <code>{pickedVaultName}</code> : null} vault</h3>
-          <form onSubmit={onAttach}>
-            <div className="row">
-              <label htmlFor="vaultBaseUrl">Vault</label>
-              <VaultPicker
-                inputId="vaultBaseUrl"
-                value={vaultBaseUrl}
-                onChange={setVaultBaseUrl}
-                onPickedName={setPickedVaultName}
-                disabled={submitting}
-              />
-            </div>
+          {folder && <AgentProviderSection folder={folder} />}
 
-            <div className="row">
-              <label htmlFor="scope">Scope</label>
-              <select
-                id="scope"
-                value={scope}
-                onChange={(e) => setScope(e.target.value as VaultScope)}
-                disabled={submitting}
-              >
-                {SCOPE_OPTIONS.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-              <p className="dim">
-                Token capability — the agent literally cannot exceed this. Default <code>vault:read</code>.
-              </p>
-              <ScopeGrants scope={scope} />
-            </div>
-
-            <div className="row">
-              <label htmlFor="tokenLabel">Token label</label>
-              <input
-                id="tokenLabel"
-                type="text"
-                value={tokenLabel}
-                onChange={(e) => setTokenLabel(e.target.value)}
-                disabled={submitting}
-                placeholder={`claw-${folder}`}
-              />
-              <p className="dim">
-                Used for revocation. Default: <code>claw-{folder}</code>.
-              </p>
-            </div>
-
-            <div className="row">
-              <label htmlFor="pasteToken">Paste an existing token (optional)</label>
-              <input
-                id="pasteToken"
-                type="text"
-                value={pasteToken}
-                onChange={(e) => setPasteToken(e.target.value)}
-                disabled={submitting}
-                placeholder="pvt_…  (leave blank to mint a fresh one via the parachute CLI)"
-              />
-              <p className="dim">
-                When blank: the server runs{' '}
-                <code>
-                  parachute vault tokens create --scope {scope} --label {tokenLabel || `claw-${folder}`}
-                </code>{' '}
-                for you. (Until vault OAuth is wired in Phase B; then you'll never see <code>pvt_…</code> tokens at
-                all.)
-              </p>
-            </div>
-
-            <div className="actions">
-              <button type="submit" disabled={submitting}>
-                {submitting ? 'Attaching…' : 'Attach vault'}
+          {group.vault ? (
+            <div className="section">
+              <h3>Vault attachment</h3>
+              <div className="kv">
+                <div>vault url</div>
+                <div>
+                  <code>{group.vault.vaultBaseUrl}</code>
+                </div>
+                <div>scope</div>
+                <div>
+                  <span className="tag">{group.vault.scope}</span>
+                </div>
+                <div>token label</div>
+                <div>
+                  <code>{group.vault.tokenLabel}</code>
+                </div>
+                <div>attached</div>
+                <div>{new Date(group.vault.attachedAt).toLocaleString()}</div>
+              </div>
+              <hr className="sep" />
+              <div className="dim" style={{ marginBottom: '0.75rem' }}>
+                The agent's container.json has a <code>parachute-vault</code> MCP entry pointing at this URL with a
+                Bearer token. Detach removes the entry; the token stays valid until you revoke it via{' '}
+                <code>parachute vault tokens revoke {group.vault.tokenLabel}</code>.
+              </div>
+              <button className="danger" onClick={onDetach} disabled={submitting}>
+                {submitting ? 'Working…' : 'Detach vault'}
               </button>
             </div>
-          </form>
+          ) : (
+            <div className="section">
+              <h3>Attach {pickedVaultName ? <code>{pickedVaultName}</code> : null} vault</h3>
+              <form onSubmit={onAttach}>
+                <div className="row">
+                  <label htmlFor="vaultBaseUrl">Vault</label>
+                  <VaultPicker
+                    inputId="vaultBaseUrl"
+                    value={vaultBaseUrl}
+                    onChange={setVaultBaseUrl}
+                    onPickedName={setPickedVaultName}
+                    disabled={submitting}
+                  />
+                </div>
+
+                <div className="row">
+                  <label htmlFor="scope">Scope</label>
+                  <select
+                    id="scope"
+                    value={scope}
+                    onChange={(e) => setScope(e.target.value as VaultScope)}
+                    disabled={submitting}
+                  >
+                    {SCOPE_OPTIONS.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="dim">
+                    Token capability — the agent literally cannot exceed this. Default <code>vault:read</code>.
+                  </p>
+                  <ScopeGrants scope={scope} />
+                </div>
+
+                <div className="row">
+                  <label htmlFor="tokenLabel">Token label</label>
+                  <input
+                    id="tokenLabel"
+                    type="text"
+                    value={tokenLabel}
+                    onChange={(e) => setTokenLabel(e.target.value)}
+                    disabled={submitting}
+                    placeholder={`claw-${folder}`}
+                  />
+                  <p className="dim">
+                    Used for revocation. Default: <code>claw-{folder}</code>.
+                  </p>
+                </div>
+
+                <div className="row">
+                  <label htmlFor="pasteToken">Paste an existing token (optional)</label>
+                  <input
+                    id="pasteToken"
+                    type="text"
+                    value={pasteToken}
+                    onChange={(e) => setPasteToken(e.target.value)}
+                    disabled={submitting}
+                    placeholder="pvt_…  (leave blank to mint a fresh one via the parachute CLI)"
+                  />
+                  <p className="dim">
+                    When blank: the server runs{' '}
+                    <code>
+                      parachute vault tokens create --scope {scope} --label {tokenLabel || `claw-${folder}`}
+                    </code>{' '}
+                    for you. (Until vault OAuth is wired in Phase B; then you'll never see <code>pvt_…</code> tokens at
+                    all.)
+                  </p>
+                </div>
+
+                <div className="actions">
+                  <button type="submit" disabled={submitting}>
+                    {submitting ? 'Attaching…' : 'Attach vault'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          <div className="section">
+            <h3>What the agent gets</h3>
+            <p className="muted">
+              When attached, the agent's container has a <code>parachute-vault</code> MCP server available with the nine
+              vault tools: <code>query-notes</code>, <code>create-note</code>, <code>update-note</code>,{' '}
+              <code>delete-note</code>, <code>list-tags</code>, <code>update-tag</code>, <code>delete-tag</code>,{' '}
+              <code>find-path</code>, <code>vault-info</code>. Constrained by the scope you chose.
+            </p>
+            <p className="muted">
+              Paraclaw doesn't impose a vault-note layout on the agent — the claw decides how to use vault access. (See{' '}
+              <a
+                href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                docs/parachute-integration.md
+              </a>
+              .)
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function describeSource(source: AgentProviderSource | null, serverUrl: string | null): string {
+  switch (source) {
+    case 'claude_setup_token':
+      return 'Claude setup token';
+    case 'anthropic_api_key':
+      return 'Anthropic API key';
+    case 'external_server':
+      return serverUrl ? `External server (${serverUrl})` : 'External server';
+    case null:
+      return 'not configured';
+  }
+}
+
+function AgentProviderSection({ folder }: { folder: string }) {
+  const [state, setState] = useState<
+    { kind: 'loading' } | { kind: 'ok'; view: GroupAgentProviderView } | { kind: 'error'; message: string }
+  >({ kind: 'loading' });
+  const [busy, setBusy] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [flash, setFlash] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      setState({ kind: 'loading' });
+      const view = await getGroupAgentProvider(folder);
+      setState({ kind: 'ok', view });
+    } catch (err) {
+      setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  }, [folder]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const submit = async (input: { source: AgentProviderSource; apiKey?: string; serverUrl?: string }) => {
+    setBusy(true);
+    setFlash(null);
+    try {
+      const view = await setGroupAgentProvider(folder, input);
+      setState({ kind: 'ok', view });
+      setShowForm(false);
+      setFlash({ kind: 'ok', text: 'Override saved — takes effect on the next session spawn.' });
+    } catch (err) {
+      setFlash({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onClear = async () => {
+    if (!window.confirm("Clear this group's override and inherit the install-wide default?")) return;
+    setBusy(true);
+    setFlash(null);
+    try {
+      const view = await clearGroupAgentProvider(folder);
+      setState({ kind: 'ok', view });
+      setShowForm(false);
+      setFlash({
+        kind: 'ok',
+        text: 'Override cleared. Group will inherit the install-wide default on the next spawn.',
+      });
+    } catch (err) {
+      setFlash({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (state.kind === 'loading') {
+    return (
+      <div className="section">
+        <h3>Agent provider</h3>
+        <div className="skeleton skeleton-line" style={{ width: '60%' }} />
+      </div>
+    );
+  }
+  if (state.kind === 'error') {
+    return (
+      <div className="section">
+        <h3>Agent provider</h3>
+        <div className="error-banner">
+          Couldn't load: <code>{state.message}</code>
+        </div>
+        <div className="actions" style={{ marginTop: '0.75rem' }}>
+          <button onClick={reload}>Retry</button>
+        </div>
+      </div>
+    );
+  }
+
+  const { view } = state;
+  const effectiveSummary = describeSource(view.effective.source, view.effective.serverUrl);
+  const overrideSummary = describeSource(view.override.source, view.override.serverUrl);
+
+  return (
+    <div className="section">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+        <h3 style={{ margin: 0 }}>Agent provider</h3>
+        {view.overridden ? <span className="tag">override</span> : <span className="tag muted">inheriting</span>}
+      </div>
+      <p className="muted" style={{ marginTop: '0.75rem' }}>
+        {view.overridden ? (
+          <>
+            This group uses its own credential source: <strong>{overrideSummary}</strong>. Clear the override to inherit
+            the install-wide default again.
+          </>
+        ) : (
+          <>
+            This group inherits the install-wide default — currently <strong>{effectiveSummary}</strong>. Set an
+            override below to give this group its own credentials. Change at{' '}
+            <Link to="/settings/agent-provider">Settings · Agent provider</Link> for the install-wide default.
+          </>
+        )}
+      </p>
+
+      {flash && (
+        <div className={flash.kind === 'ok' ? 'status-banner' : 'error-banner'} style={{ marginBottom: '0.75rem' }}>
+          {flash.text}
         </div>
       )}
 
-      <div className="section">
-        <h3>What the agent gets</h3>
-        <p className="muted">
-          When attached, the agent's container has a <code>parachute-vault</code> MCP server available with the nine
-          vault tools: <code>query-notes</code>, <code>create-note</code>, <code>update-note</code>,{' '}
-          <code>delete-note</code>, <code>list-tags</code>, <code>update-tag</code>, <code>delete-tag</code>,{' '}
-          <code>find-path</code>, <code>vault-info</code>. Constrained by the scope you chose.
-        </p>
-        <p className="muted">
-          Paraclaw doesn't impose a vault-note layout on the agent — the claw decides how to use vault access. (See{' '}
-          <a
-            href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
-            target="_blank"
-            rel="noreferrer"
-          >
-            docs/parachute-integration.md
-          </a>
-          .)
-        </p>
-      </div>
-      </>
+      {!view.overridden && !showForm && (
+        <div className="actions">
+          <button onClick={() => setShowForm(true)}>Override default</button>
+        </div>
+      )}
+
+      {(view.overridden || showForm) && (
+        <>
+          <AgentProviderCards view={view.override} busy={busy} onSubmit={submit} />
+          <div className="actions" style={{ display: 'flex', gap: '0.5rem' }}>
+            {view.overridden && (
+              <button className="danger" onClick={onClear} disabled={busy}>
+                {busy ? 'Working…' : 'Clear override'}
+              </button>
+            )}
+            {!view.overridden && showForm && (
+              <button className="secondary" onClick={() => setShowForm(false)} disabled={busy}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -431,15 +586,7 @@ function DetailTabs({ tab, onChange }: { tab: DetailTab; onChange: (next: Detail
   );
 }
 
-function StatusSection({
-  status,
-  onSpawn,
-  spawning,
-}: {
-  status: GroupStatus;
-  onSpawn: () => void;
-  spawning: boolean;
-}) {
+function StatusSection({ status, onSpawn, spawning }: { status: GroupStatus; onSpawn: () => void; spawning: boolean }) {
   return (
     <div className="section">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
