@@ -60,7 +60,7 @@ import { handleOauthProvidersRoute } from './routes/oauth-providers.js';
 import { handleSecretsRoute } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSettingsRoute } from './routes/settings.js';
-import { handleAgentProviderRoute } from './routes/agent-provider.js';
+import { handleAgentProviderRoute, handleGroupAgentProviderRoute } from './routes/agent-provider.js';
 import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { handleVaultsRoute } from './routes/vaults.js';
 import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
@@ -589,7 +589,16 @@ async function handleApi(
     const folder = decodeURIComponent(groupRoute[1]);
     const sub = groupRoute[2] ?? '';
 
-    const requiredScope: ClawScope = sub === '' && method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    // Reads at the group root + the agent-provider subroute go through
+    // claw:read; writes default to claw:write; agent-provider writes
+    // (paraclaw#86) bump to claw:admin since they store API keys.
+    const isAgentProviderSub = sub === '/agent-provider';
+    const requiredScope: ClawScope =
+      method === 'GET' && (sub === '' || isAgentProviderSub)
+        ? SCOPE_CLAW_READ
+        : isAgentProviderSub
+          ? SCOPE_CLAW_ADMIN
+          : SCOPE_CLAW_WRITE;
     if (!(await gate(req, res, requiredScope))) return;
 
     const group = getAgentGroup(folder);
@@ -828,6 +837,23 @@ async function handleApi(
         detachVaultFromGroup(folder, mcpName);
         const updated = getAgentGroup(folder);
         json(res, 200, { group: updated, revokedTokenId, revokeError });
+      } catch (err) {
+        error(res, 500, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    if (sub === '/agent-provider') {
+      const auth = await authenticate(req.headers.authorization, requiredScope);
+      const actorSubject = auth.ok ? (auth.claims.sub ?? null) : null;
+      try {
+        await handleGroupAgentProviderRoute({
+          method,
+          req,
+          res,
+          agentGroupId: group.id,
+          actorSubject,
+        });
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));
       }

@@ -92,6 +92,68 @@ describe('getProviderCredentialsForSpawn', () => {
     expect(env.source).toBe('external_server');
     expect(env.env).toEqual({});
   });
+
+  it('per-group override wins over default (paraclaw#86)', async () => {
+    const { putProviderCredentials } = await import('./db.js');
+    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    putProviderCredentials({
+      scopeId: 'ag-special',
+      source: 'external_server',
+      apiKey: 'override-key',
+      serverUrl: 'https://override.test',
+    });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const env = getProviderCredentialsForSpawn('ag-special');
+    expect(env.source).toBe('external_server');
+    expect(env.resolvedScope).toBe('group');
+    expect(env.env).toEqual({
+      ANTHROPIC_API_KEY: 'override-key',
+      ANTHROPIC_BASE_URL: 'https://override.test',
+    });
+  });
+
+  it('falls back to default when no per-group override exists (paraclaw#86)', async () => {
+    const { putProviderCredentials } = await import('./db.js');
+    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'install-default-key' });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const env = getProviderCredentialsForSpawn('ag-no-override');
+    expect(env.source).toBe('anthropic_api_key');
+    expect(env.resolvedScope).toBe('default');
+    expect(env.env).toEqual({ ANTHROPIC_API_KEY: 'install-default-key' });
+  });
+
+  it("one group's override does not leak into another group (paraclaw#86)", async () => {
+    const { putProviderCredentials } = await import('./db.js');
+    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    putProviderCredentials({
+      scopeId: 'ag-private',
+      source: 'claude_setup_token',
+      apiKey: 'sk-ant-oat01-private',
+    });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const privateEnv = getProviderCredentialsForSpawn('ag-private');
+    expect(privateEnv.resolvedScope).toBe('group');
+    expect(privateEnv.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-private' });
+
+    const otherEnv = getProviderCredentialsForSpawn('ag-other');
+    expect(otherEnv.resolvedScope).toBe('default');
+    expect(otherEnv.env).toEqual({ ANTHROPIC_API_KEY: 'install-default-key' });
+  });
+
+  it('group override with empty secret slot still wins (paraclaw#86)', async () => {
+    const { putProviderCredentials } = await import('./db.js');
+    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    putProviderCredentials({ scopeId: 'ag-broken', source: 'claude_setup_token', apiKey: null });
+
+    const { getProviderCredentialsForSpawn } = await import('./spawn.js');
+    const env = getProviderCredentialsForSpawn('ag-broken');
+    expect(env.source).toBe('claude_setup_token');
+    expect(env.resolvedScope).toBe('group');
+    expect(env.env).toEqual({});
+  });
 });
 
 describe('provider_credentials db round-trip', () => {

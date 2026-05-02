@@ -851,6 +851,42 @@ export async function setAgentProvider(input: SetAgentProviderInput): Promise<Ag
   });
 }
 
+// --- Settings: per-agent-group agent provider override (paraclaw#86) ---
+
+/**
+ * Per-group view: `override` is the row keyed on this agent_group_id (all
+ * fields null when no override exists). `effective` is what the next
+ * spawn would actually use — the override when present, otherwise the
+ * install-wide default. `overridden` is the trigger for the UI's
+ * inherit/override branching.
+ */
+export interface GroupAgentProviderView {
+  agentGroupId: string;
+  overridden: boolean;
+  override: AgentProviderView;
+  effective: AgentProviderView;
+}
+
+export async function getGroupAgentProvider(folder: string): Promise<GroupAgentProviderView> {
+  return request<GroupAgentProviderView>(`/groups/${encodeURIComponent(folder)}/agent-provider`);
+}
+
+export async function setGroupAgentProvider(
+  folder: string,
+  input: SetAgentProviderInput,
+): Promise<GroupAgentProviderView> {
+  return request<GroupAgentProviderView>(`/groups/${encodeURIComponent(folder)}/agent-provider`, {
+    method: 'POST',
+    json: input,
+  });
+}
+
+export async function clearGroupAgentProvider(folder: string): Promise<GroupAgentProviderView> {
+  return request<GroupAgentProviderView>(`/groups/${encodeURIComponent(folder)}/agent-provider`, {
+    method: 'DELETE',
+  });
+}
+
 /**
  * Per-channel native id of the install's primary operator (oldest global
  * owner). Used to pre-fill the "bot admin user" field on /channels/new so
