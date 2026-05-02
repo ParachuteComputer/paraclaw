@@ -55,4 +55,20 @@ describe('PARACHUTE_DIR resolution', () => {
     expect(cfg.CENTRAL_DB_PATH).toBe('/tmp/explicit/db.sqlite');
     delete process.env.PARACLAW_CENTRAL_DB_PATH;
   });
+
+  it('PARACHUTE_HOME + PARACLAW_CENTRAL_DB_PATH split: DB takes the override, master.key follows PARACHUTE_HOME', async () => {
+    // Intentional split. PARACLAW_CENTRAL_DB_PATH is an escape hatch for
+    // landing the DB on a different volume (e.g. NVMe scratch) while keeping
+    // the rest of paraclaw's persistent state — including the encryption
+    // key — under PARACHUTE_HOME. Anyone exporting just the DB file alone
+    // is doing it wrong: the ciphertext is unreadable without the master
+    // key that lives next to PARACHUTE_HOME's claw/ dir.
+    process.env.PARACHUTE_HOME = '/tmp/sandbox-split';
+    process.env.PARACLAW_CENTRAL_DB_PATH = '/var/db/claw.db';
+    const cfg = await import('./config.js');
+    const { getMasterKeyPath } = await import('./secrets/master-key.js');
+    expect(cfg.CENTRAL_DB_PATH).toBe('/var/db/claw.db');
+    expect(getMasterKeyPath()).toBe(path.join('/tmp/sandbox-split/claw', 'master.key'));
+    delete process.env.PARACLAW_CENTRAL_DB_PATH;
+  });
 });

@@ -299,6 +299,7 @@ pnpm run dev
 - `cd <live-paraclaw>` and run sandbox there with overrides — same INSTALL_SLUG, `cleanupOrphans` reaps live containers regardless of DB-path overrides.
 - Override only `PARACLAW_CENTRAL_DB_PATH` — `master.key` still lands at `~/.parachute/claw/master.key` if `PARACHUTE_HOME` is unset, and you'll cross-decrypt against the live key.
 - Set `HOME=/tmp/...` instead of `PARACHUTE_HOME` — affects every other tool's home-dir lookup. Paraclaw honors HOME for ergonomic compat, but `PARACHUTE_HOME` is the precise knob for "reroute paraclaw's persistent state."
+- Combine `PARACHUTE_HOME` with `PARACLAW_CENTRAL_DB_PATH` unless you understand the split — the DB lands at the explicit override path but `master.key` still follows `PARACHUTE_HOME` (sits at `<PARACHUTE_HOME>/claw/master.key`). Exporting just the DB file alone yields unreadable ciphertext on the receiving side. The split is intentional — the override lets you put the DB on a different volume — but the two atoms only travel together when you let both default off `PARACHUTE_HOME`.
 
 ### After the sandbox
 
