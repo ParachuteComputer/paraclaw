@@ -1,6 +1,6 @@
 {
   "name": "paraclaw",
-  "version": "0.0.14-rc.33",
+  "version": "0.0.14-rc.34",
   "description": "Paraclaw — Parachute's per-session containerized AI agent companion.",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
@@ -15,7 +15,8 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "prepare": "husky",
     "parachute": "bun scripts/parachute.ts",
-    "web:build": "cd web/ui && pnpm install --ignore-workspace && pnpm build",
+    "build:spa": "cd web/ui && pnpm install --frozen-lockfile --ignore-workspace && pnpm build",
+    "postinstall": "if [ -d web/ui ]; then pnpm run build:spa; fi",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
