@@ -230,10 +230,10 @@ async function handleApi(
     }
   }
 
-  if (pathname === '/api/settings/approval-routing') {
-    // Write touches DM cache + cold-resolves through an adapter; gate it
-    // at admin so a write-only token can't silently re-point an owner's
-    // approval delivery at a different bot.
+  if (pathname === '/api/settings/approval-routing' || pathname === '/api/settings/operator-identity') {
+    // approval-routing write touches DM cache + cold-resolves through an
+    // adapter; gate writes at admin. operator-identity is read-only — the
+    // /channels/new form pre-fills from it.
     const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
     if (!(await gate(req, res, required))) return;
     try {

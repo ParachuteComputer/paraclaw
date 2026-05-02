@@ -94,8 +94,10 @@ export const SUPPORTED_ADAPTERS: ChannelAdapterDescriptor[] = [
     operatorFields: [
       {
         key: 'operatorUserId',
-        label: 'Your Telegram user id',
-        hint: 'DM @userinfobot to get yours. Telegram routes DMs by chat id (= your user id).',
+        label: 'Telegram admin user ID',
+        hint:
+          'The user this bot serves — usually you. Telegram routes DMs by chat id (= your user id); ' +
+          'this is the user whose DMs reach your agent. New here? DM @userinfobot to get your ID.',
         helpHref: 'https://t.me/userinfobot',
         pattern: /^[0-9]+$/,
       },

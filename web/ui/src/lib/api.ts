@@ -829,6 +829,17 @@ export async function setApprovalRoutingDefault(
   return r.row;
 }
 
+/**
+ * Per-channel native id of the install's primary operator (oldest global
+ * owner). Used to pre-fill the "bot admin user" field on /channels/new so
+ * the operator doesn't re-enter their own user id every time. Empty record
+ * on a fresh install with no owner yet.
+ */
+export async function listOperatorIdentities(): Promise<Record<string, string>> {
+  const r = await request<{ byChannel: Record<string, string> }>('/settings/operator-identity');
+  return r.byChannel;
+}
+
 // --- Channel wirings (global view) ---
 
 export type ChannelKind = 'discord' | 'telegram' | 'cli';

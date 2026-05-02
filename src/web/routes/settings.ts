@@ -27,6 +27,35 @@ import { ensureUserDm } from '../../modules/permissions/user-dm.js';
 import { getUserDm, getUserDmsForUser, upsertUserDm } from '../../modules/permissions/db/user-dms.js';
 import { getGlobalAdmins, getOwners } from '../../modules/permissions/db/user-roles.js';
 
+/**
+ * Per-channel native id for the install's primary operator. Backs the
+ * `/channels/new` form's "bot admin user" pre-fill so an operator wiring
+ * a second telegram bot doesn't have to look up their user id again.
+ *
+ * The "operator" is the oldest global owner (from `user_roles`); their
+ * `users.id` carries the channel-prefixed identity already (`telegram:1190596288`),
+ * so the lookup is just "split on first colon, group by channel". No new
+ * schema needed — the row already represents the privileged user for
+ * approvals, which is the same user the form is asking to capture.
+ *
+ * Returns the FIRST owner identity per channel — multi-owner installs
+ * settle to whichever owner was granted first. Edge case: a fresh install
+ * with no owner yet returns an empty record, and the form falls back to
+ * the empty input.
+ */
+export function listOperatorIdentities(): Record<string, string> {
+  const owners = getOwners();
+  const byChannel: Record<string, string> = {};
+  for (const owner of owners) {
+    const sep = owner.user_id.indexOf(':');
+    if (sep < 0) continue;
+    const channelType = owner.user_id.slice(0, sep);
+    const nativeId = owner.user_id.slice(sep + 1);
+    if (!byChannel[channelType]) byChannel[channelType] = nativeId;
+  }
+  return byChannel;
+}
+
 interface BotChoice {
   botId: string;
   /** Adapter `name` field — usually `<channelType>:<botId>` for multi-bot or just `<channelType>`. */
@@ -184,6 +213,11 @@ export async function handleSettingsRoute(ctx: SettingsRouteContext): Promise<bo
 
   if (pathname === '/api/settings/approval-routing' && method === 'GET') {
     json(res, 200, { rows: listSettings() });
+    return true;
+  }
+
+  if (pathname === '/api/settings/operator-identity' && method === 'GET') {
+    json(res, 200, { byChannel: listOperatorIdentities() });
     return true;
   }
 
