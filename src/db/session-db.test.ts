@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { migrateMessagesInTable } from './session-db.js';
+import { ensureSchema, insertMessage, migrateMessagesInTable } from './session-db.js';
 
 const TEST_DIR = '/tmp/paraclaw-session-db-test';
 const DB_PATH = path.join(TEST_DIR, 'inbound.db');
@@ -53,6 +53,41 @@ describe('migrateMessagesInTable', () => {
       series_id: string;
     };
     expect(row.series_id).toBe('legacy-1');
+    db.close();
+  });
+});
+
+describe('insertMessage', () => {
+  it('returns inserted=true on first write, inserted=false on duplicate id (paraclaw#92)', () => {
+    if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+
+    ensureSchema(DB_PATH, 'inbound');
+    const db = openDb(DB_PATH);
+
+    const args = {
+      id: 'msg-dup-1:ag-1',
+      kind: 'chat' as const,
+      timestamp: new Date().toISOString(),
+      platformId: 'telegram:bot:chat',
+      channelType: 'telegram',
+      threadId: null,
+      content: '{"text":"hi"}',
+      processAfter: null,
+      recurrence: null,
+    };
+
+    const first = insertMessage(db, args);
+    expect(first.inserted).toBe(true);
+
+    // Duplicate dispatch — same id arrives again (sender-approval replay
+    // racing with re-emitted chat-sdk event, or platform getUpdates retry).
+    const second = insertMessage(db, args);
+    expect(second.inserted).toBe(false);
+
+    const count = (db.prepare('SELECT COUNT(*) AS n FROM messages_in WHERE id = ?').get(args.id) as { n: number }).n;
+    expect(count).toBe(1);
+
     db.close();
   });
 });
