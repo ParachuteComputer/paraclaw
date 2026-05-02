@@ -825,14 +825,12 @@ export async function setApprovalRoutingDefault(
 
 // --- Settings: agent provider ---
 
-export type AgentProviderSource = 'claude_code_oauth' | 'anthropic_api_key' | 'external_server';
+export type AgentProviderSource = 'claude_setup_token' | 'anthropic_api_key' | 'external_server';
 
 export interface AgentProviderView {
   source: AgentProviderSource | null;
-  hasStoredCredentials: boolean;
   hasApiKey: boolean;
   serverUrl: string | null;
-  hostHasClaudeCodeOAuth: boolean;
   updatedAt: string | null;
 }
 

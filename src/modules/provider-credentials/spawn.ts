@@ -6,15 +6,17 @@
  *   - `env`: extra `-e KEY=VALUE` pairs to add to the container args.
  *   - `files`: file-content pairs to write into the per-group `.claude-shared`
  *              dir so they appear inside the container under `/home/node/.claude`.
+ *              (Reserved for future sources; setup-token / api-key / external-server
+ *              all inject via env vars only.)
  *   - `suppressSecretEnvKeys`: paraclaw secrets named here are dropped from
- *              the spawn's secret bag — used so a residual `ANTHROPIC_API_KEY`
- *              secret can't override the operator's chosen `claude_code_oauth`
- *              source. Documented in the settings page.
+ *              the spawn's secret bag. Used so a residual `ANTHROPIC_API_KEY`
+ *              secret can't override the operator's chosen `claude_setup_token`
+ *              source — Claude Code's auth precedence puts ANTHROPIC_AUTH_TOKEN
+ *              and ANTHROPIC_API_KEY ahead of CLAUDE_CODE_OAUTH_TOKEN.
  *
  * Source-specific behavior:
- *   - claude_code_oauth: re-read host `~/.claude/.credentials.json`; on miss,
- *     fall back to last-stored encrypted copy in the row. Emit warning when
- *     falling back. Resulting JSON lands in `files['.credentials.json']`.
+ *   - claude_setup_token: env `CLAUDE_CODE_OAUTH_TOKEN=<token>`. Suppress
+ *     `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the secret bag.
  *   - anthropic_api_key: env `ANTHROPIC_API_KEY=<plaintext>`.
  *   - external_server: env `ANTHROPIC_API_KEY=<plaintext>` + `ANTHROPIC_BASE_URL=<server_url>`.
  *
@@ -23,7 +25,6 @@
  */
 import { log } from '../../log.js';
 import { DEFAULT_SCOPE_ID, readProviderCredentials, type ProviderSource } from './db.js';
-import { readClaudeCodeOAuth } from './host-claude-code.js';
 
 export interface ProviderSpawnEnvelope {
   /** Source we resolved. `null` means no row + no auto-fallback — caller emits a warning. */
@@ -53,31 +54,19 @@ export function getProviderCredentialsForSpawn(_agentGroupId: string): ProviderS
   if (!row) return empty;
 
   switch (row.source) {
-    case 'claude_code_oauth': {
-      // Always prefer the live host file — it carries refreshed tokens.
-      // Fall back to the last-stored encrypted snapshot when the host
-      // file is missing or unreadable (cloud / file-deleted scenarios).
-      const live = readClaudeCodeOAuth();
-      const credentials = live ?? row.credentialsJson;
-      if (!credentials) {
-        log.warn('claude_code_oauth selected but no credentials available (host file + stored copy both empty)', {
-          agentGroupId: _agentGroupId,
-        });
-        return { ...empty, source: 'claude_code_oauth' };
-      }
-      if (!live) {
-        log.warn('Falling back to stored .credentials.json — host file unreadable', {
-          agentGroupId: _agentGroupId,
-        });
+    case 'claude_setup_token': {
+      if (!row.apiKey) {
+        log.warn('claude_setup_token selected but no token stored', { agentGroupId: _agentGroupId });
+        return { ...empty, source: 'claude_setup_token' };
       }
       return {
-        source: 'claude_code_oauth',
-        env: {},
-        files: { '.credentials.json': credentials },
-        // Documented precedence: when the operator picks OAuth, residual
-        // ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN secrets in paraclaw
-        // would otherwise win in Claude Code SDK (it prefers env over
-        // OAuth). Suppress them so the chosen source actually applies.
+        source: 'claude_setup_token',
+        env: { CLAUDE_CODE_OAUTH_TOKEN: row.apiKey },
+        files: {},
+        // Claude Code's auth precedence: ANTHROPIC_AUTH_TOKEN and
+        // ANTHROPIC_API_KEY both win over CLAUDE_CODE_OAUTH_TOKEN. If
+        // either is sitting in the paraclaw secret bag, the operator's
+        // chosen setup-token source would be silently overridden.
         suppressSecretEnvKeys: new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']),
       };
     }

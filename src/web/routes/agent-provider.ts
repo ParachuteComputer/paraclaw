@@ -3,7 +3,16 @@
  * agent-provider credential source (paraclaw#78). Backs the
  * `/claw/settings/agent-provider` page.
  *
- * Security note: `credentialsJson` and `apiKey` are never returned in
+ * Three sources, all paste-only:
+ *   - `claude_setup_token` — operator runs `claude setup-token` on a host
+ *     where they're authenticated to a Pro/Max/Team/Enterprise subscription
+ *     and pastes the printed token. Container gets `CLAUDE_CODE_OAUTH_TOKEN`.
+ *   - `anthropic_api_key` — Anthropic Console API key. Container gets
+ *     `ANTHROPIC_API_KEY`.
+ *   - `external_server` — self-hosted Claude proxy or a vendor that speaks
+ *     the Anthropic API. Container gets `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL`.
+ *
+ * Security note: the secret value (token / key) is never returned in
  * responses. The GET shape exposes only "is this slot populated?" via
  * boolean flags, so the operator can see what's configured without
  * pulling secrets out of the encrypted store and into a browser.
@@ -16,20 +25,15 @@ import http from 'node:http';
 import { log } from '../../log.js';
 import {
   DEFAULT_SCOPE_ID,
-  hasClaudeCodeOAuth,
   putProviderCredentials,
-  readClaudeCodeOAuth,
   readProviderCredentials,
   type ProviderSource,
 } from '../../modules/provider-credentials/index.js';
 
 interface AgentProviderView {
   source: ProviderSource | null;
-  hasStoredCredentials: boolean;
   hasApiKey: boolean;
   serverUrl: string | null;
-  /** Live host file presence — drives the "auto-detected from Claude Code" hint. */
-  hostHasClaudeCodeOAuth: boolean;
   updatedAt: string | null;
 }
 
@@ -51,10 +55,8 @@ export function readAgentProviderView(): AgentProviderView {
   const row = readProviderCredentials(DEFAULT_SCOPE_ID);
   return {
     source: row?.source ?? null,
-    hasStoredCredentials: !!row?.credentialsJson,
     hasApiKey: !!row?.apiKey,
     serverUrl: row?.serverUrl ?? null,
-    hostHasClaudeCodeOAuth: hasClaudeCodeOAuth(),
     updatedAt: row?.updatedAt ?? null,
   };
 }
@@ -65,7 +67,7 @@ interface SetAgentProviderBody {
   serverUrl?: string;
 }
 
-const VALID_SOURCES: ProviderSource[] = ['claude_code_oauth', 'anthropic_api_key', 'external_server'];
+const VALID_SOURCES: ProviderSource[] = ['claude_setup_token', 'anthropic_api_key', 'external_server'];
 
 export interface SetAgentProviderResult {
   ok: true;
@@ -91,28 +93,18 @@ export function setAgentProvider(
   const previousSource = previous?.source ?? null;
 
   switch (source) {
-    case 'claude_code_oauth': {
-      // Snapshot the host file at switch-time so the spawn fallback has
-      // something to use the moment the host file rotates / disappears.
-      // Re-reads at every spawn override this, so the snapshot only
-      // matters during fallback windows.
-      const live = readClaudeCodeOAuth();
-      if (!live) {
-        return {
-          ok: false,
-          status: 422,
-          message:
-            'Claude Code OAuth not found at ~/.claude/.credentials.json. Run `claude login` first or pick a different source.',
-        };
+    case 'claude_setup_token': {
+      if (!apiKey || !apiKey.trim()) {
+        return { ok: false, status: 400, message: 'apiKey is required for claude_setup_token' };
       }
-      putProviderCredentials({ source, credentialsJson: live, apiKey: null, serverUrl: null });
+      putProviderCredentials({ source, apiKey: apiKey.trim(), serverUrl: null });
       break;
     }
     case 'anthropic_api_key': {
       if (!apiKey || !apiKey.trim()) {
         return { ok: false, status: 400, message: 'apiKey is required for anthropic_api_key' };
       }
-      putProviderCredentials({ source, credentialsJson: null, apiKey: apiKey.trim(), serverUrl: null });
+      putProviderCredentials({ source, apiKey: apiKey.trim(), serverUrl: null });
       break;
     }
     case 'external_server': {
@@ -129,7 +121,6 @@ export function setAgentProvider(
       }
       putProviderCredentials({
         source,
-        credentialsJson: null,
         apiKey: apiKey.trim(),
         serverUrl: serverUrl.trim(),
       });
@@ -142,7 +133,7 @@ export function setAgentProvider(
     fromSource: previousSource,
     toSource: source,
     actor,
-    // Don't log apiKey / credentialsJson — those are secrets.
+    // Don't log apiKey — that's the secret.
     hasServerUrl: source === 'external_server' && !!serverUrl,
   });
 

@@ -4,9 +4,9 @@
  * The PK column doubles as a sentinel slot — id `'__default__'` is the
  * install-wide row; Phase 2 will add real `agent_group_id` rows alongside.
  *
- * Encryption: `credentials_json` and `api_key_encrypted` are AES-GCM
- * ciphertext (HKDF-derived key, info `paraclaw.provider-credentials.v1`).
- * Plaintext only crosses this module's boundary at put/get time.
+ * Encryption: `api_key_encrypted` is AES-GCM ciphertext (HKDF-derived
+ * key, info `paraclaw.provider-credentials.v1`). Plaintext only crosses
+ * this module's boundary at put/get time.
  */
 import { getDb } from '../../db/connection.js';
 import { decryptSecret, deriveKey, encryptSecret } from '../../secrets/crypto.js';
@@ -15,12 +15,11 @@ import { loadOrCreateMasterKey } from '../../secrets/master-key.js';
 export const DEFAULT_SCOPE_ID = '__default__';
 const PROVIDER_CREDS_INFO = 'paraclaw.provider-credentials.v1';
 
-export type ProviderSource = 'claude_code_oauth' | 'anthropic_api_key' | 'external_server';
+export type ProviderSource = 'claude_setup_token' | 'anthropic_api_key' | 'external_server';
 
 export interface ProviderCredentialsRow {
   agent_group_id: string;
   source: ProviderSource;
-  credentials_json: string | null;
   api_key_encrypted: string | null;
   server_url: string | null;
   updated_at: string;
@@ -29,9 +28,11 @@ export interface ProviderCredentialsRow {
 export interface ProviderCredentialsPlaintext {
   agent_group_id: string;
   source: ProviderSource;
-  /** Plaintext `.credentials.json` for `claude_code_oauth` (or null when unset). */
-  credentialsJson: string | null;
-  /** Plaintext API key for `anthropic_api_key` / `external_server` (or null). */
+  /**
+   * Plaintext secret. For `claude_setup_token` this is the OAuth token
+   * (`sk-ant-oat01-...`). For `anthropic_api_key` and `external_server`
+   * it's the API key. Null when unset.
+   */
   apiKey: string | null;
   serverUrl: string | null;
   updatedAt: string;
@@ -54,7 +55,6 @@ export function readProviderCredentials(scopeId: string = DEFAULT_SCOPE_ID): Pro
   return {
     agent_group_id: row.agent_group_id,
     source: row.source,
-    credentialsJson: row.credentials_json ? decryptSecret(row.credentials_json, k) : null,
     apiKey: row.api_key_encrypted ? decryptSecret(row.api_key_encrypted, k) : null,
     serverUrl: row.server_url,
     updatedAt: row.updated_at,
@@ -64,7 +64,6 @@ export function readProviderCredentials(scopeId: string = DEFAULT_SCOPE_ID): Pro
 export interface PutProviderCredentialsInput {
   scopeId?: string;
   source: ProviderSource;
-  credentialsJson?: string | null;
   apiKey?: string | null;
   serverUrl?: string | null;
 }
@@ -78,12 +77,6 @@ export function putProviderCredentials(input: PutProviderCredentialsInput): void
   const scopeId = input.scopeId ?? DEFAULT_SCOPE_ID;
   const existing = getProviderCredentialsRow(scopeId);
   const k = key();
-  const credentials_json =
-    input.credentialsJson === undefined
-      ? (existing?.credentials_json ?? null)
-      : input.credentialsJson === null
-        ? null
-        : encryptSecret(input.credentialsJson, k);
   const api_key_encrypted =
     input.apiKey === undefined
       ? (existing?.api_key_encrypted ?? null)
@@ -96,12 +89,11 @@ export function putProviderCredentials(input: PutProviderCredentialsInput): void
   getDb()
     .prepare(
       `INSERT INTO provider_credentials
-         (agent_group_id, source, credentials_json, api_key_encrypted, server_url, updated_at)
+         (agent_group_id, source, api_key_encrypted, server_url, updated_at)
        VALUES
-         (@agent_group_id, @source, @credentials_json, @api_key_encrypted, @server_url, @updated_at)
+         (@agent_group_id, @source, @api_key_encrypted, @server_url, @updated_at)
        ON CONFLICT (agent_group_id) DO UPDATE SET
          source = excluded.source,
-         credentials_json = excluded.credentials_json,
          api_key_encrypted = excluded.api_key_encrypted,
          server_url = excluded.server_url,
          updated_at = excluded.updated_at`,
@@ -109,7 +101,6 @@ export function putProviderCredentials(input: PutProviderCredentialsInput): void
     .run({
       agent_group_id: scopeId,
       source: input.source,
-      credentials_json,
       api_key_encrypted,
       server_url,
       updated_at,

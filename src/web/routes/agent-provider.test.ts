@@ -29,28 +29,13 @@ afterEach(() => {
 
 describe('readAgentProviderView', () => {
   it('returns a fresh-install view with everything null/false when no row exists', async () => {
-    const hostMod = await import('../../modules/provider-credentials/host-claude-code.js');
-    vi.spyOn(hostMod, 'hasClaudeCodeOAuth').mockReturnValue(false);
-
     const { readAgentProviderView } = await import('./agent-provider.js');
     expect(readAgentProviderView()).toEqual({
       source: null,
-      hasStoredCredentials: false,
       hasApiKey: false,
       serverUrl: null,
-      hostHasClaudeCodeOAuth: false,
       updatedAt: null,
     });
-  });
-
-  it('reflects host file presence even when no provider row exists', async () => {
-    const hostMod = await import('../../modules/provider-credentials/host-claude-code.js');
-    vi.spyOn(hostMod, 'hasClaudeCodeOAuth').mockReturnValue(true);
-
-    const { readAgentProviderView } = await import('./agent-provider.js');
-    const view = readAgentProviderView();
-    expect(view.hostHasClaudeCodeOAuth).toBe(true);
-    expect(view.source).toBeNull();
   });
 
   it('exposes only booleans for stored secrets — never the plaintext', async () => {
@@ -64,8 +49,18 @@ describe('readAgentProviderView', () => {
     const view = readAgentProviderView();
     expect(view.source).toBe('anthropic_api_key');
     expect(view.hasApiKey).toBe(true);
-    expect(view.hasStoredCredentials).toBe(false);
     expect(JSON.stringify(view)).not.toContain('sk-ant-api03-secret-do-not-leak');
+  });
+
+  it('exposes setup-token presence as hasApiKey: true (single secret slot)', async () => {
+    const { putProviderCredentials } = await import('../../modules/provider-credentials/db.js');
+    putProviderCredentials({ source: 'claude_setup_token', apiKey: 'sk-ant-oat01-secret' });
+
+    const { readAgentProviderView } = await import('./agent-provider.js');
+    const view = readAgentProviderView();
+    expect(view.source).toBe('claude_setup_token');
+    expect(view.hasApiKey).toBe(true);
+    expect(JSON.stringify(view)).not.toContain('sk-ant-oat01-secret');
   });
 });
 
@@ -80,34 +75,25 @@ describe('setAgentProvider', () => {
     }
   });
 
-  it('claude_code_oauth → 422 when host file is missing', async () => {
-    const hostMod = await import('../../modules/provider-credentials/host-claude-code.js');
-    vi.spyOn(hostMod, 'readClaudeCodeOAuth').mockReturnValue(null);
-
+  it('claude_setup_token → requires apiKey, then stores it (trimmed)', async () => {
     const { setAgentProvider } = await import('./agent-provider.js');
-    const result = setAgentProvider({ source: 'claude_code_oauth' }, 'telegram:1');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.status).toBe(422);
-      expect(result.message).toContain('Claude Code OAuth not found');
+
+    const missing = setAgentProvider({ source: 'claude_setup_token' }, 'telegram:1');
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.status).toBe(400);
+      expect(missing.message).toContain('apiKey is required');
     }
-  });
 
-  it('claude_code_oauth → snapshots the live host file into stored credentials', async () => {
-    const hostMod = await import('../../modules/provider-credentials/host-claude-code.js');
-    vi.spyOn(hostMod, 'readClaudeCodeOAuth').mockReturnValue('{"live":"oauth-snapshot"}');
-
-    const { setAgentProvider } = await import('./agent-provider.js');
-    const result = setAgentProvider({ source: 'claude_code_oauth' }, 'telegram:1');
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.view.source).toBe('claude_code_oauth');
-      expect(result.view.hasStoredCredentials).toBe(true);
-      expect(result.view.hasApiKey).toBe(false);
+    const ok = setAgentProvider({ source: 'claude_setup_token', apiKey: '  sk-ant-oat01-paste  ' }, 'telegram:1');
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.view.source).toBe('claude_setup_token');
+      expect(ok.view.hasApiKey).toBe(true);
     }
 
     const { readProviderCredentials } = await import('../../modules/provider-credentials/db.js');
-    expect(readProviderCredentials()?.credentialsJson).toBe('{"live":"oauth-snapshot"}');
+    expect(readProviderCredentials()?.apiKey).toBe('sk-ant-oat01-paste');
   });
 
   it('anthropic_api_key → requires apiKey, then stores it', async () => {
@@ -156,7 +142,7 @@ describe('setAgentProvider', () => {
     const infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
 
     const { setAgentProvider } = await import('./agent-provider.js');
-    const ok = setAgentProvider({ source: 'anthropic_api_key', apiKey: 'sk-ant-x' }, 'telegram:42');
+    const ok = setAgentProvider({ source: 'claude_setup_token', apiKey: 'sk-ant-oat01-x' }, 'telegram:42');
     expect(ok.ok).toBe(true);
 
     const auditCalls = infoSpy.mock.calls.filter(
@@ -167,7 +153,7 @@ describe('setAgentProvider', () => {
     expect(payload).toMatchObject({
       audit: 'agent_provider_source_changed',
       fromSource: null,
-      toSource: 'anthropic_api_key',
+      toSource: 'claude_setup_token',
       actor: 'telegram:42',
     });
     expect(payload).toHaveProperty('hasServerUrl');
@@ -180,16 +166,12 @@ describe('setAgentProvider', () => {
       'telegram:1',
     );
 
-    const hostMod = await import('../../modules/provider-credentials/host-claude-code.js');
-    vi.spyOn(hostMod, 'readClaudeCodeOAuth').mockReturnValue('{"live":"oauth"}');
-
-    setAgentProvider({ source: 'claude_code_oauth' }, 'telegram:1');
+    setAgentProvider({ source: 'claude_setup_token', apiKey: 'sk-ant-oat01-new' }, 'telegram:1');
 
     const { readProviderCredentials } = await import('../../modules/provider-credentials/db.js');
     const row = readProviderCredentials();
-    expect(row?.source).toBe('claude_code_oauth');
-    expect(row?.apiKey).toBeNull();
+    expect(row?.source).toBe('claude_setup_token');
+    expect(row?.apiKey).toBe('sk-ant-oat01-new');
     expect(row?.serverUrl).toBeNull();
-    expect(row?.credentialsJson).toBe('{"live":"oauth"}');
   });
 });

@@ -67,7 +67,6 @@ import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
 import { upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
-import { autoDetectClaudeCodeOAuth } from '../modules/provider-credentials/index.js';
 import { getChannelAdapterByBotId, registerBotAdapter } from '../channels/channel-registry.js';
 import { recordTrustHint } from '../channels/trust-hint.js';
 import { validateDiscordBotToken } from './discord-validate.js';
@@ -749,17 +748,6 @@ async function handleApi(
         // DM to a freshly-wired Telegram bot bypasses any backlog-driven
         // approval cascade. No-op for Discord (no operator user id captured).
         recordTrustHint(body.channelType, botId, (body.operatorUserId ?? '').trim());
-        // Zero-config path (paraclaw#78): if the operator already ran
-        // `claude login` on the host, snapshot that OAuth file as the
-        // install's agent-provider source. No-op once any source exists,
-        // so settings-page choices are never overwritten.
-        try {
-          autoDetectClaudeCodeOAuth();
-        } catch (err) {
-          log.warn('Provider auto-detect failed at wire time', {
-            err: err instanceof Error ? err.message : String(err),
-          });
-        }
         json(res, 200, result);
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));

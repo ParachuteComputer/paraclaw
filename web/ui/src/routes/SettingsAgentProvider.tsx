@@ -1,32 +1,24 @@
 /**
  * /settings/agent-provider — install-wide agent provider source.
  *
- * Three options: Claude Code OAuth (auto-detected from
- * ~/.claude/.credentials.json), Anthropic API key, External server +
- * key. The page never displays plaintext secrets — the API returns
- * `hasApiKey` / `hasStoredCredentials` booleans only.
+ * Three options, all paste-only:
+ *   - Claude setup token (`claude setup-token` on a subscription host).
+ *   - Anthropic API key (Console).
+ *   - External provider server (self-hosted proxy or vendor speaking the
+ *     Anthropic API).
  *
- * Auto-detect: when the install starts with no source and the host
- * file exists, the first wire-channel call snapshots it. The "Re-detect"
- * button on the OAuth row re-runs the same snapshot if the host file
- * has rotated.
+ * The page never displays plaintext secrets — the API returns a `hasApiKey`
+ * boolean only.
  */
 import { useCallback, useEffect, useState } from 'react';
 
-import {
-  getAgentProvider,
-  setAgentProvider,
-  type AgentProviderSource,
-  type AgentProviderView,
-} from '../lib/api.ts';
+import { getAgentProvider, setAgentProvider, type AgentProviderSource, type AgentProviderView } from '../lib/api.ts';
 
 type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'error'; message: string };
 
 export function SettingsAgentProvider() {
   const [state, setState] = useState<
-    | { kind: 'loading' }
-    | { kind: 'ok'; view: AgentProviderView }
-    | { kind: 'error'; message: string }
+    { kind: 'loading' } | { kind: 'ok'; view: AgentProviderView } | { kind: 'error'; message: string }
   >({ kind: 'loading' });
   const [save, setSave] = useState<SaveState>({ kind: 'idle' });
   const [reloadKey, setReloadKey] = useState(0);
@@ -99,8 +91,8 @@ export function SettingsAgentProvider() {
         <a href="agent-provider">Agent provider</a>
       </nav>
       <p className="muted">
-        Where the agent gets its Claude credentials. One source per install — applies to every agent
-        group. Changing the source takes effect on the next session spawn.
+        Where the agent gets its Claude credentials. One source per install — applies to every agent group. Changing the
+        source takes effect on the next session spawn.
       </p>
 
       {save.kind === 'error' && (
@@ -109,8 +101,16 @@ export function SettingsAgentProvider() {
         </div>
       )}
 
-      <ClaudeCodeOAuthCard view={view} busy={save.kind === 'saving'} onSelect={() => submit({ source: 'claude_code_oauth' })} />
-      <ApiKeyCard view={view} busy={save.kind === 'saving'} onSubmit={(apiKey) => submit({ source: 'anthropic_api_key', apiKey })} />
+      <ClaudeSetupTokenCard
+        view={view}
+        busy={save.kind === 'saving'}
+        onSubmit={(apiKey) => submit({ source: 'claude_setup_token', apiKey })}
+      />
+      <ApiKeyCard
+        view={view}
+        busy={save.kind === 'saving'}
+        onSubmit={(apiKey) => submit({ source: 'anthropic_api_key', apiKey })}
+      />
       <ExternalServerCard
         view={view}
         busy={save.kind === 'saving'}
@@ -120,15 +120,7 @@ export function SettingsAgentProvider() {
   );
 }
 
-function Card({
-  active,
-  title,
-  children,
-}: {
-  active: boolean;
-  title: string;
-  children: React.ReactNode;
-}) {
+function Card({ active, title, children }: { active: boolean; title: string; children: React.ReactNode }) {
   return (
     <div
       style={{
@@ -148,41 +140,48 @@ function Card({
   );
 }
 
-function ClaudeCodeOAuthCard({
+function ClaudeSetupTokenCard({
   view,
   busy,
-  onSelect,
+  onSubmit,
 }: {
   view: AgentProviderView;
   busy: boolean;
-  onSelect: () => void;
+  onSubmit: (apiKey: string) => void;
 }) {
-  const active = view.source === 'claude_code_oauth';
-  const canUse = view.hostHasClaudeCodeOAuth || view.hasStoredCredentials;
+  const active = view.source === 'claude_setup_token';
+  const [token, setToken] = useState('');
   return (
-    <Card active={active} title="Claude Code OAuth (recommended)">
+    <Card active={active} title="Claude setup token (recommended)">
       <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-        Reuse the OAuth token from your Claude Code login on this host
-        (<code>~/.claude/.credentials.json</code>). No subscription cost beyond your existing Claude
-        Code plan.
+        Generate a Claude setup token with <code>claude setup-token</code> on a host where you've authenticated to your
+        Pro / Max / Team / Enterprise subscription. The command walks you through OAuth and prints a one-year token (
+        <code>sk-ant-oat01-…</code>). Inference-only — paste it here.
+        {active && view.hasApiKey && ' A token is currently stored.'}
       </p>
-      {view.hostHasClaudeCodeOAuth ? (
-        <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-          Detected on host. {active ? 'In use.' : 'Pick this option to use it.'}
-        </p>
-      ) : view.hasStoredCredentials ? (
-        <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-          Host file not currently present — falling back to the snapshot taken when this source was
-          last selected. Run <code>claude login</code> on the host and click "Re-detect" to refresh.
-        </p>
-      ) : (
-        <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-          Not detected. Run <code>claude login</code> on the host first, then pick this option.
-        </p>
-      )}
-      <button onClick={onSelect} disabled={busy || !canUse}>
-        {active ? 'Re-detect' : 'Use Claude Code OAuth'}
-      </button>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (token.trim()) {
+            onSubmit(token.trim());
+            setToken('');
+          }
+        }}
+        style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}
+      >
+        <input
+          type="password"
+          autoComplete="off"
+          placeholder="sk-ant-oat01-…"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          disabled={busy}
+          style={{ flex: '1 1 24rem', minWidth: '16rem' }}
+        />
+        <button type="submit" disabled={busy || !token.trim()}>
+          {active ? 'Replace token' : 'Use setup token'}
+        </button>
+      </form>
     </Card>
   );
 }
@@ -247,8 +246,8 @@ function ExternalServerCard({
   return (
     <Card active={active} title="External provider server">
       <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-        A self-hosted Claude proxy or a vendor that speaks the Anthropic API (e.g. OpenRouter).
-        Sets <code>ANTHROPIC_BASE_URL</code> + API key inside the container.
+        A self-hosted Claude proxy or a vendor that speaks the Anthropic API (e.g. OpenRouter). Sets{' '}
+        <code>ANTHROPIC_BASE_URL</code> + API key inside the container.
         {active && view.serverUrl && (
           <>
             {' '}
