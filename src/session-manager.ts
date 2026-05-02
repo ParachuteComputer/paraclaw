@@ -234,8 +234,9 @@ export function writeSessionMessage(
   const content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
 
   const db = openInboundDb(agentGroupId, sessionId);
+  let inserted: boolean;
   try {
-    insertMessage(db, {
+    ({ inserted } = insertMessage(db, {
       id: message.id,
       kind: message.kind,
       timestamp: message.timestamp,
@@ -246,9 +247,18 @@ export function writeSessionMessage(
       processAfter: message.processAfter ?? null,
       recurrence: message.recurrence ?? null,
       trigger: message.trigger ?? 1,
-    });
+    }));
   } finally {
     db.close();
+  }
+
+  if (!inserted) {
+    log.debug('messages_in id already present — duplicate dispatch, skipping', {
+      agentGroupId,
+      sessionId,
+      messageId: message.id,
+    });
+    return;
   }
 
   updateSession(sessionId, { last_active: new Date().toISOString() });

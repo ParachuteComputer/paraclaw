@@ -100,15 +100,25 @@ export function insertMessage(
      */
     trigger?: 0 | 1;
   },
-): void {
-  db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger)`,
-  ).run({
-    ...message,
-    trigger: message.trigger ?? 1,
-    seq: nextEvenSeq(db),
-  });
+): { inserted: boolean } {
+  // ON CONFLICT(id) DO NOTHING: the same `event.message.id` can legitimately
+  // arrive twice for one (session, agent) pair — sender-approval replay
+  // racing with a re-dispatched chat-sdk event, or a Telegram getUpdates
+  // retry. The id is canonical, so a duplicate is the SAME message; treat
+  // it as idempotent rather than crashing the inbound path. Targeted to
+  // (id) so an unrelated UNIQUE(seq) collision still surfaces.
+  const info = db
+    .prepare(
+      `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger)
+       VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger)
+       ON CONFLICT(id) DO NOTHING`,
+    )
+    .run({
+      ...message,
+      trigger: message.trigger ?? 1,
+      seq: nextEvenSeq(db),
+    });
+  return { inserted: info.changes > 0 };
 }
 
 export function countDueMessages(db: Database): number {
