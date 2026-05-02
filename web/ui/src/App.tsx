@@ -8,6 +8,7 @@ import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
 import { OAuthCallback } from "./routes/OAuthCallback.tsx";
 import { SecretsList } from "./routes/SecretsList.tsx";
 import { SessionsList } from "./routes/SessionsList.tsx";
+import { SettingsApprovals } from "./routes/SettingsApprovals.tsx";
 import { SetupWizard } from "./routes/SetupWizard.tsx";
 import { VaultDetail } from "./routes/VaultDetail.tsx";
 import { VaultsList } from "./routes/VaultsList.tsx";
@@ -42,6 +43,7 @@ export function App() {
         <Link to="/secrets">Secrets</Link>
         <Link to="/apps">Apps</Link>
         <Link to="/approvals">Approvals</Link>
+        <Link to="/settings/approvals">Settings</Link>
         <Link to="/setup">Setup</Link>
         <a
           href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
@@ -62,6 +64,7 @@ export function App() {
         <Route path="/channels/new" element={<WireChannelPage />} />
         <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />
+        <Route path="/settings/approvals" element={<SettingsApprovals />} />
         <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />
         <Route path="/groups/:folder" element={<GroupDetail />} />

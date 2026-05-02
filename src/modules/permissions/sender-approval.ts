@@ -30,8 +30,9 @@ import { normalizeOptions, type RawOption } from '../../channels/ask-question.js
 import { getMessagingGroup } from '../../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../../delivery.js';
 import { log } from '../../log.js';
+import { decodePlatformIdAs } from '../../platform-id.js';
 import type { InboundEvent } from '../../channels/adapter.js';
-import { pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
+import { appendFallbackNotice, pickApprovalDelivery, pickApprover } from '../approvals/primitive.js';
 import { createPendingSenderApproval, hasInFlightSenderApproval } from './db/pending-sender-approvals.js';
 
 const APPROVAL_OPTIONS: RawOption[] = [
@@ -76,7 +77,8 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
 
   const originMg = getMessagingGroup(messagingGroupId);
   const originChannelType = originMg?.channel_type ?? '';
-  const target = await pickApprovalDelivery(approvers, originChannelType);
+  const originBotId = originMg ? decodePlatformIdAs(originMg.platform_id, 'v2').botId : null;
+  const target = await pickApprovalDelivery(approvers, originChannelType, originBotId);
   if (!target) {
     log.warn('Unknown-sender approval skipped — no DM channel for any approver', {
       messagingGroupId,
@@ -128,7 +130,7 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
         type: 'ask_question',
         questionId: approvalId,
         title,
-        question,
+        question: appendFallbackNotice(question, target.viaFallbackBot, originBotId),
         options,
       }),
     );

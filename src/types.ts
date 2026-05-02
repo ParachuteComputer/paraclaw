@@ -78,10 +78,19 @@ export interface AgentGroupMember {
   added_at: string;
 }
 
-/** Cached DM channel for a user on a specific channel_type. */
+/**
+ * Cached DM channel for a user on a specific `(channel_type, bot_id)` pair.
+ *
+ * `bot_id = ''` (empty string) is the configurable channel-default slot —
+ * the operator points it at whichever bot they want approvals to fall
+ * back to when a `(user, channel, originBotId)` exact-bot lookup misses
+ * AND the cold-DM resolve also fails. Migration 026 added the column;
+ * pre-multi-bot installs land every row at `bot_id = ''`.
+ */
 export interface UserDm {
   user_id: string;
   channel_type: string;
+  bot_id: string;
   messaging_group_id: string;
   resolved_at: string;
 }

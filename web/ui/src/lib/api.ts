@@ -792,6 +792,43 @@ export async function decideApproval(id: string, decision: ApprovalDecision): Pr
   return r.approval;
 }
 
+// --- Settings: approval routing ---
+
+export interface ApprovalRoutingBot {
+  botId: string;
+  label: string;
+}
+
+export interface ApprovalRoutingRow {
+  userId: string;
+  channelType: string;
+  /**
+   * Bot id sitting in the channel-default `bot_id=''` slot. Null when
+   * no default has been resolved yet — the operator hasn't been DMed
+   * on that channel and `pickApprovalDelivery` has nothing to fall
+   * back to.
+   */
+  currentBotId: string | null;
+  availableBots: ApprovalRoutingBot[];
+}
+
+export async function listApprovalRouting(): Promise<ApprovalRoutingRow[]> {
+  const r = await request<{ rows: ApprovalRoutingRow[] }>('/settings/approval-routing');
+  return r.rows;
+}
+
+export async function setApprovalRoutingDefault(
+  userId: string,
+  channelType: string,
+  botId: string,
+): Promise<ApprovalRoutingRow> {
+  const r = await request<{ row: ApprovalRoutingRow }>('/settings/approval-routing', {
+    method: 'POST',
+    json: { userId, channelType, botId },
+  });
+  return r.row;
+}
+
 // --- Channel wirings (global view) ---
 
 export type ChannelKind = 'discord' | 'telegram' | 'cli';

@@ -7,6 +7,8 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 
 import type { ChannelAdapter, OutboundMessage } from '../../channels/adapter.js';
 import {
+  _resetActiveAdaptersForTest,
+  _setActiveAdapterForTest,
   initChannelAdapters,
   registerChannelAdapter,
   teardownChannelAdapters,
@@ -30,8 +32,45 @@ beforeEach(() => {
 
 afterEach(async () => {
   await teardownChannelAdapters();
+  _resetActiveAdaptersForTest();
   closeDb();
 });
+
+/**
+ * Inject a bot-pinned mock adapter directly into the active registry.
+ * Bypasses `registerChannelAdapter` / `initChannelAdapters` so a single
+ * test can mount more than one adapter on the same channel type — the
+ * factory-based mount overwrites within a channel.
+ */
+function injectBotAdapter(
+  channelType: string,
+  botId: string,
+  openDM?: (handle: string) => Promise<string>,
+): { openDMCalls: string[] } {
+  const openDMCalls: string[] = [];
+  const adapter: ChannelAdapter = {
+    name: `${channelType}:${botId}`,
+    channelType,
+    botId,
+    supportsThreads: false,
+    async setup() {},
+    async teardown() {},
+    isConnected() {
+      return true;
+    },
+    async deliver() {
+      return undefined;
+    },
+  };
+  if (openDM) {
+    adapter.openDM = async (handle: string) => {
+      openDMCalls.push(handle);
+      return openDM(handle);
+    };
+  }
+  _setActiveAdapterForTest(adapter);
+  return { openDMCalls };
+}
 
 async function mountMockAdapter(
   channelType: string,
@@ -238,5 +277,82 @@ describe('ensureUserDm', () => {
     const mg = await ensureUserDm('telegram:555');
     expect(mg?.id).toBe('mg-preexisting');
     expect(getUserDm('telegram:555', 'telegram')?.messaging_group_id).toBe('mg-preexisting');
+  });
+
+  describe('bot-aware resolution (migration 026)', () => {
+    it('opts.botId pins cold-resolve to that exact bot, caches under that bot id', async () => {
+      const primary = injectBotAdapter('telegram', 'primary-bot', async (h) => `tg-primary:${h}`);
+      const secondary = injectBotAdapter('telegram', 'secondary-bot', async (h) => `tg-secondary:${h}`);
+      seedUser('telegram:1190596288', 'telegram');
+
+      const mg = await ensureUserDm('telegram:1190596288', { botId: 'secondary-bot' });
+      expect(mg).toBeDefined();
+      expect(mg!.platform_id).toBe('tg-secondary:1190596288');
+
+      // Only the secondary bot's adapter saw the openDM call.
+      expect(primary.openDMCalls).toEqual([]);
+      expect(secondary.openDMCalls).toEqual(['1190596288']);
+
+      // Cache row is keyed under the requested bot id.
+      const cached = getUserDm('telegram:1190596288', 'telegram', 'secondary-bot');
+      expect(cached?.messaging_group_id).toBe(mg!.id);
+
+      // Channel-default slot is untouched.
+      expect(getUserDm('telegram:1190596288', 'telegram', '')).toBeUndefined();
+    });
+
+    it('cache hits scope to the bot id — same user/channel, different bot resolves separately', async () => {
+      const primary = injectBotAdapter('telegram', 'primary-bot', async (h) => `tg-primary:${h}`);
+      const secondary = injectBotAdapter('telegram', 'secondary-bot', async (h) => `tg-secondary:${h}`);
+      seedUser('telegram:42', 'telegram');
+
+      const mg1 = await ensureUserDm('telegram:42', { botId: 'primary-bot' });
+      const mg2 = await ensureUserDm('telegram:42', { botId: 'secondary-bot' });
+      expect(mg1!.platform_id).toBe('tg-primary:42');
+      expect(mg2!.platform_id).toBe('tg-secondary:42');
+      expect(mg1!.id).not.toBe(mg2!.id);
+      expect(primary.openDMCalls).toEqual(['42']);
+      expect(secondary.openDMCalls).toEqual(['42']);
+
+      // Re-resolving each is a pure cache read — no second openDM.
+      await ensureUserDm('telegram:42', { botId: 'primary-bot' });
+      await ensureUserDm('telegram:42', { botId: 'secondary-bot' });
+      expect(primary.openDMCalls).toEqual(['42']);
+      expect(secondary.openDMCalls).toEqual(['42']);
+    });
+
+    it('returns null when the requested bot has no adapter — does not silently fall back', async () => {
+      injectBotAdapter('telegram', 'primary-bot', async (h) => `tg-primary:${h}`);
+      seedUser('telegram:9', 'telegram');
+
+      // secondary-bot's adapter never spawned (e.g. its token is in
+      // secrets but `/wire-channel` hasn't completed). Asking for its
+      // DM specifically must NOT fall through to the primary bot.
+      const mg = await ensureUserDm('telegram:9', { botId: 'secondary-bot' });
+      expect(mg).toBeNull();
+      expect(getUserDm('telegram:9', 'telegram', 'secondary-bot')).toBeUndefined();
+      expect(getUserDm('telegram:9', 'telegram', '')).toBeUndefined();
+    });
+
+    it('returns null when the bot-pinned adapter.openDM throws (Telegram "bots can\'t initiate")', async () => {
+      injectBotAdapter('telegram', 'fresh-bot', async () => {
+        throw new Error("bots can't initiate DMs");
+      });
+      seedUser('telegram:5', 'telegram');
+
+      const mg = await ensureUserDm('telegram:5', { botId: 'fresh-bot' });
+      expect(mg).toBeNull();
+      // No cache row written — caller can retry once the user DMs the bot.
+      expect(getUserDm('telegram:5', 'telegram', 'fresh-bot')).toBeUndefined();
+    });
+
+    it('legacy 1-arg call writes the channel-default slot (bot_id="")', async () => {
+      await mountMockAdapter('telegram', async (h) => `telegram:${h}`);
+      seedUser('telegram:7', 'telegram');
+
+      const mg = await ensureUserDm('telegram:7');
+      expect(mg).toBeDefined();
+      expect(getUserDm('telegram:7', 'telegram', '')?.messaging_group_id).toBe(mg!.id);
+    });
   });
 });
