@@ -63,9 +63,9 @@ describe('mintVaultToken — auth gate on 403', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const api = await import('./api.ts');
-    await expect(
-      api.mintVaultToken('work', { label: 'claw-x', scopes: ['vault:read'] }),
-    ).rejects.toThrow(/beginLogin called/);
+    await expect(api.mintVaultToken('work', { label: 'claw-x', scopes: ['vault:read'] })).rejects.toThrow(
+      /beginLogin called/,
+    );
 
     expect(auth.clearTokens).toHaveBeenCalled();
     expect(auth.beginLogin).toHaveBeenCalledWith(['vault:work:admin']);
@@ -114,15 +114,13 @@ describe('detachVault — auth gate on 403', () => {
   });
 
   it('omits scope hint when caller did not supply one', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(403, { error: 'This endpoint requires the claw:admin scope' }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(403, { error: 'This endpoint requires the claw:admin scope' }));
     vi.stubGlobal('fetch', fetchMock);
 
     const api = await import('./api.ts');
-    await expect(api.detachVault('research', { revokeToken: false })).rejects.toThrow(
-      /beginLogin called/,
-    );
+    await expect(api.detachVault('research', { revokeToken: false })).rejects.toThrow(/beginLogin called/);
 
     expect(auth.beginLogin).toHaveBeenCalledWith(undefined);
   });
@@ -197,9 +195,7 @@ describe('non-scope 403 does NOT trigger re-auth', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const api = await import('./api.ts');
-    await expect(
-      api.mintVaultToken('work', { label: 'x', scopes: ['vault:read'] }),
-    ).rejects.toMatchObject({
+    await expect(api.mintVaultToken('work', { label: 'x', scopes: ['vault:read'] })).rejects.toMatchObject({
       name: 'HttpError',
       status: 403,
     });
@@ -224,6 +220,88 @@ describe('happy path — 200 returns parsed body and skips auth', () => {
 
     expect(result).toEqual(minted);
     expect(auth.beginLogin).not.toHaveBeenCalled();
+  });
+});
+
+describe('updateMessagingGroupPolicy — body shape and method', () => {
+  // Server-side validateMgPatchInput keys on `unknownSenderPolicy` exactly;
+  // pin the wire shape here so a future rename doesn't silently regress.
+  it('PATCHes /channels/mg/:id with unknownSenderPolicy', async () => {
+    const result = {
+      messagingGroup: {
+        id: 'mg_1',
+        channelType: 'telegram',
+        platformId: 'telegram:42:1',
+        displayName: null,
+        isGroup: false,
+        unknownSenderPolicy: 'public',
+        deniedAt: null,
+        createdAt: '2026-04-20T10:00:00Z',
+        wiredAgents: [],
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, result));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    const view = await api.updateMessagingGroupPolicy('mg_1', 'public');
+
+    expect(view.unknownSenderPolicy).toBe('public');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/channels\/mg\/mg_1$/);
+    expect((init as RequestInit).method).toBe('PATCH');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ unknownSenderPolicy: 'public' });
+  });
+
+  it('surfaces server 400 as HttpError(400) without re-auth', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { error: 'invalid unknownSenderPolicy: open' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    // Cast through unknown so we can drive the bad-input branch even though
+    // `open` isn't a valid UnknownSenderPolicy at the type level — the
+    // server is what we're pinning here, not the static check.
+    type UnknownSenderPolicy = import('./api.ts').UnknownSenderPolicy;
+    await expect(
+      api.updateMessagingGroupPolicy('mg_1', 'open' as unknown as UnknownSenderPolicy),
+    ).rejects.toMatchObject({ name: 'HttpError', status: 400 });
+    expect(auth.beginLogin).not.toHaveBeenCalled();
+  });
+});
+
+describe('getMessagingGroupDetail — happy path', () => {
+  it('parses { messagingGroup } envelope and returns the view', async () => {
+    const view = {
+      id: 'mg_x',
+      channelType: 'discord',
+      platformId: 'discord:@me:99',
+      displayName: 'Aaron DM',
+      isGroup: false,
+      unknownSenderPolicy: 'request_approval',
+      deniedAt: null,
+      createdAt: '2026-04-20T10:00:00Z',
+      wiredAgents: [
+        {
+          messagingGroupAgentId: 'mga_1',
+          agentGroupId: 'ag_1',
+          agentGroupFolder: 'main',
+          agentGroupName: 'Main',
+          engageMode: 'mention',
+          engagePattern: null,
+          senderScope: 'all',
+          ignoredMessagePolicy: 'drop',
+          priority: 0,
+          createdAt: '2026-04-20T10:00:00Z',
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { messagingGroup: view }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = await import('./api.ts');
+    const result = await api.getMessagingGroupDetail('mg_x');
+    expect(result).toEqual(view);
   });
 });
 

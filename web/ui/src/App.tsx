@@ -1,24 +1,25 @@
-import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { Apps } from "./routes/Apps.tsx";
-import { ApprovalsList } from "./routes/ApprovalsList.tsx";
-import { ChannelsList } from "./routes/ChannelsList.tsx";
-import { GroupDetail } from "./routes/GroupDetail.tsx";
-import { GroupList } from "./routes/GroupList.tsx";
-import { NewGroupWizard } from "./routes/NewGroupWizard.tsx";
-import { OAuthCallback } from "./routes/OAuthCallback.tsx";
-import { SecretsList } from "./routes/SecretsList.tsx";
-import { SessionsList } from "./routes/SessionsList.tsx";
-import { SettingsApprovals } from "./routes/SettingsApprovals.tsx";
-import { SetupWizard } from "./routes/SetupWizard.tsx";
-import { VaultDetail } from "./routes/VaultDetail.tsx";
-import { VaultsList } from "./routes/VaultsList.tsx";
-import { WireChannelPage } from "./routes/WireChannelPage.tsx";
+import { Link, Route, Routes, useLocation } from 'react-router-dom';
+import { Apps } from './routes/Apps.tsx';
+import { ApprovalsList } from './routes/ApprovalsList.tsx';
+import { ChannelsList } from './routes/ChannelsList.tsx';
+import { GroupDetail } from './routes/GroupDetail.tsx';
+import { GroupList } from './routes/GroupList.tsx';
+import { MessagingGroupDetail } from './routes/MessagingGroupDetail.tsx';
+import { NewGroupWizard } from './routes/NewGroupWizard.tsx';
+import { OAuthCallback } from './routes/OAuthCallback.tsx';
+import { SecretsList } from './routes/SecretsList.tsx';
+import { SessionsList } from './routes/SessionsList.tsx';
+import { SettingsApprovals } from './routes/SettingsApprovals.tsx';
+import { SetupWizard } from './routes/SetupWizard.tsx';
+import { VaultDetail } from './routes/VaultDetail.tsx';
+import { VaultsList } from './routes/VaultsList.tsx';
+import { WireChannelPage } from './routes/WireChannelPage.tsx';
 
 export function App() {
   // The OAuth callback page is intentionally chrome-free — the user is
   // mid-handoff back from the hub and the nav frame would just be noise.
   const location = useLocation();
-  const isCallback = location.pathname === "/oauth/callback";
+  const isCallback = location.pathname === '/oauth/callback';
 
   if (isCallback) {
     return (
@@ -62,13 +63,21 @@ export function App() {
         <Route path="/vaults/:name" element={<VaultDetail />} />
         <Route path="/channels" element={<ChannelsList />} />
         <Route path="/channels/new" element={<WireChannelPage />} />
+        <Route path="/channels/mg/:id" element={<MessagingGroupDetail />} />
         <Route path="/apps" element={<Apps />} />
         <Route path="/approvals" element={<ApprovalsList />} />
         <Route path="/settings/approvals" element={<SettingsApprovals />} />
         <Route path="/setup" element={<SetupWizard />} />
         <Route path="/groups/new" element={<NewGroupWizard />} />
         <Route path="/groups/:folder" element={<GroupDetail />} />
-        <Route path="*" element={<div className="empty">404 — back to <Link to="/">groups</Link>.</div>} />
+        <Route
+          path="*"
+          element={
+            <div className="empty">
+              404 — back to <Link to="/">groups</Link>.
+            </div>
+          }
+        />
       </Routes>
     </div>
   );

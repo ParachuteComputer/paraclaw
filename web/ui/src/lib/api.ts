@@ -287,10 +287,7 @@ export async function getVaultDetail(name: string): Promise<VaultDetail> {
  * 500 would label as `unauthorized` and lie to the operator about why
  * the count is missing.
  */
-export type TokenCountProbe =
-  | { kind: 'count'; value: number }
-  | { kind: 'unauthorized' }
-  | { kind: 'error' };
+export type TokenCountProbe = { kind: 'count'; value: number } | { kind: 'unauthorized' } | { kind: 'error' };
 
 /**
  * Tolerant token-count probe for the index page. Bypasses `request<T>` on
@@ -531,10 +528,7 @@ export interface ListActivityOptions {
   limit?: number;
 }
 
-export async function listGroupActivity(
-  folder: string,
-  options: ListActivityOptions = {},
-): Promise<ActivityEntry[]> {
+export async function listGroupActivity(folder: string, options: ListActivityOptions = {}): Promise<ActivityEntry[]> {
   const params = new URLSearchParams();
   if (options.since) params.set('since', options.since);
   if (options.limit !== undefined) params.set('limit', String(options.limit));
@@ -840,6 +834,67 @@ export async function listOperatorIdentities(): Promise<Record<string, string>> 
   return r.byChannel;
 }
 
+// --- Per-MG (messaging-group) detail page ---
+
+/**
+ * The three policies the router applies to messages from senders the
+ * messaging group hasn't seen / approved before. Mirrors `UnknownSenderPolicy`
+ * in `src/types.ts` exactly. `public` is the value the DB uses; `open` is
+ * NOT a valid value (we surface only the canonical names).
+ *
+ * - `request_approval` — pause the message and DM the operator with an
+ *   approve/reject card. Default for auto-created MGs.
+ * - `strict` — drop silently. Used on MGs the operator has explicitly locked
+ *   down.
+ * - `public` — admit and route normally. The MG behaves as if every sender
+ *   is known.
+ */
+export type UnknownSenderPolicy = 'strict' | 'request_approval' | 'public';
+
+export interface WiredAgentSummary {
+  /** mga.id — primary key for the per-MGA detail page (lands in PR3). */
+  messagingGroupAgentId: string;
+  agentGroupId: string;
+  agentGroupFolder: string;
+  agentGroupName: string;
+  engageMode: EngageMode;
+  engagePattern: string | null;
+  senderScope: SenderScope;
+  ignoredMessagePolicy: IgnoredMessagePolicy;
+  priority: number;
+  createdAt: string;
+}
+
+export interface MessagingGroupDetailView {
+  id: string;
+  channelType: string;
+  platformId: string;
+  /** Operator-assigned name; null when unset (most auto-created DMs are unnamed). */
+  displayName: string | null;
+  isGroup: boolean;
+  unknownSenderPolicy: UnknownSenderPolicy;
+  /** ISO when the owner explicitly denied this channel; null otherwise. */
+  deniedAt: string | null;
+  createdAt: string;
+  wiredAgents: WiredAgentSummary[];
+}
+
+export async function getMessagingGroupDetail(id: string): Promise<MessagingGroupDetailView> {
+  const r = await request<{ messagingGroup: MessagingGroupDetailView }>(`/channels/mg/${encodeURIComponent(id)}`);
+  return r.messagingGroup;
+}
+
+export async function updateMessagingGroupPolicy(
+  id: string,
+  unknownSenderPolicy: UnknownSenderPolicy,
+): Promise<MessagingGroupDetailView> {
+  const r = await request<{ messagingGroup: MessagingGroupDetailView }>(`/channels/mg/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    json: { unknownSenderPolicy },
+  });
+  return r.messagingGroup;
+}
+
 // --- Channel wirings (global view) ---
 
 export type ChannelKind = 'discord' | 'telegram' | 'cli';
@@ -998,10 +1053,7 @@ export interface RegisterChannelBotResult {
  * `botUserId` for Discord (where botId == bot's snowflake), and as the
  * basis of the operator-id for Telegram.
  */
-export async function registerChannelBot(
-  channel: ChannelKind,
-  token: string,
-): Promise<RegisterChannelBotResult> {
+export async function registerChannelBot(channel: ChannelKind, token: string): Promise<RegisterChannelBotResult> {
   return request<RegisterChannelBotResult>(`/channels/${encodeURIComponent(channel)}/register-bot`, {
     method: 'POST',
     json: { token },

@@ -35,9 +35,7 @@ import {
 
 export function ChannelsList() {
   const [state, setState] = useState<
-    | { kind: 'loading' }
-    | { kind: 'ok'; wires: ChannelWireView[] }
-    | { kind: 'error'; message: string }
+    { kind: 'loading' } | { kind: 'ok'; wires: ChannelWireView[] } | { kind: 'error'; message: string }
   >({ kind: 'loading' });
   const [reloadKey, setReloadKey] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -208,7 +206,12 @@ function ChannelRow({
         <div>engage</div>
         <div>
           {wire.engageMode}
-          {wire.engagePattern && <> · pattern <code>{wire.engagePattern}</code></>}
+          {wire.engagePattern && (
+            <>
+              {' '}
+              · pattern <code>{wire.engagePattern}</code>
+            </>
+          )}
         </div>
         <div>senders</div>
         <div>{wire.senderScope}</div>
@@ -219,6 +222,11 @@ function ChannelRow({
         <button className="secondary" onClick={onEdit} disabled={busy}>
           Edit
         </button>
+        <Link to={`/channels/mg/${encodeURIComponent(wire.messagingGroupId)}`}>
+          <button className="secondary" disabled={busy}>
+            Group settings →
+          </button>
+        </Link>
         <button
           className="secondary"
           onClick={onDelete}
