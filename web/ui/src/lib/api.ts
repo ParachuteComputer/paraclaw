@@ -928,8 +928,13 @@ export async function listChannelWires(): Promise<ChannelWireView[]> {
   return r.wires;
 }
 
+export async function getChannelWireDetail(id: string): Promise<ChannelWireView> {
+  const r = await request<{ wire: ChannelWireView }>(`/channels/mga/${encodeURIComponent(id)}`);
+  return r.wire;
+}
+
 export async function deleteChannelWire(id: string): Promise<void> {
-  return request<void>(`/channels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return request<void>(`/channels/mga/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export interface UpdateChannelWireInput {
@@ -941,7 +946,7 @@ export interface UpdateChannelWireInput {
 }
 
 export async function updateChannelWire(id: string, input: UpdateChannelWireInput): Promise<ChannelWireView> {
-  const r = await request<{ wire: ChannelWireView }>(`/channels/${encodeURIComponent(id)}`, {
+  const r = await request<{ wire: ChannelWireView }>(`/channels/mga/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     json: input,
   });
