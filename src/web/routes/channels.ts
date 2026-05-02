@@ -29,14 +29,17 @@ import {
   deleteMessagingGroupAgent,
   getMessagingGroup,
   getMessagingGroupAgent,
+  updateMessagingGroup,
   updateMessagingGroupAgent,
 } from '../../db/messaging-groups.js';
 import { log } from '../../log.js';
 import type {
   EngageMode as DbEngageMode,
   IgnoredMessagePolicy as DbIgnoredMessagePolicy,
+  MessagingGroup,
   SenderScope as DbSenderScope,
   MessagingGroupAgent,
+  UnknownSenderPolicy,
 } from '../../types.js';
 
 type ApiEngageMode = 'mention' | 'pattern' | 'all';
@@ -256,6 +259,113 @@ function validatePatchInput(body: unknown): { ok: true; input: PatchInput } | { 
   return { ok: true, input: out };
 }
 
+// ─── /api/channels/mg/:id — per-MG detail + policy editor ──────────────
+//
+// Path is namespaced under `mg/` so it can't collide with `/api/channels/:mga-id`
+// when an mg-id and an mga-id happen to share a prefix or shape (both are
+// uuids today, but the disambiguation is a contract for future schemas).
+// Each MGA wire row already carries its parent `messagingGroupId`, so the
+// list page links the detail with the value it already has — no extra
+// resolve step.
+
+export interface WiredAgentSummary {
+  /** mga.id — primary key for the per-MGA detail page in PR3. */
+  messagingGroupAgentId: string;
+  agentGroupId: string;
+  agentGroupFolder: string;
+  agentGroupName: string;
+  /** Snapshot of MGA fields useful for the read-only summary on the detail page. */
+  engageMode: ApiEngageMode;
+  engagePattern: string | null;
+  senderScope: ApiSenderScope;
+  ignoredMessagePolicy: ApiIgnoredMessagePolicy;
+  priority: number;
+  createdAt: string;
+}
+
+export interface MessagingGroupDetailView {
+  id: string;
+  channelType: string;
+  platformId: string;
+  /** MG's `name` column — null when the operator hasn't set one. */
+  displayName: string | null;
+  isGroup: boolean;
+  unknownSenderPolicy: UnknownSenderPolicy;
+  /** ISO when the owner explicitly denied this channel; null otherwise. */
+  deniedAt: string | null;
+  createdAt: string;
+  wiredAgents: WiredAgentSummary[];
+}
+
+interface AgentJoinRow extends MessagingGroupAgent {
+  ag_folder: string;
+  ag_name: string;
+}
+
+export function getMessagingGroupDetail(id: string): MessagingGroupDetailView | null {
+  const mg = getMessagingGroup(id);
+  if (!mg) return null;
+  const rows = getDb()
+    .prepare<AgentJoinRow>(
+      `SELECT mga.*, ag.folder AS ag_folder, ag.name AS ag_name
+         FROM messaging_group_agents mga
+         JOIN agent_groups ag ON ag.id = mga.agent_group_id
+        WHERE mga.messaging_group_id = ?
+        ORDER BY mga.priority DESC, mga.created_at ASC`,
+    )
+    .all(id);
+  return mgToDetailView(
+    mg,
+    rows.map((row) => ({
+      messagingGroupAgentId: row.id,
+      agentGroupId: row.agent_group_id,
+      agentGroupFolder: row.ag_folder,
+      agentGroupName: row.ag_name,
+      engageMode: dbToApiEngage(row.engage_mode, row.engage_pattern),
+      engagePattern:
+        row.engage_mode === 'pattern' && row.engage_pattern !== ALL_MESSAGES_PATTERN_SENTINEL
+          ? row.engage_pattern
+          : null,
+      senderScope: dbToApiSenderScope(row.sender_scope),
+      ignoredMessagePolicy: dbToApiIgnoredPolicy(row.ignored_message_policy),
+      priority: row.priority,
+      createdAt: row.created_at,
+    })),
+  );
+}
+
+function mgToDetailView(mg: MessagingGroup, wiredAgents: WiredAgentSummary[]): MessagingGroupDetailView {
+  return {
+    id: mg.id,
+    channelType: mg.channel_type,
+    platformId: mg.platform_id,
+    displayName: mg.name,
+    isGroup: mg.is_group === 1,
+    unknownSenderPolicy: mg.unknown_sender_policy,
+    deniedAt: mg.denied_at ?? null,
+    createdAt: mg.created_at,
+    wiredAgents,
+  };
+}
+
+const VALID_UNKNOWN_SENDER_POLICIES: UnknownSenderPolicy[] = ['strict', 'request_approval', 'public'];
+
+interface MgPatchInput {
+  unknownSenderPolicy: UnknownSenderPolicy;
+}
+
+function validateMgPatchInput(body: unknown): { ok: true; input: MgPatchInput } | { ok: false; reason: string } {
+  if (!body || typeof body !== 'object') return { ok: false, reason: 'body must be an object' };
+  const b = body as Record<string, unknown>;
+  if (!('unknownSenderPolicy' in b)) {
+    return { ok: false, reason: 'unknownSenderPolicy is required' };
+  }
+  if (!VALID_UNKNOWN_SENDER_POLICIES.includes(b.unknownSenderPolicy as UnknownSenderPolicy)) {
+    return { ok: false, reason: `invalid unknownSenderPolicy: ${String(b.unknownSenderPolicy)}` };
+  }
+  return { ok: true, input: { unknownSenderPolicy: b.unknownSenderPolicy as UnknownSenderPolicy } };
+}
+
 export interface ChannelsRouteContext {
   pathname: string;
   method: string;
@@ -268,6 +378,51 @@ export async function handleChannelsRoute(ctx: ChannelsRouteContext): Promise<bo
 
   if (pathname === '/api/channels' && method === 'GET') {
     json(res, 200, { wires: listAllWires() });
+    return true;
+  }
+
+  // /api/channels/mg/:id — GET (detail) or PATCH (policy edit). Must dispatch
+  // ahead of /api/channels/:id so the literal `mg` segment doesn't get
+  // mis-parsed as an mga-id.
+  const mgMatch = pathname.match(/^\/api\/channels\/mg\/([^/]+)$/);
+  if (mgMatch) {
+    const id = decodeURIComponent(mgMatch[1]);
+    const detail = getMessagingGroupDetail(id);
+    if (!detail) {
+      error(res, 404, `messaging group not found: ${id}`);
+      return true;
+    }
+    if (method === 'GET') {
+      json(res, 200, { messagingGroup: detail });
+      return true;
+    }
+    if (method === 'PATCH') {
+      let body: unknown;
+      try {
+        body = await readJsonBody<unknown>(req);
+      } catch {
+        error(res, 400, 'invalid JSON body');
+        return true;
+      }
+      const validated = validateMgPatchInput(body);
+      if (!validated.ok) {
+        error(res, 400, validated.reason);
+        return true;
+      }
+      updateMessagingGroup(id, { unknown_sender_policy: validated.input.unknownSenderPolicy });
+      const after = getMessagingGroupDetail(id);
+      if (!after) {
+        error(res, 500, `messaging group ${id} disappeared after update`);
+        return true;
+      }
+      log.info('messaging group policy updated via web', {
+        id,
+        unknownSenderPolicy: validated.input.unknownSenderPolicy,
+      });
+      json(res, 200, { messagingGroup: after });
+      return true;
+    }
+    error(res, 405, `method not allowed on ${pathname}: ${method}`);
     return true;
   }
 
