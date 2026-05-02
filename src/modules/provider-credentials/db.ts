@@ -62,7 +62,10 @@ export function readProviderCredentials(scopeId: string = DEFAULT_SCOPE_ID): Pro
 }
 
 export interface PutProviderCredentialsInput {
-  scopeId?: string;
+  // Required so a future caller can't silently overwrite the install-wide
+  // row by forgetting the scope. Pass `DEFAULT_SCOPE_ID` explicitly when
+  // you mean the install-wide credential.
+  scopeId: string;
   source: ProviderSource;
   apiKey?: string | null;
   serverUrl?: string | null;
@@ -74,7 +77,7 @@ export interface PutProviderCredentialsInput {
  * unchanged (caller-side merge — we read-modify-write).
  */
 export function putProviderCredentials(input: PutProviderCredentialsInput): void {
-  const scopeId = input.scopeId ?? DEFAULT_SCOPE_ID;
+  const { scopeId } = input;
   const existing = getProviderCredentialsRow(scopeId);
   const k = key();
   const api_key_encrypted =

@@ -39,8 +39,9 @@ describe('readAgentProviderView', () => {
   });
 
   it('exposes only booleans for stored secrets — never the plaintext', async () => {
-    const { putProviderCredentials } = await import('../../modules/provider-credentials/db.js');
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('../../modules/provider-credentials/db.js');
     putProviderCredentials({
+      scopeId: DEFAULT_SCOPE_ID,
       source: 'anthropic_api_key',
       apiKey: 'sk-ant-api03-secret-do-not-leak',
     });
@@ -53,8 +54,8 @@ describe('readAgentProviderView', () => {
   });
 
   it('exposes setup-token presence as hasApiKey: true (single secret slot)', async () => {
-    const { putProviderCredentials } = await import('../../modules/provider-credentials/db.js');
-    putProviderCredentials({ source: 'claude_setup_token', apiKey: 'sk-ant-oat01-secret' });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('../../modules/provider-credentials/db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'claude_setup_token', apiKey: 'sk-ant-oat01-secret' });
 
     const { readAgentProviderView } = await import('./agent-provider.js');
     const view = readAgentProviderView();
@@ -178,8 +179,8 @@ describe('setAgentProvider', () => {
 
 describe('per-group agent provider (paraclaw#86)', () => {
   it('readGroupAgentProviderView reports unoverridden + effective from default', async () => {
-    const { putProviderCredentials } = await import('../../modules/provider-credentials/db.js');
-    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('../../modules/provider-credentials/db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'install-default-key' });
 
     const { readGroupAgentProviderView } = await import('./agent-provider.js');
     const view = readGroupAgentProviderView('ag-no-override');
@@ -238,8 +239,8 @@ describe('per-group agent provider (paraclaw#86)', () => {
   });
 
   it('clearGroupAgentProvider deletes the override row + emits override_cleared audit', async () => {
-    const { putProviderCredentials } = await import('../../modules/provider-credentials/db.js');
-    putProviderCredentials({ source: 'anthropic_api_key', apiKey: 'install-default-key' });
+    const { putProviderCredentials, DEFAULT_SCOPE_ID } = await import('../../modules/provider-credentials/db.js');
+    putProviderCredentials({ scopeId: DEFAULT_SCOPE_ID, source: 'anthropic_api_key', apiKey: 'install-default-key' });
     putProviderCredentials({ scopeId: 'ag-x', source: 'claude_setup_token', apiKey: 'sk-ant-oat01-x' });
 
     const { log } = await import('../../log.js');

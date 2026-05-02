@@ -599,7 +599,14 @@ async function handleApi(
         : isAgentProviderSub
           ? SCOPE_CLAW_ADMIN
           : SCOPE_CLAW_WRITE;
-    if (!(await gate(req, res, requiredScope))) return;
+    // Authenticate once; capture sub so the agent-provider sub-route's
+    // audit log doesn't have to re-decode the JWT.
+    const auth = await authenticate(req.headers.authorization, requiredScope);
+    if (!auth.ok) {
+      send401or403(res, auth);
+      return;
+    }
+    const actorSubject = auth.claims.sub ?? null;
 
     const group = getAgentGroup(folder);
     if (!group) {
@@ -844,8 +851,10 @@ async function handleApi(
     }
 
     if (sub === '/agent-provider') {
-      const auth = await authenticate(req.headers.authorization, requiredScope);
-      const actorSubject = auth.ok ? (auth.claims.sub ?? null) : null;
+      // Group existence (folder → agent_group) was validated by `getAgentGroup`
+      // upstream — by the time we get here `group` is non-null, so the
+      // sub-route handler can assume the agent group id is real and 404
+      // semantics for unknown folders are already handled.
       try {
         await handleGroupAgentProviderRoute({
           method,
