@@ -14,8 +14,9 @@
  * write fails (permissions, disk full, race with another writer).
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+
+import { PARACHUTE_DIR } from '../config.js';
 
 export interface ServiceEntry {
   name: string;
@@ -32,8 +33,7 @@ interface ServicesManifest {
 }
 
 export function resolveManifestPath(): string {
-  const base = process.env.PARACHUTE_HOME ?? join(homedir(), '.parachute');
-  return join(base, 'services.json');
+  return join(PARACHUTE_DIR, 'services.json');
 }
 
 function readManifest(path: string): ServicesManifest {

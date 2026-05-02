@@ -16,6 +16,12 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
+// Parachute ecosystem root. Convention shared with parachute-hub, vault,
+// scribe — every module's persistent state lands under this directory
+// (`<PARACHUTE_DIR>/<module>/`). Override via `PARACHUTE_HOME` for sandboxes
+// or Docker. Default: `~/.parachute/`. See docs/sandbox-isolation.md.
+export const PARACHUTE_DIR = process.env.PARACHUTE_HOME || path.join(HOME_DIR, '.parachute');
+
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'paraclaw', 'mount-allowlist.json');
 export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'paraclaw', 'sender-allowlist.json');
@@ -26,13 +32,14 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 // Central DB lives outside the project tree so that:
 //   1. `git clean` / fresh checkouts can never wipe operator-owned state.
 //   2. Multiple project checkouts on the same host share one source of truth.
-//   3. The DB sits next to `master.key` under `~/.parachute/claw/` so a single
-//      backup of that directory captures both crypto material and DB state.
+//   3. The DB sits next to `master.key` under `<PARACHUTE_DIR>/claw/` so a
+//      single backup of that directory captures both crypto material and DB
+//      state.
 //
 // The legacy location was `<PROJECT_ROOT>/data/v2.db`. We migrate-on-startup
 // (see `migrateCentralDbLocation` in src/db/connection.ts) so existing installs
 // pick up the new path without manual intervention.
-export const CENTRAL_DB_DIR = path.join(HOME_DIR, '.parachute', 'claw');
+export const CENTRAL_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
 export const CENTRAL_DB_PATH = process.env.PARACLAW_CENTRAL_DB_PATH || path.join(CENTRAL_DB_DIR, 'paraclaw.db');
 export const LEGACY_CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 
