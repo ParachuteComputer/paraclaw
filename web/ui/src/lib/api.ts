@@ -965,16 +965,11 @@ export async function updateMessagingGroupPolicy(
 
 export type ChannelKind = 'discord' | 'telegram' | 'cli';
 
-/**
- * Wire/API vocabulary. The DB uses a different (pre-rebuild) shape — see
- * `EngageMode` / `SenderScope` / `IgnoredMessagePolicy` in `src/types.ts`.
- * Translation between the two lives in `src/web/routes/channels.ts`
- * (`dbToApi*` + the patch-input mapper). If you add or rename a value
- * here, update the translator AND the server union — they are NOT meant
- * to drift independently.
- */
+// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type EngageMode = 'mention' | 'pattern' | 'all';
+// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type SenderScope = 'allowlist' | 'all';
+// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type IgnoredMessagePolicy = 'drop' | 'silent';
 
 export interface ChannelWireView {

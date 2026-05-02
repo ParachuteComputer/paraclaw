@@ -100,16 +100,11 @@ export interface UserDm {
   resolved_at: string;
 }
 
-/**
- * DB-side vocabulary. The wire/API uses a different (post-rebuild) shape —
- * see `EngageMode` / `SenderScope` / `IgnoredMessagePolicy` in
- * `web/ui/src/lib/api.ts`. Translation between the two lives in
- * `src/web/routes/channels.ts` (`dbToApi*` + the patch-input mapper). If
- * you add or rename a value here, update the translator AND the wire
- * union — they are NOT meant to drift independently.
- */
+// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
+// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type SenderScope = 'all' | 'known';
+// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type IgnoredMessagePolicy = 'drop' | 'accumulate';
 
 export interface MessagingGroupAgent {
