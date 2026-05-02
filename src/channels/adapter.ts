@@ -178,9 +178,35 @@ export interface ChannelAdapter {
 /** Factory function that creates a channel adapter (returns null if credentials missing). */
 export type ChannelAdapterFactory = () => ChannelAdapter | null | Promise<ChannelAdapter | null>;
 
+/**
+ * Build an adapter from a stored secret. Channel modules implement this so
+ * the registry's secrets-backed startup scan and the dynamic register-bot
+ * endpoint can spawn additional bot adapters beyond the `.env`-defined
+ * primary, without channel-registry needing to know per-channel internals.
+ *
+ * Receives the full secret name (e.g. `CHANNEL_BOT_TOKEN:discord:9128…`)
+ * and its plaintext value (the bot token). Adapters that need more than
+ * just a token (Discord needs `applicationId`) parse it out of the name's
+ * trailing segment, which by convention is the bot's identity.
+ *
+ * Returns the adapter ready for `setup()`; the caller wires up host
+ * callbacks. Returns null if the secret can't produce a viable adapter
+ * (e.g. token rejected by the platform); callers log + skip.
+ */
+export type ChannelSpawnFromSecret = (secretName: string, secretValue: string) => Promise<ChannelAdapter | null>;
+
 /** Registration entry for a channel adapter. */
 export interface ChannelRegistration {
   factory: ChannelAdapterFactory;
+  /**
+   * Optional. Channels that support multi-bot operation expose this so the
+   * registry can spawn additional bots from `CHANNEL_BOT_TOKEN:<channel>:*`
+   * secrets at boot time and on-demand via the register-bot HTTP endpoint.
+   *
+   * Channels without it support exactly one bot per install (the
+   * `.env`-defined primary).
+   */
+  spawnFromSecret?: ChannelSpawnFromSecret;
   containerConfig?: {
     mounts?: Array<{ hostPath: string; containerPath: string; readonly: boolean }>;
     env?: Record<string, string>;

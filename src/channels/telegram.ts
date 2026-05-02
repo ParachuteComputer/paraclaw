@@ -211,46 +211,69 @@ function createPairingInterceptor(
   };
 }
 
+/**
+ * Build (but don't `setup()`) a Telegram channel adapter for the given bot
+ * token. Resolves bot identity eagerly via `getMe` so the bridge can encode
+ * v2 platform_ids before any inbound traffic arrives.
+ *
+ * Used by:
+ *   - the channel-registry's startup factory below (single bot via `.env`)
+ *   - `registerBotAdapter('telegram', { token })` (dynamic per-bot adds via
+ *     `POST /api/channels/telegram/register-bot`, see channel-registry.ts)
+ *   - the secrets-backed startup scan (one adapter per
+ *     `CHANNEL_BOT_TOKEN:telegram:*` row across restarts)
+ *
+ * Throws on getMe failure; callers decide whether the bot is essential
+ * (factory: log + skip) or operator-driven (register-bot: surface as 4xx).
+ */
+export async function spawnTelegramAdapter(token: string): Promise<ChannelAdapter> {
+  const identity = await withRetry(() => fetchBotIdentity(token), 'getMe');
+  const { botId, username } = identity;
+
+  const telegramAdapter = createTelegramAdapter({
+    botToken: token,
+    mode: 'polling',
+  });
+  const bridge = createChatSdkBridge({
+    adapter: telegramAdapter,
+    botId,
+    concurrency: 'concurrent',
+    extractReplyContext,
+    supportsThreads: false,
+    transformOutboundText: sanitizeTelegramLegacyMarkdown,
+  });
+
+  return {
+    ...bridge,
+    botId,
+    async setup(hostConfig: ChannelSetup) {
+      const intercepted: ChannelSetup = {
+        ...hostConfig,
+        onInbound: createPairingInterceptor(username, hostConfig.onInbound, token),
+      };
+      return withRetry(() => bridge.setup(intercepted), 'bridge.setup');
+    },
+  };
+}
+
 registerChannelAdapter('telegram', {
   factory: async () => {
     const env = readEnvFile(['TELEGRAM_BOT_TOKEN']);
     if (!env.TELEGRAM_BOT_TOKEN) return null;
-    const token = env.TELEGRAM_BOT_TOKEN;
-
-    // Resolve the bot identity (id + username) eagerly. The id keys the v2
-    // platform_id encoding and the registry slot, so we cannot defer it the
-    // way the old code lazily fetched the username for pairing — paraclaw
-    // would otherwise route all inbound traffic before knowing how to encode
-    // it. If getMe fails we surface the error so initChannelAdapters logs
-    // a clear "Failed to start channel adapter" instead of silently routing
-    // to the wrong key.
-    const identity = await withRetry(() => fetchBotIdentity(token), 'getMe');
-    const { botId, username } = identity;
-
-    const telegramAdapter = createTelegramAdapter({
-      botToken: token,
-      mode: 'polling',
-    });
-    const bridge = createChatSdkBridge({
-      adapter: telegramAdapter,
-      botId,
-      concurrency: 'concurrent',
-      extractReplyContext,
-      supportsThreads: false,
-      transformOutboundText: sanitizeTelegramLegacyMarkdown,
-    });
-
-    const wrapped: ChannelAdapter = {
-      ...bridge,
-      botId,
-      async setup(hostConfig: ChannelSetup) {
-        const intercepted: ChannelSetup = {
-          ...hostConfig,
-          onInbound: createPairingInterceptor(username, hostConfig.onInbound, token),
-        };
-        return withRetry(() => bridge.setup(intercepted), 'bridge.setup');
-      },
-    };
-    return wrapped;
+    return spawnTelegramAdapter(env.TELEGRAM_BOT_TOKEN);
+  },
+  /**
+   * The token is the only thing Telegram needs — the bot's id and username
+   * are recovered via getMe inside spawnTelegramAdapter. The secretName's
+   * trailing segment IS the botId, but we don't need to parse it; the adapter
+   * resolves identity itself.
+   */
+  spawnFromSecret: async (_secretName, secretValue) => {
+    try {
+      return await spawnTelegramAdapter(secretValue);
+    } catch (err) {
+      log.error('Telegram spawnFromSecret failed', { err });
+      return null;
+    }
   },
 });

@@ -931,6 +931,35 @@ export async function testTelegramToken(token: string): Promise<{ identity: Tele
   });
 }
 
+// --- Dynamic bot registration (used after token validate, before wire) ---
+
+export interface RegisterChannelBotResult {
+  ok: true;
+  botId: string;
+  username: string;
+}
+
+/**
+ * Persist the validated bot token to /secrets and bring up its adapter at
+ * runtime. Idempotent on `(channel, botId)` — re-posting the same token
+ * refreshes the ciphertext and returns the already-active adapter.
+ *
+ * Run this AFTER `testDiscordToken` / `testTelegramToken` succeeds so the
+ * server can fail fast on bad tokens before any DB write. The returned
+ * `botId` is what the next `wireChannelToGroup` call should pass as
+ * `botUserId` for Discord (where botId == bot's snowflake), and as the
+ * basis of the operator-id for Telegram.
+ */
+export async function registerChannelBot(
+  channel: ChannelKind,
+  token: string,
+): Promise<RegisterChannelBotResult> {
+  return request<RegisterChannelBotResult>(`/channels/${encodeURIComponent(channel)}/register-bot`, {
+    method: 'POST',
+    json: { token },
+  });
+}
+
 // --- Channel wiring (per-group, used by wizard step 7) ---
 
 export interface WireChannelResult {
@@ -943,13 +972,28 @@ export interface WireChannelResult {
 /**
  * Wire a DM channel to an agent group.
  *
- * `botUserId` semantics differ by channel — see web/server/src/wire-channel.ts:
+ * `botId` is the bot's own identity (returned by /register-bot); it forms
+ * the second segment of the v2 platform_id and keys the dynamic adapter
+ * the server brings up after the wire commits.
+ *
+ * `botUserId` semantics differ by channel — see src/web/wire-channel.ts:
  *   - discord  : the BOT's snowflake (DMs are addressee-routed; ANY DM lands on the bot's @me)
  *   - telegram : the OPERATOR's user id (DMs are chat-routed; only that user's DMs match)
+ *
+ * `operatorUserId` is the operator's user id captured by the form (Telegram
+ * only). It seeds the in-memory trust hint that lets the operator's first
+ * post-wire DM bypass the unwired-channel approval cascade. Empty string
+ * is fine for adapters that don't capture an operator id.
  */
 export async function wireChannelToGroup(
   folder: string,
-  input: { channel: ChannelKind; botUserId: string; displayName?: string },
+  input: {
+    channel: ChannelKind;
+    botId: string;
+    botUserId: string;
+    operatorUserId?: string;
+    displayName?: string;
+  },
 ): Promise<WireChannelResult> {
   // Server's body parser keys on `channelType` (matches the DB column
   // and the wire-channel.ts WireDmInput interface). The helper accepts
@@ -958,7 +1002,9 @@ export async function wireChannelToGroup(
     method: 'POST',
     json: {
       channelType: input.channel,
+      botId: input.botId,
       botUserId: input.botUserId,
+      operatorUserId: input.operatorUserId,
       displayName: input.displayName,
     },
   });

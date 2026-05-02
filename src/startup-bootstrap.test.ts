@@ -15,7 +15,7 @@ import type { ChannelAdapter } from './channels/adapter.js';
 import { createMessagingGroup, getMessagingGroup } from './db/messaging-groups.js';
 import { closeDb, initTestDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
-import { getSecret } from './secrets/index.js';
+import { getSecret, putSecret } from './secrets/index.js';
 import {
   backfillMessagingGroupsToV2,
   bootstrapChannelTokensToSecrets,
@@ -131,6 +131,48 @@ describe('backfillMessagingGroupsToV2', () => {
     // Second run must also be a no-op.
     expect(backfillMessagingGroupsToV2()).toBe(0);
     expect(getMessagingGroup('mg-4')!.platform_id).toBe('telegram:bot1:1190596288');
+  });
+
+  it('does not re-prefix already-v2 rows that belong to a registered-but-not-yet-active secondary bot', () => {
+    // Reproduces the live regression that corrupted TechneRobot's rows on
+    // reboot: only the .env primary adapter is active at boot, but the
+    // secondary bot's CHANNEL_BOT_TOKEN secret is already in the table
+    // (Proposal A: register-bot persists the token before adapter spawn).
+    // The backfill iterates over the primary; if it forgets the secondary's
+    // botId, it sees the secondary's already-v2 row, treats it as v1, and
+    // re-prefixes it under the primary → 4-segment garbage id.
+    _setActiveAdapterForTest(fakeAdapter('telegram', 'primary-bot'));
+    putSecret(channelTokenSecretName('telegram', 'secondary-bot'), 'tg-token-2', {
+      kind: 'channel-token',
+      agent_group_id: null,
+    });
+    createMessagingGroup({
+      id: 'mg-primary',
+      channel_type: 'telegram',
+      platform_id: 'telegram:primary-bot:1190596288',
+      name: null,
+      is_group: 0,
+      unknown_sender_policy: 'strict',
+      created_at: new Date().toISOString(),
+    });
+    createMessagingGroup({
+      id: 'mg-secondary',
+      channel_type: 'telegram',
+      platform_id: 'telegram:secondary-bot:-1002245300962',
+      name: null,
+      is_group: 1,
+      unknown_sender_policy: 'strict',
+      created_at: new Date().toISOString(),
+    });
+
+    expect(backfillMessagingGroupsToV2()).toBe(0);
+    expect(getMessagingGroup('mg-primary')!.platform_id).toBe('telegram:primary-bot:1190596288');
+    expect(getMessagingGroup('mg-secondary')!.platform_id).toBe('telegram:secondary-bot:-1002245300962');
+
+    // Second pass must remain a no-op even with mixed-bot rows present.
+    expect(backfillMessagingGroupsToV2()).toBe(0);
+    expect(getMessagingGroup('mg-primary')!.platform_id).toBe('telegram:primary-bot:1190596288');
+    expect(getMessagingGroup('mg-secondary')!.platform_id).toBe('telegram:secondary-bot:-1002245300962');
   });
 
   it('skips channels with no active adapter (e.g. install with only Telegram running)', () => {

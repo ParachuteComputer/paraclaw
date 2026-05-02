@@ -72,7 +72,12 @@ export function WireChannelStep({ state, patchState, next, back }: StepProps) {
     try {
       const r = await wireChannelToGroup(state.agentGroupFolder, {
         channel: adapter,
+        // The bot's identity from test-connection's getMe; for both
+        // adapters this is the bot's user/application id and forms the
+        // bot dimension of the v2 platform_id.
+        botId: state.botUserId ?? '',
         botUserId: wireId,
+        operatorUserId: state.operatorUserId ?? undefined,
         displayName: state.agentGroupName ? `${state.agentGroupName} DM` : undefined,
       });
       setResult(r);

@@ -30,7 +30,7 @@ import {
   type ChannelAdapter,
   type ResolvedIdentity,
 } from '../lib/channel-adapters.ts';
-import { wireChannelToGroup, type WireChannelResult } from '../lib/api.ts';
+import { registerChannelBot, wireChannelToGroup, type WireChannelResult } from '../lib/api.ts';
 
 export function WireChannelPage() {
   const [adapterKey, setAdapterKey] = useState<ChannelAdapter | null>(null);
@@ -66,8 +66,19 @@ export function WireChannelPage() {
     setValidating(true);
     setValidateError(null);
     try {
-      const r = await adapter.validate(token.trim());
-      setIdentity(r);
+      const trimmed = token.trim();
+      // Single hop: register-bot validates upstream, persists to /secrets,
+      // and brings the adapter live in one server round-trip. The server
+      // surfaces the upstream platform's rejection message via the standard
+      // `{ error }` shape on bad tokens, so we don't need a separate /test
+      // pre-call.
+      //
+      // Re-posting the same bot's secret with a new token persists the
+      // rotation immediately but the live polling loop keeps the old token
+      // until the next host restart — same as a `.env` rotation. Operators
+      // doing a forced rotation should restart paraclaw.
+      const registered = await registerChannelBot(adapter.key, trimmed);
+      setIdentity({ id: registered.botId, username: registered.username });
       setToken('');
     } catch (err) {
       setValidateError(err instanceof Error ? err.message : String(err));
@@ -106,7 +117,9 @@ export function WireChannelPage() {
     try {
       const r = await wireChannelToGroup(picked.folder, {
         channel: adapter.key,
+        botId: identity.id,
         botUserId: wireId,
+        operatorUserId: operatorUserId.trim() || undefined,
         displayName: `${picked.name} DM`,
       });
       setWireResult(r);
@@ -191,7 +204,8 @@ export function WireChannelPage() {
         <Section step={2} title={`Bot identity — ${adapter.label}`}>
           <p className="dim" style={{ marginTop: 0 }}>
             We hit <code>{adapter.upstreamProbePath}</code> to confirm the token authenticates and the account
-            is a bot. Get a token from{' '}
+            is a bot, then encrypt-and-store it under <code>secrets</code> and bring up the adapter so
+            the bot is live across host restarts. Get a token from{' '}
             <a href={adapter.tokenHelp.href} target="_blank" rel="noreferrer">
               {adapter.tokenHelp.title}
             </a>
@@ -201,7 +215,7 @@ export function WireChannelPage() {
           {identity ? (
             <div className="empty empty-rich" style={{ marginTop: '0.5rem' }}>
               <p className="empty-headline" style={{ margin: 0 }}>
-                Bot identified: <code>@{identity.username}</code>{' '}
+                Bot registered: <code>@{identity.username}</code>{' '}
                 <span className="dim">
                   (id <code>{identity.id}</code>)
                 </span>
@@ -214,7 +228,7 @@ export function WireChannelPage() {
                   setToken('');
                 }}
               >
-                Re-validate with a different token
+                Use a different token
               </button>
             </div>
           ) : (
@@ -233,7 +247,7 @@ export function WireChannelPage() {
               {validateError && <div className="error-banner">{validateError}</div>}
               <div className="actions" style={{ marginTop: '0.5rem' }}>
                 <button onClick={onValidate} disabled={!token.trim() || validating}>
-                  {validating ? 'Validating…' : 'Validate token'}
+                  {validating ? 'Validating + registering…' : 'Validate & register bot'}
                 </button>
               </div>
             </>

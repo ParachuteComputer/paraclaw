@@ -122,7 +122,7 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
       : `Someone DM'd your agent on ${originChannelType}. Wire it to ${target.name} and let it respond?`;
   const options = normalizeOptions(APPROVAL_OPTIONS);
 
-  createPendingChannelApproval({
+  const inserted = createPendingChannelApproval({
     messaging_group_id: messagingGroupId,
     agent_group_id: target.id,
     original_message: JSON.stringify(event),
@@ -131,6 +131,18 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
     title,
     options_json: JSON.stringify(options),
   });
+  if (!inserted) {
+    // Lost a concurrent race against another inbound for this same
+    // messaging group. The winner already produced a card; we silently
+    // skip delivery rather than spamming a duplicate. The earlier
+    // `hasInFlightChannelApproval` check catches the common case but
+    // doesn't cover concurrent inbounds that both pass it before either
+    // INSERTs.
+    log.debug('Channel registration card already inserted by concurrent inbound', {
+      messagingGroupId,
+    });
+    return;
+  }
 
   const adapter = getDeliveryAdapter();
   if (!adapter) {
