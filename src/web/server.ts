@@ -23,6 +23,12 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Sourced from package.json so `/api/health` and the hub-registered
+// manifest reflect the actual built version. Pre-paraclaw#101 this was a
+// hardcoded string that drifted across rc bumps; vault uses the same
+// pattern (see parachute-vault src/routing.ts).
+import pkg from '../../package.json' with { type: 'json' };
+
 import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR } from '../config.js';
 import { openDb, type Database } from '../db/connection.js';
 import {
@@ -87,7 +93,8 @@ const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // hub#83) sets this from `module.json` `paths[0]` automatically. Empty
 // string = serve at the origin root (default).
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
-const SERVICE_VERSION = '0.0.14-rc.7';
+/** Exported for tests; serves as the value reported by `/api/health` and registered with hub. */
+export const SERVICE_VERSION: string = pkg.version;
 
 interface AgentGroupRow {
   id: string;
