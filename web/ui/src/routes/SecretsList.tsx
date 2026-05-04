@@ -717,6 +717,11 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
 
               {showAssignmentsGrid && (
                 <div className="row">
+                  <p className="dim" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+                    Secrets are injected into agent containers at <strong>session spawn</strong>. Changes apply to new
+                    sessions; running containers won't see them until restarted (the post-save banner below flags any
+                    affected sessions, with a one-click Restart per session).
+                  </p>
                   <label>Assigned to ({assignments.size})</label>
                   {!assignmentsLoaded && <p className="dim">Loading current assignments…</p>}
                   {assignmentsLoaded && groups.length === 0 && (
