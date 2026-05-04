@@ -133,7 +133,7 @@ export function GroupDetail() {
     if (!folder) return;
     if (
       !window.confirm(
-        "Restart this agent's container? The current session will end; the agent's next reply will spawn a fresh container picking up the latest secrets, env, and code. The conversation context is reset.",
+        "Restart this agent's container? The current session ends; the agent's next reply will spawn a fresh container picking up the latest secrets, env, and code. The chat thread is preserved; only the container's in-memory state resets.",
       )
     ) {
       return;

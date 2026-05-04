@@ -854,7 +854,7 @@ function StalenessBanner({
   if (staleSessions.length === 0) {
     return (
       <div className="row">
-        <p>Saved. No running containers needed a restart to see the change.</p>
+        <p>Saved. No outstanding stale containers.</p>
         <div className="actions" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
           <button type="button" onClick={onDone}>
             Done

@@ -273,9 +273,21 @@ export interface StaleSession {
 
 /**
  * Sessions whose container was spawned BEFORE this secret was last updated
- * AND whose agent group would inject the secret per the same resolution rules
- * `resolveInjectableSecrets` applies (scoped match, OR global + group
- * `secret_mode='all'`, OR global + assignment row).
+ * AND whose agent group would inject the secret. The injection predicate
+ * mirrors `resolveInjectableSecrets` for the configurations the UI can
+ * actually create:
+ *   - scoped secret  → matches its parent group (`s.agent_group_id = g.id`)
+ *   - global secret  → matches any group with `secret_mode='all'` OR an
+ *                      explicit `secret_assignments` row
+ *
+ * Note on a subtle asymmetry: `resolveInjectableSecrets` additionally gates
+ * scoped secrets through `(secret_mode='all' OR assignment row exists)` on
+ * the recipient group. The SQL here accepts the scoped match unconditionally.
+ * The asymmetry is benign — the only configs where it would diverge (a
+ * scoped secret paired with its parent group in `selective` mode and no
+ * assignment row) are unreachable via the UI, which always seeds an
+ * assignment row when scoping. If a future code path makes that config
+ * reachable, tighten the SQL to add the same gate.
  *
  * The host injects env vars at spawn time only — there is no in-process
  * update path. This helper powers the post-save banner that prompts the
