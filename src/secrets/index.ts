@@ -259,3 +259,91 @@ export function removeAssignment(secretId: string, agentGroupId: string): boolea
     .run({ secret_id: secretId, agent_group_id: agentGroupId });
   return r.changes > 0;
 }
+
+// ── Staleness detection (Bug B) ──
+
+export interface StaleSession {
+  sessionId: string;
+  agentGroupId: string;
+  agentGroupName: string;
+  agentGroupFolder: string;
+  sessionCreatedAt: string;
+  secretUpdatedAt: string;
+}
+
+/**
+ * Sessions whose container was spawned BEFORE this secret was last updated
+ * AND whose agent group would inject the secret. The injection predicate
+ * mirrors `resolveInjectableSecrets` for the configurations the UI can
+ * actually create:
+ *   - scoped secret  → matches its parent group (`s.agent_group_id = g.id`)
+ *   - global secret  → matches any group with `secret_mode='all'` OR an
+ *                      explicit `secret_assignments` row
+ *
+ * Note on a subtle asymmetry: `resolveInjectableSecrets` additionally gates
+ * scoped secrets through `(secret_mode='all' OR assignment row exists)` on
+ * the recipient group. The SQL here accepts the scoped match unconditionally.
+ * The asymmetry is benign — the only configs where it would diverge (a
+ * scoped secret paired with its parent group in `selective` mode and no
+ * assignment row) are unreachable via the UI, which always seeds an
+ * assignment row when scoping. If a future code path makes that config
+ * reachable, tighten the SQL to add the same gate.
+ *
+ * The host injects env vars at spawn time only — there is no in-process
+ * update path. This helper powers the post-save banner that prompts the
+ * operator to restart the specific sessions that need to see the change.
+ *
+ * Returns empty when the secret doesn't exist (caller handles 404).
+ */
+export function findStaleSessionsForSecret(secretId: string): StaleSession[] {
+  const rows = db()
+    .prepare<{
+      session_id: string;
+      agent_group_id: string;
+      agent_group_name: string;
+      agent_group_folder: string;
+      session_created_at: string;
+      secret_updated_at: string;
+    }>(
+      `SELECT
+          sess.id           AS session_id,
+          g.id              AS agent_group_id,
+          g.name            AS agent_group_name,
+          g.folder          AS agent_group_folder,
+          sess.created_at   AS session_created_at,
+          s.updated_at      AS secret_updated_at
+        FROM secrets s
+        JOIN agent_groups g
+          ON s.agent_group_id = g.id
+          OR s.agent_group_id IS NULL
+        LEFT JOIN secret_assignments a
+          ON a.secret_id = s.id AND a.agent_group_id = g.id
+        JOIN sessions sess
+          ON sess.agent_group_id = g.id
+        WHERE s.id = @secret_id
+          AND sess.container_status = 'running'
+          AND sess.created_at < s.updated_at
+          AND (
+                s.agent_group_id = g.id
+             OR (s.agent_group_id IS NULL
+                 AND (g.secret_mode = 'all' OR a.secret_id IS NOT NULL))
+          )
+        ORDER BY sess.created_at DESC`,
+    )
+    .all({ secret_id: secretId });
+  return rows.map((r) => ({
+    sessionId: r.session_id,
+    agentGroupId: r.agent_group_id,
+    agentGroupName: r.agent_group_name,
+    agentGroupFolder: r.agent_group_folder,
+    sessionCreatedAt: r.session_created_at,
+    secretUpdatedAt: r.secret_updated_at,
+  }));
+}
+
+/** Metadata-only single-row read by id. Returns undefined if missing. */
+export function getSecretById(id: string): SecretRow | undefined {
+  return db()
+    .prepare<SecretRow>(`SELECT id, name, kind, agent_group_id, created_at, updated_at FROM secrets WHERE id = ?`)
+    .get(id);
+}

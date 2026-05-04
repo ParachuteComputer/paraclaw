@@ -1,11 +1,13 @@
 /**
  * /api/secrets — CRUD over paraclaw's local AES-256-GCM secret store.
  *
- * Every endpoint requires `claw:write` for mutation, `claw:read` for the
- * list-metadata view. Plaintext values are accepted on PUT and never
- * returned by any GET — listSecrets() is metadata-only by design. There is
- * no "show value" endpoint; if a human needs the value they should re-mint
- * (or back it out via the original platform's UI).
+ * Auth: `claw:admin` for mutation (POST/PUT/DELETE), `claw:read` for GET.
+ * The mutation gate is admin-not-write because a write-only token would
+ * otherwise be enough to swap any vault credential and silently MITM
+ * downstream API calls. Plaintext values are accepted on POST and never
+ * returned by any GET — `listSecrets()` is metadata-only by design. There
+ * is no "show value" endpoint; if a human needs the value they should
+ * re-mint (or back it out via the original platform's UI).
  */
 import http from 'node:http';
 
@@ -16,6 +18,8 @@ import {
   type SecretRow,
   addAssignment,
   deleteSecret,
+  findStaleSessionsForSecret,
+  getSecretById,
   listAssignments,
   listSecrets,
   putSecret,
@@ -171,6 +175,26 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
       return true;
     }
     json(res, 200, { secret: toView(view) });
+    return true;
+  }
+
+  // Stale-sessions probe — match before the bare /:id DELETE so the more-specific
+  // path wins. Surface for the post-save banner: which running containers were
+  // spawned BEFORE this secret's last update AND would inject it on next spawn?
+  const staleMatch = pathname.match(/^\/api\/secrets\/([^/]+)\/stale-sessions$/);
+  if (staleMatch && method === 'GET') {
+    const id = decodeURIComponent(staleMatch[1]);
+    const meta = getSecretById(id);
+    if (!meta) {
+      error(res, 404, `secret not found: ${id}`);
+      return true;
+    }
+    const stale = findStaleSessionsForSecret(id);
+    json(res, 200, {
+      secretId: id,
+      secretUpdatedAt: meta.updated_at,
+      staleSessions: stale,
+    });
     return true;
   }
 

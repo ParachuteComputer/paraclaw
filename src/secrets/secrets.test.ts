@@ -7,7 +7,9 @@ import { _setMasterKeyForTest } from './master-key.js';
 import {
   addAssignment,
   deleteSecret,
+  findStaleSessionsForSecret,
   getSecret,
+  getSecretById,
   listAssignments,
   listSecrets,
   putSecret,
@@ -205,5 +207,148 @@ describe('secret assignments (selective mode)', () => {
 
     expect(resolveInjectableSecrets('A').get('TOKEN')).toBe('shared-via-allowlist');
     expect(resolveInjectableSecrets('B').get('TOKEN')).toBe('b-only');
+  });
+});
+
+describe('findStaleSessionsForSecret', () => {
+  function seedSession(
+    db: ReturnType<typeof initTestDb>,
+    sessionId: string,
+    agentGroupId: string,
+    createdAt: string,
+    containerStatus: 'running' | 'idle' | 'stopped' = 'running',
+  ) {
+    db.prepare(
+      `INSERT INTO sessions
+         (id, agent_group_id, messaging_group_id, thread_id, agent_provider, status, container_status, last_active, created_at)
+       VALUES (?, ?, NULL, NULL, NULL, 'active', ?, NULL, ?)`,
+    ).run(sessionId, agentGroupId, containerStatus, createdAt);
+  }
+
+  function bumpSecretUpdatedAt(db: ReturnType<typeof initTestDb>, secretId: string, updatedAt: string) {
+    db.prepare(`UPDATE secrets SET updated_at = ? WHERE id = ?`).run(updatedAt, secretId);
+  }
+
+  it('returns sessions spawned before a global secret was updated, when assigned', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    // Session created at t=10
+    seedSession(db, 'sess-A', 'A', '2026-01-01T00:00:10.000Z');
+
+    // Global secret with assignment to A; secret updated at t=20 (after spawn)
+    const sid = putSecret('TOKEN', 'v');
+    addAssignment(sid, 'A');
+    bumpSecretUpdatedAt(db, sid, '2026-01-01T00:00:20.000Z');
+
+    const stale = findStaleSessionsForSecret(sid);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].sessionId).toBe('sess-A');
+    expect(stale[0].agentGroupId).toBe('A');
+    expect(stale[0].secretUpdatedAt).toBe('2026-01-01T00:00:20.000Z');
+    expect(stale[0].sessionCreatedAt).toBe('2026-01-01T00:00:10.000Z');
+  });
+
+  it('skips sessions spawned AFTER the secret update', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    const sid = putSecret('TOKEN', 'v');
+    addAssignment(sid, 'A');
+    bumpSecretUpdatedAt(db, sid, '2026-01-01T00:00:10.000Z');
+
+    // Session spawned at t=20 — after the secret update — already has env.
+    seedSession(db, 'sess-A', 'A', '2026-01-01T00:00:20.000Z');
+
+    expect(findStaleSessionsForSecret(sid)).toEqual([]);
+  });
+
+  it('skips non-running sessions (idle and stopped)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+
+    const sid = putSecret('TOKEN', 'v');
+    bumpSecretUpdatedAt(db, sid, '2026-01-01T00:00:20.000Z');
+
+    seedSession(db, 'sess-running', 'A', '2026-01-01T00:00:10.000Z', 'running');
+    seedSession(db, 'sess-idle', 'A', '2026-01-01T00:00:10.000Z', 'idle');
+    seedSession(db, 'sess-stopped', 'A', '2026-01-01T00:00:10.000Z', 'stopped');
+
+    const stale = findStaleSessionsForSecret(sid);
+    expect(stale.map((s) => s.sessionId)).toEqual(['sess-running']);
+  });
+
+  it('skips groups that would not inject the global (selective + no assignment)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+    seedAgentGroup(db, 'B', 'selective');
+
+    const sid = putSecret('TOKEN', 'v');
+    addAssignment(sid, 'A'); // only A is assigned
+    bumpSecretUpdatedAt(db, sid, '2026-01-01T00:00:20.000Z');
+
+    seedSession(db, 'sess-A', 'A', '2026-01-01T00:00:10.000Z');
+    seedSession(db, 'sess-B', 'B', '2026-01-01T00:00:10.000Z');
+
+    const stale = findStaleSessionsForSecret(sid);
+    expect(stale.map((s) => s.sessionId)).toEqual(['sess-A']);
+  });
+
+  it('includes mode=all groups even without an explicit assignment', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+
+    const sid = putSecret('TOKEN', 'v');
+    bumpSecretUpdatedAt(db, sid, '2026-01-01T00:00:20.000Z');
+
+    seedSession(db, 'sess-A', 'A', '2026-01-01T00:00:10.000Z');
+    expect(findStaleSessionsForSecret(sid).map((s) => s.sessionId)).toEqual(['sess-A']);
+  });
+
+  it('scoped secret only marks its own group stale', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+    seedAgentGroup(db, 'B', 'all');
+
+    const sid = putSecret('TOKEN', 'v', { agent_group_id: 'A' });
+    bumpSecretUpdatedAt(db, sid, '2026-01-01T00:00:20.000Z');
+
+    seedSession(db, 'sess-A', 'A', '2026-01-01T00:00:10.000Z');
+    seedSession(db, 'sess-B', 'B', '2026-01-01T00:00:10.000Z');
+
+    expect(findStaleSessionsForSecret(sid).map((s) => s.sessionId)).toEqual(['sess-A']);
+  });
+
+  it('returns [] for a missing secret id', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    expect(findStaleSessionsForSecret('does-not-exist')).toEqual([]);
+  });
+});
+
+describe('getSecretById', () => {
+  it('returns the metadata row, never the value', () => {
+    const id = putSecret('NAME', 'plaintext');
+    const row = getSecretById(id);
+    expect(row?.id).toBe(id);
+    expect(row?.name).toBe('NAME');
+    expect(row).not.toHaveProperty('value_encrypted');
+  });
+
+  it('returns undefined for a missing id', () => {
+    expect(getSecretById('does-not-exist')).toBeUndefined();
   });
 });

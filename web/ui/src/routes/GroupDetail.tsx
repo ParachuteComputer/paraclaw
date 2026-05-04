@@ -8,6 +8,7 @@ import { VaultPicker } from '../components/VaultPicker.tsx';
 import {
   attachVault,
   clearGroupAgentProvider,
+  closeSession,
   detachVault,
   getGroup,
   getGroupAgentProvider,
@@ -46,6 +47,7 @@ export function GroupDetail() {
   const [tokenLabel, setTokenLabel] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [spawning, setSpawning] = useState(false);
+  const [restartingSessionId, setRestartingSessionId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
   const reload = useCallback(async () => {
@@ -119,6 +121,36 @@ export function GroupDetail() {
       });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Reap a running session's container. The host's session-close path is
+  // synchronous (kill + mark closed), so by the time `closeSession` resolves
+  // the container is gone. Next inbound message spawns fresh — that's what
+  // makes this the canonical way to pick up secrets/env/code changes that
+  // were baked at spawn time and aren't readable mid-life.
+  const onRestartSession = async (sessionId: string) => {
+    if (!folder) return;
+    if (
+      !window.confirm(
+        "Restart this agent's container? The current session ends; the agent's next reply will spawn a fresh container picking up the latest secrets, env, and code. The chat thread is preserved; only the container's in-memory state resets.",
+      )
+    ) {
+      return;
+    }
+    setRestartingSessionId(sessionId);
+    setFlash(null);
+    try {
+      await closeSession(sessionId);
+      await reload();
+      setFlash({
+        kind: 'ok',
+        text: `Session ${sessionId} closed. The agent's next message will spawn a fresh container.`,
+      });
+    } catch (err) {
+      setFlash({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setRestartingSessionId(null);
     }
   };
 
@@ -282,7 +314,15 @@ export function GroupDetail() {
             </div>
           </div>
 
-          {group.status && <StatusSection status={group.status} onSpawn={onSpawn} spawning={spawning} />}
+          {group.status && (
+            <StatusSection
+              status={group.status}
+              onSpawn={onSpawn}
+              spawning={spawning}
+              onRestartSession={onRestartSession}
+              restartingSessionId={restartingSessionId}
+            />
+          )}
 
           {folder && <AgentProviderSection folder={folder} />}
 
@@ -586,7 +626,19 @@ function DetailTabs({ tab, onChange }: { tab: DetailTab; onChange: (next: Detail
   );
 }
 
-function StatusSection({ status, onSpawn, spawning }: { status: GroupStatus; onSpawn: () => void; spawning: boolean }) {
+function StatusSection({
+  status,
+  onSpawn,
+  spawning,
+  onRestartSession,
+  restartingSessionId,
+}: {
+  status: GroupStatus;
+  onSpawn: () => void;
+  spawning: boolean;
+  onRestartSession: (sessionId: string) => void;
+  restartingSessionId: string | null;
+}) {
   return (
     <div className="section">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
@@ -595,6 +647,10 @@ function StatusSection({ status, onSpawn, spawning }: { status: GroupStatus; onS
           {spawning ? 'Spawning…' : '+ New session'}
         </button>
       </div>
+      <p className="dim" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+        Container env (secrets, agent provider, code) is set at session spawn. To pick up changes, use{' '}
+        <strong>Restart</strong> on a running session — the agent's next message will spawn a fresh container.
+      </p>
       <div className="kv" style={{ marginTop: '1rem' }}>
         <div>container</div>
         <div>
@@ -653,23 +709,41 @@ function StatusSection({ status, onSpawn, spawning }: { status: GroupStatus; onS
             Sessions ({status.sessions.length}):
           </div>
           <ul className="session-list">
-            {status.sessions.map((s) => (
-              <li key={s.sessionId}>
-                <code>{s.sessionId}</code>{' '}
-                {s.alive ? (
-                  <span className="status-text alive">alive</span>
-                ) : (
-                  <span className="status-text idle">{s.containerStatus}</span>
-                )}{' '}
-                <span className="dim">— {s.status}</span>
-                {s.lastHeartbeatAt && (
-                  <>
-                    {' '}
-                    <span className="dim">· hb {formatRelative(s.lastHeartbeatAt)}</span>
-                  </>
-                )}
-              </li>
-            ))}
+            {status.sessions.map((s) => {
+              const restartable = s.containerStatus === 'running' && s.status === 'active';
+              const isRestarting = restartingSessionId === s.sessionId;
+              return (
+                <li key={s.sessionId}>
+                  <code>{s.sessionId}</code>{' '}
+                  {s.alive ? (
+                    <span className="status-text alive">alive</span>
+                  ) : (
+                    <span className="status-text idle">{s.containerStatus}</span>
+                  )}{' '}
+                  <span className="dim">— {s.status}</span>
+                  {s.lastHeartbeatAt && (
+                    <>
+                      {' '}
+                      <span className="dim">· hb {formatRelative(s.lastHeartbeatAt)}</span>
+                    </>
+                  )}
+                  {restartable && (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        className="secondary"
+                        style={{ marginLeft: '0.5rem', padding: '0.15rem 0.6rem', fontSize: '0.85rem' }}
+                        onClick={() => onRestartSession(s.sessionId)}
+                        disabled={restartingSessionId !== null}
+                      >
+                        {isRestarting ? 'Restarting…' : 'Restart'}
+                      </button>
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

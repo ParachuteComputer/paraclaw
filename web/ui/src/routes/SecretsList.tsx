@@ -25,16 +25,19 @@ import { Link } from 'react-router-dom';
 import { CredentialForm } from '../components/CredentialForm.tsx';
 import { formatRelative } from '../components/StatusDot.tsx';
 import {
+  closeSession,
   deleteSecret,
   listGroups,
   listSecretAssignments,
   listSecrets,
+  listStaleSessionsForSecret,
   putSecret,
   setSecretAssignments,
   type AgentGroupView,
   type AssignedMode,
   type SecretKind,
   type SecretView,
+  type StaleSession,
 } from '../lib/api.ts';
 
 // Kind display order — channel-tokens first since they're the most common
@@ -448,17 +451,38 @@ interface EditorProps {
 }
 
 /**
- * Edit drawer rendered as a native <dialog>. Three concurrent edits in scope:
- *   1. Inject mode (all|selective)
- *   2. Selective assignments (multi-select agent groups)
- *   3. Value rotation
+ * Edit drawer rendered as a native <dialog>. Concurrent edits in scope:
+ *   1. Per-group accept-mode (only for SCOPED secrets — the radio flips the
+ *      parent agent group's `secret_mode`, which gates how that group accepts
+ *      every secret routed to it, not just this one).
+ *   2. Selective assignments (multi-select agent groups). Always shown for
+ *      globals; shown for scoped only when accept-mode is `selective`.
+ *   3. Value rotation.
  *
- * Mode flips and kind changes both require value re-paste because the server's
- * POST upsert wire requires `value`. Assignment-only edits go straight to the
- * /assignments PUT and don't touch the secret value at all.
+ * Globals do NOT get a per-secret mode toggle: post-migration-023, mode lives
+ * on the recipient agent group, so flipping a "mode" on a global has no
+ * destination to land in (paraclaw#103 — Bug A: silent-mode-toggle on
+ * globals). The assignment grid is the operator's actual handle for
+ * scoping a global.
+ *
+ * Mode flips for SCOPED secrets still require value re-paste because the
+ * server's POST upsert wire requires `value` and that's how the parent
+ * group's mode change gets persisted today. Assignment-only edits go
+ * straight to /assignments PUT and don't touch the secret value at all.
+ *
+ * Post-save, the editor probes /api/secrets/:id/stale-sessions and surfaces
+ * a banner with [Restart] buttons when running containers were spawned
+ * before this secret's last update — env vars are spawn-time-only, so a
+ * mid-life edit is invisible to a container that's already running
+ * (paraclaw#103 — Bug B: stale-container env).
  */
 function SecretEditor({ secret, groups, onClose }: EditorProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+
+  const isGlobal = secret.agentGroupId === null;
+  const groupName = secret.agentGroupId
+    ? (groups.find((g) => g.id === secret.agentGroupId)?.name ?? secret.agentGroupId.slice(0, 8))
+    : 'global';
 
   const [mode, setMode] = useState<AssignedMode>(secret.assignedMode);
   const [assignments, setAssignments] = useState<Set<string>>(new Set());
@@ -467,6 +491,9 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [staleSessions, setStaleSessions] = useState<StaleSession[] | null>(null);
+  const [restartingId, setRestartingId] = useState<string | null>(null);
+  const saved = staleSessions !== null;
 
   // Open the dialog on mount, close imperatively on unmount. Native <dialog>
   // gives us focus-trap + ESC-to-close for free.
@@ -510,7 +537,9 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
       return next;
     });
 
-  const modeChanged = mode !== secret.assignedMode;
+  // Mode changes only have meaning for SCOPED secrets — for globals there
+  // is no parent group to flip, so we never expose a UI for it.
+  const modeChanged = !isGlobal && mode !== secret.assignedMode;
   const assignmentsChanged = (() => {
     if (!assignmentsLoaded || !initialAssignmentsRef.current) return false;
     const init = initialAssignmentsRef.current;
@@ -520,10 +549,16 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
   })();
   const valueProvided = value.trim().length > 0;
 
+  // Globals: always show the assignment grid (it's the only handle).
+  // Scoped: show only when accept-mode is `selective` (else group accepts all).
+  const showAssignmentsGrid = isGlobal || mode === 'selective';
+
   const save = async () => {
     setError(null);
     if (modeChanged && !valueProvided) {
-      setError('Switching inject mode requires re-pasting the secret value (the server upsert wire requires it).');
+      setError(
+        `Changing how ${groupName} accepts secrets requires re-pasting this secret's value (the server upsert wire requires it).`,
+      );
       return;
     }
     setBusy(true);
@@ -534,16 +569,25 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
           value: value.trim(),
           kind: secret.kind,
           agentGroupId: secret.agentGroupId,
-          assignedMode: mode,
+          // Globals have no parent group to land mode on — sending it would
+          // silently no-op on the server. Scoped flips the parent group.
+          assignedMode: isGlobal ? undefined : mode,
         });
       }
       // Push assignments whenever they changed, OR whenever we just upserted
       // the secret with selective mode (so the join-table reflects intent
       // even on first switch).
-      if (mode === 'selective' && (assignmentsChanged || (modeChanged && valueProvided))) {
+      if (showAssignmentsGrid && (assignmentsChanged || (modeChanged && valueProvided))) {
         await setSecretAssignments(secret.id, Array.from(assignments));
       }
-      onClose(true);
+      // Probe staleness — running containers spawned before this update
+      // won't see the change until next session spawn. Banner stays open
+      // so the operator can restart specific sessions inline.
+      const stale = await listStaleSessionsForSecret(secret.id);
+      setStaleSessions(stale);
+      if (stale.length === 0) {
+        onClose(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -551,15 +595,58 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
     }
   };
 
-  const noAssignmentsWarn = mode === 'selective' && assignmentsLoaded && assignments.size === 0;
-  const scopeLabel = secret.agentGroupId
-    ? (groups.find((g) => g.id === secret.agentGroupId)?.name ?? secret.agentGroupId.slice(0, 8))
-    : 'global';
+  const restartSession = async (sessionId: string) => {
+    setError(null);
+    setRestartingId(sessionId);
+    try {
+      await closeSession(sessionId);
+      setStaleSessions((prev) => (prev ?? []).filter((s) => s.sessionId !== sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRestartingId(null);
+    }
+  };
+
+  const restartAll = async () => {
+    if (!staleSessions || staleSessions.length === 0) return;
+    if (
+      !window.confirm(
+        `Restart ${staleSessions.length} agent session(s)? Each agent's current conversation will end and a fresh container will spawn on next inbound message.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    // Sequential — count is small (one running container per agent group),
+    // and serializing keeps the runtime from being hammered with concurrent
+    // killContainer calls in the rare large-fanout case. Track successes
+    // inside the loop so a mid-run throw on session N doesn't leave the
+    // banner showing 1..N-1 as still-stale (they were already closed).
+    const closed = new Set<string>();
+    try {
+      for (const s of staleSessions) {
+        await closeSession(s.sessionId);
+        closed.add(s.sessionId);
+      }
+      setStaleSessions([]);
+    } catch (err) {
+      setStaleSessions((prev) => (prev ?? []).filter((s) => !closed.has(s.sessionId)));
+      setError(
+        `Restarted ${closed.size}/${staleSessions.length} session(s); ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const noAssignmentsWarn = !isGlobal && mode === 'selective' && assignmentsLoaded && assignments.size === 0;
 
   return (
     <dialog
       ref={dialogRef}
-      onClose={() => onClose(false)}
+      onClose={() => onClose(saved)}
       className="secret-editor"
       style={{
         width: 'min(560px, 92vw)',
@@ -578,7 +665,7 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
             <button
               type="button"
               className="secondary"
-              onClick={() => onClose(false)}
+              onClick={() => onClose(saved)}
               style={{ padding: '0.3rem 0.7rem' }}
               aria-label="Close"
             >
@@ -587,7 +674,7 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
             <span className="tag muted">{secret.kind}</span>
-            <span className="tag muted">{scopeLabel}</span>
+            <span className="tag muted">{groupName}</span>
           </div>
           <div className="dim" style={{ marginTop: '0.5rem' }}>
             created <span title={new Date(secret.createdAt).toLocaleString()}>{formatRelative(secret.createdAt)}</span>
@@ -598,113 +685,237 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
         <div style={{ padding: '1.25rem 1.5rem' }}>
           {error && <div className="error-banner">{error}</div>}
 
-          <div className="row">
-            <label>Inject mode</label>
-            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-              <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', fontWeight: 400 }}>
-                <input
-                  type="radio"
-                  name="mode"
-                  value="all"
-                  checked={mode === 'all'}
-                  onChange={() => setMode('all')}
-                  disabled={busy}
-                />
-                <span>all</span>
-              </label>
-              <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', fontWeight: 400 }}>
-                <input
-                  type="radio"
-                  name="mode"
-                  value="selective"
-                  checked={mode === 'selective'}
-                  onChange={() => setMode('selective')}
-                  disabled={busy}
-                />
-                <span>selective</span>
-              </label>
-            </div>
-            <p className="dim" style={{ marginTop: '0.4rem' }}>
-              {mode === 'all'
-                ? 'Injected into every agent container whose scope matches.'
-                : 'Injected only into the agent groups you check below.'}
-            </p>
-          </div>
-
-          {mode === 'selective' && (
-            <div className="row">
-              <label>Assigned to ({assignments.size})</label>
-              {!assignmentsLoaded && <p className="dim">Loading current assignments…</p>}
-              {assignmentsLoaded && groups.length === 0 && (
-                <p className="dim">No agent groups exist yet — create one to assign this secret.</p>
-              )}
-              {assignmentsLoaded && groups.length > 0 && (
-                <div
-                  style={{
-                    display: 'grid',
-                    gap: '0.35rem',
-                    maxHeight: '14rem',
-                    overflowY: 'auto',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    padding: '0.5rem 0.75rem',
-                  }}
-                >
-                  {groups.map((g) => (
-                    <label key={g.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontWeight: 400 }}>
+          {!saved && (
+            <>
+              {isGlobal ? (
+                <p className="dim" style={{ marginBottom: '1rem' }}>
+                  <strong>Global secret.</strong> Eligible for every agent group. Inject targets are the groups
+                  checked below, plus any group whose own accept-mode is <code>all</code>. Per-group accept-mode
+                  lives on the agent group, not the secret.
+                </p>
+              ) : (
+                <div className="row">
+                  <label>
+                    <strong>{groupName}</strong> accepts
+                  </label>
+                  <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', fontWeight: 400 }}>
                       <input
-                        type="checkbox"
-                        checked={assignments.has(g.id)}
-                        onChange={() => toggleAssignment(g.id)}
+                        type="radio"
+                        name="mode"
+                        value="all"
+                        checked={mode === 'all'}
+                        onChange={() => setMode('all')}
                         disabled={busy}
                       />
-                      <span>{g.name}</span>
-                      <code style={{ fontSize: '0.78rem', color: 'var(--fg-dim)' }}>{g.folder}</code>
+                      <span>all in-scope secrets</span>
                     </label>
-                  ))}
+                    <label style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', fontWeight: 400 }}>
+                      <input
+                        type="radio"
+                        name="mode"
+                        value="selective"
+                        checked={mode === 'selective'}
+                        onChange={() => setMode('selective')}
+                        disabled={busy}
+                      />
+                      <span>only assigned secrets</span>
+                    </label>
+                  </div>
+                  <p className="dim" style={{ marginTop: '0.4rem' }}>
+                    This setting controls how <strong>{groupName}</strong> accepts secrets from any source — not
+                    just this one. Changing it affects every secret destined for this group.
+                  </p>
                 </div>
               )}
-              {noAssignmentsWarn && (
-                <div className="warn-banner" style={{ marginTop: '0.5rem' }}>
-                  Selective mode with zero assignments — this secret will inject into nothing. OK if intentional, but
-                  containers that read this name will see it as unset.
+
+              {showAssignmentsGrid && (
+                <div className="row">
+                  <p className="dim" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+                    Secrets are injected into agent containers at <strong>session spawn</strong>. Changes apply to new
+                    sessions; running containers won't see them until restarted (the post-save banner below flags any
+                    affected sessions, with a one-click Restart per session).
+                  </p>
+                  <label>Assigned to ({assignments.size})</label>
+                  {!assignmentsLoaded && <p className="dim">Loading current assignments…</p>}
+                  {assignmentsLoaded && groups.length === 0 && (
+                    <p className="dim">No agent groups exist yet — create one to assign this secret.</p>
+                  )}
+                  {assignmentsLoaded && groups.length > 0 && (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gap: '0.35rem',
+                        maxHeight: '14rem',
+                        overflowY: 'auto',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        padding: '0.5rem 0.75rem',
+                      }}
+                    >
+                      {groups.map((g) => (
+                        <label
+                          key={g.id}
+                          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontWeight: 400 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={assignments.has(g.id)}
+                            onChange={() => toggleAssignment(g.id)}
+                            disabled={busy}
+                          />
+                          <span>{g.name}</span>
+                          <code style={{ fontSize: '0.78rem', color: 'var(--fg-dim)' }}>{g.folder}</code>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {noAssignmentsWarn && (
+                    <div className="warn-banner" style={{ marginTop: '0.5rem' }}>
+                      Selective mode with zero assignments — this secret will inject into nothing. OK if intentional,
+                      but containers that read this name will see it as unset.
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+
+              <div className="row">
+                <label htmlFor="rotateValue">
+                  {modeChanged ? 'Value (required to apply accept-mode change)' : 'Rotate value (optional)'}
+                </label>
+                <input
+                  id="rotateValue"
+                  type="password"
+                  autoComplete="off"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  disabled={busy}
+                  placeholder={modeChanged ? 'paste current value' : 'leave blank to keep current value'}
+                />
+                <p className="dim" style={{ marginTop: '0.25rem' }}>
+                  Value is never read back over the API; rotating writes a new ciphertext under the same name.
+                </p>
+              </div>
+
+              <div className="actions" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
+                <button type="button" className="secondary" onClick={() => onClose(false)} disabled={busy}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={busy || (!modeChanged && !assignmentsChanged && !valueProvided)}
+                >
+                  {busy ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            </>
           )}
 
-          <div className="row">
-            <label htmlFor="rotateValue">
-              {modeChanged ? 'Value (required to apply mode change)' : 'Rotate value (optional)'}
-            </label>
-            <input
-              id="rotateValue"
-              type="password"
-              autoComplete="off"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              disabled={busy}
-              placeholder={modeChanged ? 'paste current value' : 'leave blank to keep current value'}
+          {saved && (
+            <StalenessBanner
+              staleSessions={staleSessions ?? []}
+              restartingId={restartingId}
+              busy={busy}
+              onRestart={restartSession}
+              onRestartAll={restartAll}
+              onDone={() => onClose(true)}
             />
-            <p className="dim" style={{ marginTop: '0.25rem' }}>
-              Value is never read back over the API; rotating writes a new ciphertext under the same name.
-            </p>
-          </div>
-
-          <div className="actions" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
-            <button type="button" className="secondary" onClick={() => onClose(false)} disabled={busy}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={save}
-              disabled={busy || (!modeChanged && !assignmentsChanged && !valueProvided)}
-            >
-              {busy ? 'Saving…' : 'Save changes'}
-            </button>
-          </div>
+          )}
         </div>
       </form>
     </dialog>
+  );
+}
+
+interface StalenessBannerProps {
+  staleSessions: StaleSession[];
+  restartingId: string | null;
+  busy: boolean;
+  onRestart: (sessionId: string) => void;
+  onRestartAll: () => void;
+  onDone: () => void;
+}
+
+/**
+ * Post-save banner. Lists running containers spawned BEFORE the secret's
+ * latest update — they won't see the change until next spawn. The operator
+ * can restart specific sessions or all at once. "Done" closes the editor
+ * regardless of whether any restart happened.
+ */
+function StalenessBanner({
+  staleSessions,
+  restartingId,
+  busy,
+  onRestart,
+  onRestartAll,
+  onDone,
+}: StalenessBannerProps) {
+  if (staleSessions.length === 0) {
+    return (
+      <div className="row">
+        <p>Saved. No outstanding stale containers.</p>
+        <div className="actions" style={{ marginTop: '1rem', justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onDone}>
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="row">
+      <div className="warn-banner" style={{ marginBottom: '1rem' }}>
+        <strong>
+          {staleSessions.length} running {staleSessions.length === 1 ? 'container was' : 'containers were'} spawned
+          before this change.
+        </strong>{' '}
+        Env vars are baked at spawn time, so the new value won't reach{' '}
+        {staleSessions.length === 1 ? 'it' : 'them'} until next session. Restart to apply.
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gap: '0.5rem',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          padding: '0.5rem 0.75rem',
+        }}
+      >
+        {staleSessions.map((s) => (
+          <div
+            key={s.sessionId}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div>
+                <strong>{s.agentGroupName}</strong>{' '}
+                <code style={{ fontSize: '0.78rem', color: 'var(--fg-dim)' }}>{s.agentGroupFolder}</code>
+              </div>
+              <div className="dim" style={{ fontSize: '0.85em' }} title={new Date(s.sessionCreatedAt).toLocaleString()}>
+                spawned {formatRelative(s.sessionCreatedAt)}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onRestart(s.sessionId)}
+              disabled={busy || restartingId === s.sessionId}
+            >
+              {restartingId === s.sessionId ? 'Restarting…' : 'Restart'}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="actions" style={{ marginTop: '1rem', justifyContent: 'space-between' }}>
+        <button type="button" className="secondary" onClick={onRestartAll} disabled={busy}>
+          {busy ? 'Restarting all…' : `Restart all ${staleSessions.length}`}
+        </button>
+        <button type="button" onClick={onDone} disabled={busy}>
+          Done
+        </button>
+      </div>
+    </div>
   );
 }
