@@ -752,6 +752,31 @@ export async function setSecretAssignments(secretId: string, agentGroupIds: stri
   return r.agentGroupIds;
 }
 
+/**
+ * Sessions whose container was spawned BEFORE this secret's last update AND
+ * whose agent group would still inject it. The post-save banner surfaces
+ * these so the operator can restart specific sessions to pick up the change
+ * — env vars are spawn-time-only, so a running container will never see a
+ * mid-life edit otherwise.
+ */
+export interface StaleSession {
+  sessionId: string;
+  agentGroupId: string;
+  agentGroupName: string;
+  agentGroupFolder: string;
+  sessionCreatedAt: string;
+  secretUpdatedAt: string;
+}
+
+export async function listStaleSessionsForSecret(secretId: string): Promise<StaleSession[]> {
+  const r = await request<{
+    secretId: string;
+    secretUpdatedAt: string;
+    staleSessions: StaleSession[];
+  }>(`/secrets/${encodeURIComponent(secretId)}/stale-sessions`);
+  return r.staleSessions;
+}
+
 // --- Approvals ---
 
 export type ApprovalKind = 'install_packages' | 'add_mcp_server' | 'access-new-credential' | string;

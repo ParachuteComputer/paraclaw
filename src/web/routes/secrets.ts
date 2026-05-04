@@ -16,6 +16,8 @@ import {
   type SecretRow,
   addAssignment,
   deleteSecret,
+  findStaleSessionsForSecret,
+  getSecretById,
   listAssignments,
   listSecrets,
   putSecret,
@@ -171,6 +173,26 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
       return true;
     }
     json(res, 200, { secret: toView(view) });
+    return true;
+  }
+
+  // Stale-sessions probe — match before the bare /:id DELETE so the more-specific
+  // path wins. Surface for the post-save banner: which running containers were
+  // spawned BEFORE this secret's last update AND would inject it on next spawn?
+  const staleMatch = pathname.match(/^\/api\/secrets\/([^/]+)\/stale-sessions$/);
+  if (staleMatch && method === 'GET') {
+    const id = decodeURIComponent(staleMatch[1]);
+    const meta = getSecretById(id);
+    if (!meta) {
+      error(res, 404, `secret not found: ${id}`);
+      return true;
+    }
+    const stale = findStaleSessionsForSecret(id);
+    json(res, 200, {
+      secretId: id,
+      secretUpdatedAt: meta.updated_at,
+      staleSessions: stale,
+    });
     return true;
   }
 
