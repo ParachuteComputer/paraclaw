@@ -10,6 +10,9 @@ Hard fork from NanoClaw v2. Paraclaw is now its own service: single Bun process 
 - **Native secrets.** Master key at `~/.parachute/claw/master.key` (32 bytes, mode 0600), AES-256-GCM with HKDF domain separation per subsystem, redacted error messages. Migration 015 drops the vestigial `host_pattern` column.
 - **Web UI** ships native pages for paraclaw primitives: `/secrets`, `/approvals`, `/sessions`, `/channels`. Wizard's credential-capture step removed (replaced by `/secrets`).
 - **Lifecycle.** Install via `parachute install paraclaw`; start runs `bun src/index.ts`. Module manifest at `.parachute/module.json`.
+- **fix(secrets):** per-secret mode radio for global secrets was a silent UI illusion (paraclaw#9-era migration moved mode to `agent_groups.secret_mode`). Globals now hide the radio with explainer; scoped secrets reframe the radio as `<group> accepts: [all in-scope | only assigned]`, surfacing the per-group nature of the setting.
+- **feat(secrets):** post-save staleness banner detects running containers spawned before the secret update + per-session `[Restart]` + `Restart all N`. Calls existing `closeSession`; next inbound message respawns fresh with new env. New `GET /api/secrets/:id/stale-sessions` (claw:read).
+- **feat(GroupDetail):** per-session `[Restart]` button on the Live status list + inline help on the spawn-time env model — operators can restart any running container without leaving the agent group page, for code/env/agent-provider changes too, not just secrets.
 
 ## [2.0.0] - 2026-04-22 (NanoClaw v2 — paraclaw's ancestor)
 

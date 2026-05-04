@@ -610,18 +610,32 @@ function SecretEditor({ secret, groups, onClose }: EditorProps) {
 
   const restartAll = async () => {
     if (!staleSessions || staleSessions.length === 0) return;
+    if (
+      !window.confirm(
+        `Restart ${staleSessions.length} agent session(s)? Each agent's current conversation will end and a fresh container will spawn on next inbound message.`,
+      )
+    ) {
+      return;
+    }
     setError(null);
     setBusy(true);
+    // Sequential — count is small (one running container per agent group),
+    // and serializing keeps the runtime from being hammered with concurrent
+    // killContainer calls in the rare large-fanout case. Track successes
+    // inside the loop so a mid-run throw on session N doesn't leave the
+    // banner showing 1..N-1 as still-stale (they were already closed).
+    const closed = new Set<string>();
     try {
-      // Sequential — count is small (one running container per agent group),
-      // and serializing keeps the runtime from being hammered with concurrent
-      // killContainer calls in the rare large-fanout case.
       for (const s of staleSessions) {
         await closeSession(s.sessionId);
+        closed.add(s.sessionId);
       }
       setStaleSessions([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setStaleSessions((prev) => (prev ?? []).filter((s) => !closed.has(s.sessionId)));
+      setError(
+        `Restarted ${closed.size}/${staleSessions.length} session(s); ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setBusy(false);
     }

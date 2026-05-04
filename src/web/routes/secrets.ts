@@ -1,11 +1,13 @@
 /**
  * /api/secrets — CRUD over paraclaw's local AES-256-GCM secret store.
  *
- * Every endpoint requires `claw:write` for mutation, `claw:read` for the
- * list-metadata view. Plaintext values are accepted on PUT and never
- * returned by any GET — listSecrets() is metadata-only by design. There is
- * no "show value" endpoint; if a human needs the value they should re-mint
- * (or back it out via the original platform's UI).
+ * Auth: `claw:admin` for mutation (POST/PUT/DELETE), `claw:read` for GET.
+ * The mutation gate is admin-not-write because a write-only token would
+ * otherwise be enough to swap any vault credential and silently MITM
+ * downstream API calls. Plaintext values are accepted on POST and never
+ * returned by any GET — `listSecrets()` is metadata-only by design. There
+ * is no "show value" endpoint; if a human needs the value they should
+ * re-mint (or back it out via the original platform's UI).
  */
 import http from 'node:http';
 
