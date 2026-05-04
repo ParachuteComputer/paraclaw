@@ -332,8 +332,6 @@ export function findStaleSessionsForSecret(secretId: string): StaleSession[] {
 /** Metadata-only single-row read by id. Returns undefined if missing. */
 export function getSecretById(id: string): SecretRow | undefined {
   return db()
-    .prepare<SecretRow>(
-      `SELECT id, name, kind, agent_group_id, created_at, updated_at FROM secrets WHERE id = ?`,
-    )
+    .prepare<SecretRow>(`SELECT id, name, kind, agent_group_id, created_at, updated_at FROM secrets WHERE id = ?`)
     .get(id);
 }

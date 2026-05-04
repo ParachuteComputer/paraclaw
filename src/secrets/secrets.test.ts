@@ -225,11 +225,7 @@ describe('findStaleSessionsForSecret', () => {
     ).run(sessionId, agentGroupId, containerStatus, createdAt);
   }
 
-  function bumpSecretUpdatedAt(
-    db: ReturnType<typeof initTestDb>,
-    secretId: string,
-    updatedAt: string,
-  ) {
+  function bumpSecretUpdatedAt(db: ReturnType<typeof initTestDb>, secretId: string, updatedAt: string) {
     db.prepare(`UPDATE secrets SET updated_at = ? WHERE id = ?`).run(updatedAt, secretId);
   }
 
