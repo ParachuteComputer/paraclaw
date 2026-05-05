@@ -9,6 +9,13 @@
  * (e.g. refresh tokens accidentally surfaced in a log) shouldn't yield
  * decryption power on the others. Bumping any `v<n>` suffix is a
  * per-domain key rotation.
+ *
+ * ⚠ The `paraclaw.` prefix is a cryptographic domain separator and is
+ * intentionally retained across the paraclaw → parachute-agent rename.
+ * The HKDF info string is mixed into key derivation; renaming it would
+ * derive a different key and render every existing OAuth ciphertext row
+ * (client secrets, access tokens, refresh tokens) undecryptable. The
+ * brand sweep is operator-visible only — these bytes are forever.
  */
 import { deriveKey, encryptSecret, decryptSecret } from '../secrets/crypto.js';
 import { loadOrCreateMasterKey } from '../secrets/master-key.js';

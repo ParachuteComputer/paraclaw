@@ -22,6 +22,12 @@ import { loadOrCreateMasterKey } from './master-key.js';
 
 // Domain tag for HKDF-derived secrets-store key. Bumping the version (v2…)
 // would force re-encryption of every row in this table. See crypto.ts.
+//
+// ⚠ The `paraclaw.` prefix is a cryptographic domain separator and must
+// stay frozen across the paraclaw → parachute-agent rename. Renaming it
+// changes the derived key and renders every existing ciphertext row
+// undecryptable. The brand-sweep documentation lives in commit messages
+// and CHANGELOG; the bytes here do not change.
 const SECRETS_INFO = 'paraclaw.secrets.v1';
 
 function secretsKey(): Buffer {
