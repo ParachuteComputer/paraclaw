@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.6] - 2026-05-05
+
+### Changed
+
+- **Wire-side `senderScope.'all'` renamed to `'unrestricted'` (paraclaw#94).** The wire vocabulary `'allowlist' | 'all'` shared the literal `'all'` with the DB-side `'all' | 'known'` — both meant "no sender filter", but the literal collision meant a grep-based rename of either side would silently break the translator in `src/web/routes/channels.ts` (and its duplicate in `src/mcp/tools/channels.ts`) without any compile error. Renamed wire-side `'all'` → `'unrestricted'` so the two unions are now literal-disjoint; the DB schema is untouched (no migration). Touchpoints: both translators, the MCP tool's `update-channel-wire` schema enum (now `['allowlist', 'unrestricted']`), `web/ui/src/lib/api.ts:SenderScope`, and the dropdown copy in `ChannelWireDetail.tsx` (now reads "unrestricted — anyone in the thread"). Tests pin the round-trip and reject the legacy literal on PATCH. Breaking change to the API/MCP wire vocabulary — pre-1.0, no operator-data risk.
+
 ## [0.1.2-rc.5] - 2026-05-05
 
 ### Changed

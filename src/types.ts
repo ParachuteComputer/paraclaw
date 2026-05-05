@@ -102,7 +102,10 @@ export interface UserDm {
 
 // DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type EngageMode = 'pattern' | 'mention' | 'mention-sticky';
-// DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
+// DB vocabulary. The DB-side `'all'` means "no sender filter"; the wire side
+// uses `'allowlist' | 'unrestricted'` (paraclaw#94 — kept the two unions
+// literal-disjoint so a grep-refactor can't conflate them through the
+// translator).
 export type SenderScope = 'all' | 'known';
 // DB vocabulary. See dbToApi* in src/web/routes/channels.ts for wire equivalents in web/ui/src/lib/api.ts.
 export type IgnoredMessagePolicy = 'drop' | 'accumulate';

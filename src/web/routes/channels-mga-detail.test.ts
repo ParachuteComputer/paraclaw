@@ -115,7 +115,10 @@ function makeRes(): MockRes & http.ServerResponse {
 }
 
 function seedFullWire(
-  override: { mgaId?: string; engage?: Partial<Pick<MessagingGroupAgent, 'engage_mode' | 'engage_pattern'>> } = {},
+  override: {
+    mgaId?: string;
+    engage?: Partial<Pick<MessagingGroupAgent, 'engage_mode' | 'engage_pattern' | 'sender_scope'>>;
+  } = {},
 ): { mga: MessagingGroupAgent } {
   const ag = seedAgentGroup({ id: 'ag_routing', folder: 'routing', name: 'Routing agent' });
   const mg = seedMg({ id: 'mg_routing' });
@@ -125,6 +128,7 @@ function seedFullWire(
     agent_group_id: ag.id,
     engage_mode: override.engage?.engage_mode ?? 'mention',
     engage_pattern: override.engage?.engage_pattern ?? null,
+    sender_scope: override.engage?.sender_scope ?? 'all',
   });
   return { mga };
 }
@@ -154,7 +158,7 @@ describe('handleChannelsRoute — GET /api/channels/mga/:id', () => {
       platformId: 'telegram:111111:222222',
       engageMode: 'mention',
       engagePattern: null,
-      senderScope: 'all',
+      senderScope: 'unrestricted',
       ignoredMessagePolicy: 'drop',
       priority: 0,
     });
@@ -344,6 +348,49 @@ describe('handleChannelsRoute — PATCH /api/channels/mga/:id', () => {
     expect(res.json()).toMatchObject({
       error: expect.stringMatching(/engagePattern '\.' is reserved as the 'all' sentinel/),
     });
+  });
+
+  it("round-trips senderScope='unrestricted' to DB sender_scope='all' and back (paraclaw#94)", async () => {
+    // The wire vocabulary used to share the literal 'all' with the DB side
+    // (DB: 'all'|'known'; wire: 'allowlist'|'all') — both meant "no filter"
+    // but a grep-refactor of one side would have silently broken the
+    // translator. Renamed wire-side 'all' → 'unrestricted' to keep the
+    // unions literal-disjoint. Pin the round-trip so a future contributor
+    // who collapses the two back to one literal sees this fail.
+    seedFullWire({ engage: { sender_scope: 'known' } });
+
+    const res = makeRes();
+    await handleChannelsRoute({
+      pathname: '/api/channels/mga/mga_routing',
+      method: 'PATCH',
+      req: makeReq({ senderScope: 'unrestricted' }),
+      res,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { wire: { senderScope: string } };
+    expect(body.wire.senderScope).toBe('unrestricted');
+    expect(getMessagingGroupAgent('mga_routing')!.sender_scope).toBe('all');
+  });
+
+  it("rejects the legacy wire literal senderScope='all' with 400 (paraclaw#94)", async () => {
+    // Belt-and-suspenders for the rename above: even if a client still
+    // sends the old wire vocabulary by mistake, validatePatchInput must
+    // reject it rather than silently mapping into the DB's 'all'. This is
+    // also the test that fails loudly if someone re-introduces 'all' to
+    // VALID_SENDER_SCOPES alongside 'unrestricted'.
+    seedFullWire();
+
+    const res = makeRes();
+    await handleChannelsRoute({
+      pathname: '/api/channels/mga/mga_routing',
+      method: 'PATCH',
+      req: makeReq({ senderScope: 'all' }),
+      res,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: expect.stringMatching(/invalid senderScope: all/) });
   });
 
   it('returns 404 when the wire does not exist', async () => {

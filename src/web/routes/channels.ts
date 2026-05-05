@@ -8,14 +8,20 @@
  * web/ui/src/lib/api.ts:ChannelWireView.
  *
  * Enum translation: night/arch's API contract uses `engageMode = mention |
- * pattern | all`, `senderScope = allowlist | all`, `ignoredMessagePolicy =
- * drop | silent`. The DB still stores the pre-rebuild values: engage_mode
- * = pattern | mention | mention-sticky (with engage_pattern='.' as the
- * sentinel for "match every message"), sender_scope = all | known,
- * ignored_message_policy = drop | accumulate. The translator collapses the
- * pattern + '.' sentinel into the API's `all` mode, lossy on the
- * mention-sticky distinction (rendered as `mention` to the UI). When the
- * DB schema migrates to the new shape, this translator becomes a no-op.
+ * pattern | all`, `senderScope = allowlist | unrestricted`,
+ * `ignoredMessagePolicy = drop | silent`. The DB still stores the
+ * pre-rebuild values: engage_mode = pattern | mention | mention-sticky (with
+ * engage_pattern='.' as the sentinel for "match every message"),
+ * sender_scope = all | known, ignored_message_policy = drop | accumulate.
+ * The translator collapses the pattern + '.' sentinel into the API's `all`
+ * mode, lossy on the mention-sticky distinction (rendered as `mention` to
+ * the UI). When the DB schema migrates to the new shape, this translator
+ * becomes a no-op.
+ *
+ * Wire-side senderScope used to be `'allowlist' | 'all'` (paraclaw#94 —
+ * the wire `'all'` collided literally with the DB `'all'`, so a grep-style
+ * rename of either side would have silently broken the translator). Renamed
+ * to `'unrestricted'` so the two unions are literal-disjoint.
  *
  * PATCH translates the inverse direction. DELETE is a straight pass-through
  * to deleteMessagingGroupAgent — the agent_destinations row created at wire
@@ -43,7 +49,7 @@ import type {
 } from '../../types.js';
 
 type ApiEngageMode = 'mention' | 'pattern' | 'all';
-type ApiSenderScope = 'allowlist' | 'all';
+type ApiSenderScope = 'allowlist' | 'unrestricted';
 type ApiIgnoredMessagePolicy = 'drop' | 'silent';
 
 interface ChannelWireView {
@@ -74,7 +80,7 @@ function dbToApiEngage(mode: DbEngageMode, pattern: string | null): ApiEngageMod
 }
 
 function dbToApiSenderScope(s: DbSenderScope): ApiSenderScope {
-  return s === 'known' ? 'allowlist' : 'all';
+  return s === 'known' ? 'allowlist' : 'unrestricted';
 }
 
 function dbToApiIgnoredPolicy(p: DbIgnoredMessagePolicy): ApiIgnoredMessagePolicy {
@@ -130,6 +136,8 @@ function apiToDbPatch(input: PatchInput, current: MessagingGroupAgent): DbPatch 
   }
 
   if (input.senderScope !== undefined) {
+    // wire 'unrestricted' → DB 'all'. validatePatchInput has already gated
+    // the union to the two known values, so the binary mapping is safe.
     out.sender_scope = input.senderScope === 'allowlist' ? 'known' : 'all';
   }
   if (input.ignoredMessagePolicy !== undefined) {
@@ -219,7 +227,7 @@ async function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
 }
 
 const VALID_ENGAGE_MODES: ApiEngageMode[] = ['mention', 'pattern', 'all'];
-const VALID_SENDER_SCOPES: ApiSenderScope[] = ['allowlist', 'all'];
+const VALID_SENDER_SCOPES: ApiSenderScope[] = ['allowlist', 'unrestricted'];
 const VALID_IGNORED_POLICIES: ApiIgnoredMessagePolicy[] = ['drop', 'silent'];
 
 function validatePatchInput(body: unknown): { ok: true; input: PatchInput } | { ok: false; reason: string } {
