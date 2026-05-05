@@ -17,6 +17,7 @@ import { routeInbound } from './router.js';
 import { migrateSessionsDir } from './session-manager.js';
 import { startWebServer } from './web/server.js';
 import { log, migrateLegacyLogFilenames } from './log.js';
+import { migrateLegacyAllowlistDir } from './modules/mount-security/index.js';
 import { runStartupBootstrap } from './startup-bootstrap.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -84,6 +85,7 @@ async function main(): Promise<void> {
   migrateGroupsToClaudeLocal();
   migrateSessionsDir();
   migrateLegacyLogFilenames(process.cwd());
+  migrateLegacyAllowlistDir();
 
   // 2. Container runtime
   ensureContainerRuntimeRunning();

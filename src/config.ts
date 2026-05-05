@@ -22,9 +22,16 @@ const HOME_DIR = process.env.HOME || os.homedir();
 // or Docker. Default: `~/.parachute/`. See docs/sandbox-isolation.md.
 export const PARACHUTE_DIR = process.env.PARACHUTE_HOME || path.join(HOME_DIR, '.parachute');
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'paraclaw', 'mount-allowlist.json');
-export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'paraclaw', 'sender-allowlist.json');
+// Mount security: allowlist stored OUTSIDE project root, never mounted into
+// containers. The directory was renamed paraclaw → parachute-agent in 0.1.0.
+// `migrateLegacyAllowlistDir` (src/modules/mount-security/index.ts) moves any
+// pre-existing files from the legacy dir on first 0.1.0 boot. The legacy
+// constants are exported for the migration to consult; nothing else should
+// read them. Drop in 0.2.0.
+export const ALLOWLIST_DIR = path.join(HOME_DIR, '.config', 'parachute-agent');
+export const LEGACY_ALLOWLIST_DIR = path.join(HOME_DIR, '.config', 'paraclaw');
+export const MOUNT_ALLOWLIST_PATH = path.join(ALLOWLIST_DIR, 'mount-allowlist.json');
+export const SENDER_ALLOWLIST_PATH = path.join(ALLOWLIST_DIR, 'sender-allowlist.json');
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');

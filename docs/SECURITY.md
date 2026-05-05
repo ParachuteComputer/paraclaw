@@ -23,10 +23,12 @@ This is the primary security boundary. Rather than relying on application-level 
 
 ### 2. Mount Security
 
-**External Allowlist** - Mount permissions stored at `~/.config/paraclaw/mount-allowlist.json`, which is:
+**External Allowlist** - Mount permissions stored at `~/.config/parachute-agent/mount-allowlist.json`, which is:
 - Outside project root
 - Never mounted into containers
 - Cannot be modified by agents
+
+(Pre-0.1.0 installs auto-migrate from `~/.config/paraclaw/` on first 0.1.0 boot. Compat read drops in 0.2.0.)
 
 **Default Blocked Patterns:**
 ```
