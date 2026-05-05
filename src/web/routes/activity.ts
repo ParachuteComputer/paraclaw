@@ -3,7 +3,7 @@
  * tool-invocation feed. Rows are merged into central agent_activity by the
  * delivery loop in src/delivery.ts; this route just paginates them out.
  *
- * Auth: claw:read. Listing tool calls leaks no plaintext (target is the
+ * Auth: agent:read. Listing tool calls leaks no plaintext (target is the
  * tool name, summary is null today), but it does expose what the agent has
  * been doing — operator-only by design.
  */

@@ -72,7 +72,7 @@ export const sessionTools: ToolDef[] = [
     name: 'list-sessions',
     description:
       'List sessions across the install. Optional filters: folder (one agent group only) and status (active|closed). Liveness uses the heartbeat mtime.',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,7 +90,7 @@ export const sessionTools: ToolDef[] = [
   {
     name: 'get-session',
     description: 'Look up a single session by id. Throws when the id is unknown.',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string', description: 'Session id.' } },
@@ -112,7 +112,7 @@ export const sessionTools: ToolDef[] = [
     name: 'close-session',
     description:
       "Close a session: mark the row status='closed' and call killContainer to actually stop the container. Idempotent — already-closed sessions return the current view without re-killing.",
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string', description: 'Session id.' } },

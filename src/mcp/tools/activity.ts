@@ -1,7 +1,7 @@
 /**
  * Activity-log MCP tool. Mirrors `/api/groups/:folder/activity` and
  * `/api/sessions/:id/activity` — read-only feed of tool invocations from
- * the central `agent_activity` table. Same auth scope (`claw:read`) and
+ * the central `agent_activity` table. Same auth scope (`agent:read`) and
  * the same default/max limits the HTTP route enforces.
  *
  * One of `agentGroupId` or `sessionId` is required; if both are given the
@@ -57,7 +57,7 @@ export const activityTools: ToolDef[] = [
     name: 'get-activity',
     description:
       'List recent agent tool invocations from agent_activity. Requires either agentGroupId or sessionId; if both, sessionId wins. Optional `since` (ISO 8601) returns only newer rows. Default limit 100, hard-capped at 500.',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: {
       type: 'object',
       properties: {

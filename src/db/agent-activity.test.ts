@@ -56,7 +56,7 @@ describe('agent_activity merge', () => {
     const newCursor = mergeActivityBatch(agentGroupId, sessionId, [
       row(1, 'tool_call', 'Read'),
       row(2, 'cmd_exec', 'Bash'),
-      row(3, 'mcp_call', 'mcp__paraclaw__schedule_task'),
+      row(3, 'mcp_call', 'mcp__parachute_agent__schedule_task'),
     ]);
     expect(newCursor).toBe(3);
     expect(getActivitySyncedSeq(sessionId)).toBe(3);

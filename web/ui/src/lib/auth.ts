@@ -11,9 +11,9 @@
  *   5. POST <hub>/oauth/token         — authorization_code, then refresh_token
  *                                       on 401 from /api/* before re-login.
  *
- * Scopes: `claw:admin claw:write vault:read vault:write`. `claw:admin` is
+ * Scopes: `agent:admin agent:write vault:read vault:write`. `agent:admin` is
  * required for /api/secrets writes + the setup wizard install-channel
- * step; `claw:write` is the bar for /api/approvals decisions and
+ * step; `agent:write` is the bar for /api/approvals decisions and
  * /api/sessions/:id/close. The vault scopes anticipate the vault tokens-API
  * REST endpoint (paraclaw#4 companion vault issue); today the server still
  * shells out, but minting the user JWT with vault:* now means no re-consent
@@ -46,7 +46,7 @@ interface FlowState {
   hub_origin: string;
 }
 
-const REQUESTED_SCOPES = "claw:admin claw:write vault:read vault:write";
+const REQUESTED_SCOPES = "agent:admin agent:write vault:read vault:write";
 const DISCOVERY_KEY = "paraclaw.discovery";
 const FLOW_KEY = "paraclaw.flow";
 

@@ -4,11 +4,11 @@
  * consume the same registry, with scope-filtering and "disabled" gating
  * applied at advertise time and re-checked at call time.
  *
- * Why factory-style scope context: stdio defaults to `claw:admin` (the
+ * Why factory-style scope context: stdio defaults to `agent:admin` (the
  * caller is the operator on the same machine, ambient trust); HTTP derives
- * the strongest claw scope from the JWT's grant. Both paths flow into a
+ * the strongest agent scope from the JWT's grant. Both paths flow into a
  * `ToolHandlerContext` so individual tool handlers can refuse mutating ops
- * when the caller only holds `claw:read`.
+ * when the caller only holds `agent:read`.
  */
 import type { ClawScope } from '../web/auth.js';
 

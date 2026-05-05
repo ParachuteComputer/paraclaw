@@ -4,7 +4,7 @@
  * /path/to/paraclaw/src/mcp/stdio.ts`.
  *
  * Stdio is a same-machine ambient-trust surface — the operator already has
- * filesystem access, so we default to `claw:admin`. No JWT, no per-call
+ * filesystem access, so we default to `agent:admin`. No JWT, no per-call
  * auth.
  *
  * Stdout discipline: paraclaw's `log.ts` writes info-level messages to
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   runMigrations(db);
 
   const { server } = buildMcpServer({
-    effectiveScope: 'claw:admin',
+    effectiveScope: 'agent:admin',
     callerSubject: STDIO_USER_ID,
   });
 

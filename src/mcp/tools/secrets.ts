@@ -58,7 +58,7 @@ export const secretTools: ToolDef[] = [
     name: 'list-secrets',
     description:
       'List secret metadata. NEVER returns plaintext values. Optional `agentGroupId` filter: empty string = global only; non-empty = global + that scope.',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: {
       type: 'object',
       properties: {
@@ -80,7 +80,7 @@ export const secretTools: ToolDef[] = [
     name: 'put-secret',
     description:
       'Insert or update a secret by (name, agentGroupId). Returns the row metadata — never the plaintext. The value is AES-256-GCM encrypted in-process before landing in the DB.',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: {
@@ -122,7 +122,7 @@ export const secretTools: ToolDef[] = [
   {
     name: 'delete-secret',
     description: 'Delete a secret by id. Returns { deleted: true } on success, throws on unknown id.',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string' } },
@@ -141,7 +141,7 @@ export const secretTools: ToolDef[] = [
     name: 'assign-secret',
     description:
       "Replace the agent-group assignment list for a 'selective' secret. Empty array revokes everything. Atomic; throws on unknown secret id. Returns the new assignment list.",
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: {

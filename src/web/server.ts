@@ -200,7 +200,7 @@ async function handleApi(
 
   if (pathname === '/api/health' && method === 'GET') {
     json(res, 200, {
-      service: 'paraclaw-web-server',
+      service: 'parachute-agent-web-server',
       version: SERVICE_VERSION,
       data_dir: DATA_DIR,
       groups_dir: GROUPS_DIR,
@@ -280,7 +280,7 @@ async function handleApi(
   }
 
   // Token validation — pre-install, no DB writes, the wizard hits this from
-  // /channels/new before persisting anything. claw:write is enough; the
+  // /channels/new before persisting anything. agent:write is enough; the
   // /api/channels/* CRUD block below is admin-gated and would over-reject.
   //
   // We remap a validator status of 401 ("bot token rejected by upstream")
@@ -452,7 +452,7 @@ async function handleApi(
 
   if (pathname === '/api/vaults' || pathname.startsWith('/api/vaults/')) {
     // /tokens and /tokens/:id forward to the vault — admin-gated. Refresh
-    // and detail views are claw:read. Refer to § API surface in
+    // and detail views are agent:read. Refer to § API surface in
     // docs/design/2026-04-29-vault-management-ui.md for the full table.
     const isTokenPath = /\/tokens(\/[^/]+)?$/.test(pathname);
     const required: ClawScope = isTokenPath ? SCOPE_CLAW_ADMIN : SCOPE_CLAW_READ;
@@ -599,8 +599,8 @@ async function handleApi(
     const sub = groupRoute[2] ?? '';
 
     // Reads at the group root + the agent-provider subroute go through
-    // claw:read; writes default to claw:write; agent-provider writes
-    // (paraclaw#86) bump to claw:admin since they store API keys.
+    // agent:read; writes default to agent:write; agent-provider writes
+    // (paraclaw#86) bump to agent:admin since they store API keys.
     const isAgentProviderSub = sub === '/agent-provider';
     const requiredScope: ClawScope =
       method === 'GET' && (sub === '' || isAgentProviderSub)
@@ -908,7 +908,7 @@ export function startWebServer(): http.Server {
         await handleApi(req, res, url, dispatchPath);
         return;
       }
-      // MCP transport — same auth seam as /api/* routes (hub JWT, claw:read
+      // MCP transport — same auth seam as /api/* routes (hub JWT, agent:read
       // minimum). Mount-aware: hits `/mcp` whether the install lives at
       // origin root or behind PARACLAW_WEB_MOUNT.
       if (dispatchPath === '/mcp' || dispatchPath.startsWith('/mcp/')) {
@@ -967,12 +967,12 @@ export function startWebServer(): http.Server {
       uiDist: fs.existsSync(UI_DIST) ? UI_DIST : null,
       mount: MOUNT || null,
     });
-    // Self-register so `parachute status` + `parachute expose` see paraclaw.
+    // Self-register so `parachute status` + `parachute expose` see the agent.
     // Best-effort: a manifest write failure (perms / disk / race) doesn't
     // block the server from doing its job locally.
     try {
       upsertService({
-        name: 'claw',
+        name: 'agent',
         port: PORT,
         paths: ['/agent'],
         health: '/api/health',

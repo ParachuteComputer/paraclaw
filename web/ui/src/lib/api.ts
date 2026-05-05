@@ -81,7 +81,7 @@ async function doFetch(
 }
 
 // Hub's scope-validation 403 (cli#71) responds with a body like
-// `{"error":"This endpoint requires the claw:admin scope"}`; the vault
+// `{"error":"This endpoint requires the agent:admin scope"}`; the vault
 // uses single-quoted scope names: `requires the 'vault:work:admin' scope
 // (or 'vault:work:admin')`. We match either quoting so paraclaw#56's
 // vault path doesn't slip past the gate. Reads via .clone() so
@@ -129,7 +129,7 @@ export class HttpError extends Error {
  * re-auth (401-after-refresh-failure or 403 scope-mismatch). Use it on
  * endpoints that gate on a per-resource narrow scope the broad
  * REQUESTED_SCOPES set doesn't carry — e.g. vault token mgmt requires
- * `vault:<name>:admin` on top of `claw:admin`. Without this hint the
+ * `vault:<name>:admin` on top of `agent:admin`. Without this hint the
  * re-auth would loop with the same broad-only JWT (paraclaw#56).
  */
 export interface RequestInitWithAuth extends RequestInit {
@@ -160,7 +160,7 @@ export async function request<T>(path: string, init?: RequestInitWithAuth): Prom
   // 403 with a scope-mismatch body means the cached token was minted before
   // a newly-required scope was added (paraclaw#33). Without this, existing
   // users were stuck behind a manual `localStorage.clear()` after the Phase 1
-  // wizard bumped REQUESTED_SCOPES to include claw:admin. Refresh won't help
+  // wizard bumped REQUESTED_SCOPES to include agent:admin. Refresh won't help
   // (refresh tokens carry the original scope set), so drop straight to
   // re-auth — beginLogin() will request the new scope set, plus any
   // narrow per-resource scope the caller threaded via authExtraScopes
@@ -274,7 +274,7 @@ export interface VaultDetail {
   attachedGroups: VaultAttachedGroup[];
 }
 
-/** GET /api/vaults/:name — listing entry + attached-group derivation. claw:read. */
+/** GET /api/vaults/:name — listing entry + attached-group derivation. agent:read. */
 export async function getVaultDetail(name: string): Promise<VaultDetail> {
   return request<VaultDetail>(`/vaults/${encodeURIComponent(name)}`);
 }
@@ -398,7 +398,7 @@ export interface VaultToken {
 
 /**
  * GET /api/vaults/:name/tokens — listing + attached-to merge. paraclaw-side
- * scope is `claw:admin`; vault-side `vault:<name>:admin` is enforced by the
+ * scope is `agent:admin`; vault-side `vault:<name>:admin` is enforced by the
  * vault itself and a 401/403 from the vault is mirrored verbatim. Callers
  * use `HttpError.status` to detect the vault-narrow-scope-missing case and
  * trigger a consent prompt (Phase 3 detail page only).

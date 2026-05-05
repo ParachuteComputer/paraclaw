@@ -2,8 +2,8 @@
  * Hub-JWT validation + scope-check tests. Mirrors vault's hub-jwt.test.ts
  * shape but uses vitest + node:http (paraclaw's suite is vitest, not
  * bun:test). A fake JWKS endpoint signs locally with a known RSA keypair;
- * cases cover the spec failure modes plus paraclaw's claw-scope inheritance
- * + vault:admin catch-all.
+ * cases cover the spec failure modes plus paraclaw's agent-scope inheritance
+ * + vault:admin catch-all + legacy `claw:*` compat normalization.
  */
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -106,7 +106,7 @@ async function signJwt(kp: Keypair, opts: SignOpts): Promise<string> {
   const iat = Math.floor(Date.now() / 1000);
   const exp = opts.expiresAtSeconds ?? iat + (opts.ttlSeconds ?? 60);
   return await new SignJWT({
-    scope: opts.scope ?? 'claw:read',
+    scope: opts.scope ?? 'agent:read',
     client_id: opts.clientId ?? 'test-client',
   })
     .setProtectedHeader({ alg: 'RS256', kid: opts.kid ?? kp.kid })
@@ -150,10 +150,10 @@ afterEach(() => {
 
 describe('validateHubJwt', () => {
   it('happy path — surfaces sub + scopes + clientId', async () => {
-    const token = await signJwt(kp, { iss: fixture.origin, scope: 'claw:read claw:write' });
+    const token = await signJwt(kp, { iss: fixture.origin, scope: 'agent:read agent:write' });
     const claims = await validateHubJwt(token);
     expect(claims.sub).toBe('user-1');
-    expect(claims.scopes).toEqual(['claw:read', 'claw:write']);
+    expect(claims.scopes).toEqual(['agent:read', 'agent:write']);
     expect(claims.clientId).toBe('test-client');
   });
 
@@ -232,7 +232,7 @@ describe('hasScope', () => {
     expect(hasScope([SCOPE_CLAW_READ], SCOPE_CLAW_READ)).toBe(true);
   });
 
-  it('claw:admin ⊇ claw:write ⊇ claw:read', () => {
+  it('agent:admin ⊇ agent:write ⊇ agent:read', () => {
     expect(hasScope([SCOPE_CLAW_ADMIN], SCOPE_CLAW_READ)).toBe(true);
     expect(hasScope([SCOPE_CLAW_ADMIN], SCOPE_CLAW_WRITE)).toBe(true);
     expect(hasScope([SCOPE_CLAW_WRITE], SCOPE_CLAW_READ)).toBe(true);
@@ -240,16 +240,24 @@ describe('hasScope', () => {
     expect(hasScope([SCOPE_CLAW_WRITE], SCOPE_CLAW_ADMIN)).toBe(false);
   });
 
-  it('vault:admin (operator-token catch-all) satisfies every claw scope', () => {
+  it('vault:admin (operator-token catch-all) satisfies every agent scope', () => {
     expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_CLAW_READ)).toBe(true);
     expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_CLAW_WRITE)).toBe(true);
     expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_CLAW_ADMIN)).toBe(true);
   });
 
-  it('hub:admin does NOT satisfy claw scopes', () => {
+  it('hub:admin does NOT satisfy agent scopes', () => {
     expect(hasScope(['hub:admin'], SCOPE_CLAW_READ)).toBe(false);
     expect(hasScope(['hub:admin'], SCOPE_CLAW_WRITE)).toBe(false);
     expect(hasScope(['hub:admin'], SCOPE_CLAW_ADMIN)).toBe(false);
+  });
+
+  it('legacy `claw:*` grants are normalized to `agent:*` (pre-0.1.0 compat)', () => {
+    expect(hasScope(['claw:read'], SCOPE_CLAW_READ)).toBe(true);
+    expect(hasScope(['claw:write'], SCOPE_CLAW_READ)).toBe(true);
+    expect(hasScope(['claw:admin'], SCOPE_CLAW_WRITE)).toBe(true);
+    expect(hasScope(['claw:admin'], SCOPE_CLAW_ADMIN)).toBe(true);
+    expect(hasScope(['claw:read'], SCOPE_CLAW_WRITE)).toBe(false);
   });
 
   it('empty scopes never satisfy', () => {
@@ -259,10 +267,10 @@ describe('hasScope', () => {
 
 describe('authenticate', () => {
   it('returns ok with claims for a valid Bearer + sufficient scope', async () => {
-    const token = await signJwt(kp, { iss: fixture.origin, scope: 'claw:write' });
+    const token = await signJwt(kp, { iss: fixture.origin, scope: 'agent:write' });
     const r = await authenticate(`Bearer ${token}`, SCOPE_CLAW_READ);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.claims.scopes).toContain('claw:write');
+    if (r.ok) expect(r.claims.scopes).toContain('agent:write');
   });
 
   it('401 on missing header', async () => {
@@ -286,18 +294,18 @@ describe('authenticate', () => {
   });
 
   it('403 on insufficient scope — surfaces error_type + required + granted', async () => {
-    const token = await signJwt(kp, { iss: fixture.origin, scope: 'claw:read' });
+    const token = await signJwt(kp, { iss: fixture.origin, scope: 'agent:read' });
     const r = await authenticate(`Bearer ${token}`, SCOPE_CLAW_WRITE);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(403);
       expect(r.errorType).toBe('insufficient_scope');
       expect(r.requiredScope).toBe(SCOPE_CLAW_WRITE);
-      expect(r.grantedScopes).toEqual(['claw:read']);
+      expect(r.grantedScopes).toEqual(['agent:read']);
     }
   });
 
-  it('operator-token shape (vault:admin scope) passes any claw gate', async () => {
+  it('operator-token shape (vault:admin scope) passes any agent gate', async () => {
     const token = await signJwt(kp, {
       iss: fixture.origin,
       scope: 'hub:admin vault:admin scribe:admin channel:send',

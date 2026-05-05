@@ -71,7 +71,7 @@ export function VaultsList() {
             if (r.vault.name !== name) return r;
             return {
               ...r,
-              // getVaultDetail only requires `claw:read`, which the session
+              // getVaultDetail only requires `agent:read`, which the session
               // already has if the operator hit /vaults at all. A 401/403
               // here would be re-auth'd by `request<T>` before throwing,
               // so a rejected promise is a 5xx / network blip — not an

@@ -15,23 +15,42 @@
  * (matching vault's choice). Tailnet-served paraclaw must see the hub's
  * tailnet origin or `iss` mismatch rejects every JWT.
  *
- * Scope vocabulary introduced here: `claw:read` / `claw:write` / `claw:admin`
- * with `admin ⊇ write ⊇ read` inheritance per
+ * Scope vocabulary: `agent:read` / `agent:write` / `agent:admin` with
+ * `admin ⊇ write ⊇ read` inheritance per
  * `parachute-patterns/patterns/oauth-scopes.md`. `vault:admin` is the
- * operator-token catch-all and satisfies any claw scope check (operator
+ * operator-token catch-all and satisfies any agent scope check (operator
  * token is what local CLI/scripts present; it carries `vault:admin` per
  * `parachute-hub/src/operator-token.ts`).
+ *
+ * Pre-0.1.0 compat: hub-issued tokens may still carry `claw:*` scopes for
+ * one cycle. `hasScope` normalizes legacy `claw:*` to `agent:*` so callers
+ * with grandfathered grants keep working. Drop the compat normalization in
+ * 0.2.0 (tracked as a follow-up at PR open time).
  */
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 
 const DEFAULT_HUB_LOOPBACK = 'http://127.0.0.1:1939';
 
-export const SCOPE_CLAW_READ = 'claw:read' as const;
-export const SCOPE_CLAW_WRITE = 'claw:write' as const;
-export const SCOPE_CLAW_ADMIN = 'claw:admin' as const;
+export const SCOPE_CLAW_READ = 'agent:read' as const;
+export const SCOPE_CLAW_WRITE = 'agent:write' as const;
+export const SCOPE_CLAW_ADMIN = 'agent:admin' as const;
 export const SCOPE_VAULT_ADMIN = 'vault:admin' as const;
 
 export type ClawScope = typeof SCOPE_CLAW_READ | typeof SCOPE_CLAW_WRITE | typeof SCOPE_CLAW_ADMIN;
+
+/**
+ * Pre-0.1.0 compat: map legacy `claw:*` scope grants to their `agent:*`
+ * equivalents so hub-issued tokens minted before the rename keep working.
+ * Drop in 0.2.0.
+ */
+const LEGACY_SCOPE_MAP: Record<string, string> = {
+  'claw:read': SCOPE_CLAW_READ,
+  'claw:write': SCOPE_CLAW_WRITE,
+  'claw:admin': SCOPE_CLAW_ADMIN,
+};
+function normalizeGranted(s: string): string {
+  return LEGACY_SCOPE_MAP[s] ?? s;
+}
 
 export function getHubOrigin(): string {
   const override = process.env.PARACLAW_HUB_ORIGIN?.replace(/\/$/, '');
@@ -117,19 +136,22 @@ export function parseScopes(raw: string | null | undefined): string[] {
  * Does `granted` satisfy `required`?
  *
  * Inheritance rules:
- *   - `claw:admin` ⊇ `claw:write` ⊇ `claw:read`
- *   - `vault:admin` (operator-token catch-all) satisfies every `claw:*`
+ *   - `agent:admin` ⊇ `agent:write` ⊇ `agent:read`
+ *   - `vault:admin` (operator-token catch-all) satisfies every `agent:*`
  *   - `hub:admin` does NOT — narrow boundary; admins of the hub identity
  *     surface aren't implicitly admins of every resource server.
+ *   - Legacy `claw:*` grants are normalized to `agent:*` (pre-0.1.0 compat;
+ *     drop in 0.2.0).
  */
 export function hasScope(granted: string[], required: ClawScope): boolean {
-  if (granted.includes(required)) return true;
-  if (granted.includes(SCOPE_VAULT_ADMIN)) return true;
+  const normalized = granted.map(normalizeGranted);
+  if (normalized.includes(required)) return true;
+  if (normalized.includes(SCOPE_VAULT_ADMIN)) return true;
   if (required === SCOPE_CLAW_READ) {
-    return granted.includes(SCOPE_CLAW_WRITE) || granted.includes(SCOPE_CLAW_ADMIN);
+    return normalized.includes(SCOPE_CLAW_WRITE) || normalized.includes(SCOPE_CLAW_ADMIN);
   }
   if (required === SCOPE_CLAW_WRITE) {
-    return granted.includes(SCOPE_CLAW_ADMIN);
+    return normalized.includes(SCOPE_CLAW_ADMIN);
   }
   return false;
 }
