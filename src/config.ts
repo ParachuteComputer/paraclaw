@@ -50,13 +50,18 @@ export const LEGACY_PARACLAW_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
 export const LEGACY_PARACLAW_DB_PATH = path.join(LEGACY_PARACLAW_DB_DIR, 'paraclaw.db');
 
 // Per-checkout image tag so two installs on the same host don't share
-// `paraclaw-agent:latest` and clobber each other on rebuild.
+// `parachute-agent-image:latest` and clobber each other on rebuild.
 export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
 // Install slug — stamped onto every spawned container via --label so
 // cleanupOrphans only reaps containers from this install, not peers.
 export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
-export const CONTAINER_INSTALL_LABEL = `paraclaw-install=${INSTALL_SLUG}`;
+export const CONTAINER_INSTALL_LABEL = `parachute-agent-install=${INSTALL_SLUG}`;
+// Pre-0.1.0 label, before the paraclaw → parachute-agent rename. Kept in the
+// reap query for one cycle so containers spawned by an older host process get
+// cleaned up when this one starts. Drop in 0.2.0 (tracked as a follow-up
+// issue at PR open time).
+export const LEGACY_PARACLAW_INSTALL_LABEL = `paraclaw-install=${INSTALL_SLUG}`;
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10); // 10MB default
 export const MAX_MESSAGES_PER_PROMPT = Math.max(1, parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10);

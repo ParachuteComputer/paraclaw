@@ -24,7 +24,7 @@ import {
   ensureContainerRuntimeRunning,
   cleanupOrphans,
 } from './container-runtime.js';
-import { CONTAINER_INSTALL_LABEL } from './config.js';
+import { CONTAINER_INSTALL_LABEL, LEGACY_PARACLAW_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
 
 beforeEach(() => {
@@ -85,45 +85,53 @@ describe('ensureContainerRuntimeRunning', () => {
 // --- cleanupOrphans ---
 
 describe('cleanupOrphans', () => {
-  it('filters ps by the install label so peers are not reaped', () => {
-    mockExecSync.mockReturnValueOnce('');
-
-    cleanupOrphans();
-
-    expect(mockExecSync).toHaveBeenCalledWith(
-      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}'`,
-      expect.any(Object),
-    );
-  });
-
-  it('stops orphaned paraclaw containers', () => {
-    // docker ps returns container names, one per line
-    mockExecSync.mockReturnValueOnce('paraclaw-group1-111\nparaclaw-group2-222\n');
-    // stop calls succeed
+  it('filters ps by both the new and legacy install labels so peers are not reaped', () => {
     mockExecSync.mockReturnValue('');
 
     cleanupOrphans();
 
-    // ps + 2 stop calls
-    expect(mockExecSync).toHaveBeenCalledTimes(3);
-    expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} stop -t 1 paraclaw-group1-111`, {
+    expect(mockExecSync).toHaveBeenNthCalledWith(
+      1,
+      `${CONTAINER_RUNTIME_BIN} ps --filter label=${CONTAINER_INSTALL_LABEL} --format '{{.Names}}'`,
+      expect.any(Object),
+    );
+    expect(mockExecSync).toHaveBeenNthCalledWith(
+      2,
+      `${CONTAINER_RUNTIME_BIN} ps --filter label=${LEGACY_PARACLAW_INSTALL_LABEL} --format '{{.Names}}'`,
+      expect.any(Object),
+    );
+  });
+
+  it('stops orphaned containers from both labels and de-dupes', () => {
+    // First ps (new label) returns one container; second ps (legacy label) returns two —
+    // one duplicates the first, simulating a container that carries both labels during
+    // upgrade.
+    mockExecSync.mockReturnValueOnce('parachute-agent-group1-111\n');
+    mockExecSync.mockReturnValueOnce('parachute-agent-group1-111\nparaclaw-group2-222\n');
+    mockExecSync.mockReturnValue('');
+
+    cleanupOrphans();
+
+    // 2 ps + 2 unique stop calls
+    expect(mockExecSync).toHaveBeenCalledTimes(4);
+    expect(mockExecSync).toHaveBeenNthCalledWith(3, `${CONTAINER_RUNTIME_BIN} stop -t 1 parachute-agent-group1-111`, {
       stdio: 'pipe',
     });
-    expect(mockExecSync).toHaveBeenNthCalledWith(3, `${CONTAINER_RUNTIME_BIN} stop -t 1 paraclaw-group2-222`, {
+    expect(mockExecSync).toHaveBeenNthCalledWith(4, `${CONTAINER_RUNTIME_BIN} stop -t 1 paraclaw-group2-222`, {
       stdio: 'pipe',
     });
     expect(log.info).toHaveBeenCalledWith('Stopped orphaned containers', {
       count: 2,
-      names: ['paraclaw-group1-111', 'paraclaw-group2-222'],
+      names: ['parachute-agent-group1-111', 'paraclaw-group2-222'],
     });
   });
 
-  it('does nothing when no orphans exist', () => {
-    mockExecSync.mockReturnValueOnce('');
+  it('does nothing when no orphans exist on either label', () => {
+    mockExecSync.mockReturnValue('');
 
     cleanupOrphans();
 
-    expect(mockExecSync).toHaveBeenCalledTimes(1);
+    expect(mockExecSync).toHaveBeenCalledTimes(2); // both label queries
     expect(log.info).not.toHaveBeenCalled();
   });
 
@@ -141,7 +149,8 @@ describe('cleanupOrphans', () => {
   });
 
   it('continues stopping remaining containers when one stop fails', () => {
-    mockExecSync.mockReturnValueOnce('paraclaw-a-1\nparaclaw-b-2\n');
+    mockExecSync.mockReturnValueOnce('parachute-agent-a-1\nparachute-agent-b-2\n');
+    mockExecSync.mockReturnValueOnce(''); // legacy label query empty
     // First stop fails
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
@@ -151,10 +160,10 @@ describe('cleanupOrphans', () => {
 
     cleanupOrphans(); // should not throw
 
-    expect(mockExecSync).toHaveBeenCalledTimes(3);
+    expect(mockExecSync).toHaveBeenCalledTimes(4);
     expect(log.info).toHaveBeenCalledWith('Stopped orphaned containers', {
       count: 2,
-      names: ['paraclaw-a-1', 'paraclaw-b-2'],
+      names: ['parachute-agent-a-1', 'parachute-agent-b-2'],
     });
   });
 });

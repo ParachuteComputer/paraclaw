@@ -48,11 +48,7 @@ export function migrateCentralDbLocation(
 
   // Prefer the paraclaw-era legacy path: it's the more recent state for
   // anyone upgrading through 0.0.x → 0.1.0.
-  const source = fs.existsSync(paraclawLegacy)
-    ? paraclawLegacy
-    : fs.existsSync(legacy)
-      ? legacy
-      : null;
+  const source = fs.existsSync(paraclawLegacy) ? paraclawLegacy : fs.existsSync(legacy) ? legacy : null;
   if (!source) return; // fresh install, nothing to migrate
 
   fs.mkdirSync(path.dirname(current), { recursive: true, mode: 0o700 });
