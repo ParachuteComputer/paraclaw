@@ -72,9 +72,12 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'mcp-tools', 'index.ts');
 
-  // Build MCP servers config: paraclaw built-in + any from container.json
+  // Build MCP servers config: parachute-agent built-in + any from container.json.
+  // Tools advertise as `mcp__parachute_agent__<verb>-<noun>` (the SDK's name
+  // mangle replaces non-alphanum with underscore). Renamed from `paraclaw` in
+  // 0.1.0; existing sessions need a restart to pick up the new prefix.
   const mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {
-    paraclaw: {
+    'parachute-agent': {
       command: 'bun',
       args: ['run', mcpServerPath],
       env: {},

@@ -41,7 +41,7 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitWorktree',
 ];
 
-// Tool allowlist for Paraclaw agent containers
+// Tool allowlist for parachute-agent containers
 const TOOL_ALLOWLIST = [
   'Bash',
   'Read',
