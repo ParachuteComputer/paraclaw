@@ -12,7 +12,8 @@ import { log } from './log.js';
 //   - 0.1.0+:    `parachute-agent-image-<8-hex-slug>:latest`
 //   - pre-0.1.0: `paraclaw-agent-<8-hex-slug>:latest` (kept for one cycle of
 //                back-compat so an operator who upgrades into a 0.1.x checkout
-//                without rebuilding the image still gets a working spawn).
+//                without rebuilding the image still gets a working spawn;
+//                drop in 0.2.0 — same lifecycle as LEGACY_PARACLAW_INSTALL_LABEL).
 // Both prefixes are stable + content-equivalent — Dockerfile baseline
 // matches across slugs — so a `docker tag` of any peer is safe.
 const PEER_IMAGE_PATTERN = /^(parachute-agent-image|paraclaw-agent)-[0-9a-f]{8}:latest$/;
