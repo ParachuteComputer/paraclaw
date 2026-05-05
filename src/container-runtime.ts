@@ -72,10 +72,10 @@ export function ensureContainerRuntimeRunning(): void {
  * spawning sessions.
  *
  * INSTALL_SLUG = sha1(process.cwd())[:8], so an operator dir-rename
- * (paraclaw#114: `mv paraclaw parachute-agent` was the trigger) flips the
- * slug. The previously-built image carries the OLD slug; the daemon goes
- * to spawn against the NEW slug; `docker run` returns code=125 ("image
- * not found") and every container spawn crashloops silently.
+ * (paraclaw#114) flips the slug. The previously-built image carries the
+ * OLD slug; the daemon goes to spawn against the NEW slug; `docker run`
+ * returns code=125 ("image not found") and every container spawn
+ * crashloops silently.
  *
  * Resolution path, ordered fail-fast → cheap → loud:
  *   1. Expected tag present → no-op.
