@@ -448,7 +448,7 @@ export function GroupDetail() {
             <p className="muted">
               Parachute Agent doesn't impose a vault-note layout — the agent decides how to use vault access. (See{' '}
               <a
-                href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
+                href="https://github.com/ParachuteComputer/parachute-agent/blob/main/docs/parachute-integration.md"
                 target="_blank"
                 rel="noreferrer"
               >
