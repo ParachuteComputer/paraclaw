@@ -18,7 +18,7 @@ function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
 }
 
-// Deferred SDK builtins that either sidestep paraclaw's own scheduling or
+// Deferred SDK builtins that either sidestep parachute-agent's own scheduling or
 // don't fit our async message-passing model (they're designed for Claude
 // Code's interactive UI and would hang here).
 //

@@ -329,7 +329,7 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
       <MintSection
         name={name}
-        defaultLabel={`claw-${name}`}
+        defaultLabel={`agent-${name}`}
         onMinted={onMinted}
         onError={(text) => setFlash({ kind: 'error', text })}
       />
@@ -617,7 +617,7 @@ function MintSection({ name, defaultLabel, onMinted, onError }: MintSectionProps
             onChange={(e) => setLabel(e.target.value)}
             disabled={busy}
             maxLength={64}
-            placeholder="claw-research"
+            placeholder="agent-research"
             required
           />
           <p className="dim">Identifier for revocation — alphanumeric + dashes, 64 chars max.</p>

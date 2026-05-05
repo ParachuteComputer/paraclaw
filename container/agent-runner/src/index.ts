@@ -1,5 +1,5 @@
 /**
- * Paraclaw Agent Runner
+ * parachute-agent runner
  *
  * Runs inside a container. All IO goes through the session DB.
  * No stdin, no stdout markers, no IPC files.

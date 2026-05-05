@@ -111,7 +111,7 @@ export function createParachuteAgentGroup(opts: CreateAgentGroupOpts): CreateAge
       vaultBaseUrl: opts.vault.vaultBaseUrl ?? 'http://127.0.0.1:1940/vault/default',
       vaultToken: opts.vault.token,
       scope: opts.vault.scope,
-      tokenLabel: opts.vault.tokenLabel ?? `claw-${group.folder}`,
+      tokenLabel: opts.vault.tokenLabel ?? `agent-${group.folder}`,
       mcpName: opts.vault.mcpName,
       instructions: opts.vault.instructions,
     });
