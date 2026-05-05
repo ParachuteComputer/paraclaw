@@ -2,7 +2,7 @@
  * Runner config — reads /workspace/agent/container.json at startup.
  *
  * This file is mounted read-only inside the container. The host writes it;
- * the runner only reads. All Paraclaw-specific configuration lives here
+ * the runner only reads. All parachute-agent-specific configuration lives here
  * instead of environment variables.
  */
 import fs from 'fs';

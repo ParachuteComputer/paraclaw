@@ -14,7 +14,7 @@ export const oauthTools: ToolDef[] = [
     name: 'start-oauth',
     description:
       'Kick off an OAuth flow against an external provider (Google, Slack, …). Returns the authorization URL the operator should visit. STUB — disabled until /api/integrations/start lands.',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     disabled: { reason: PENDING },
     inputSchema: {
       type: 'object',
@@ -33,7 +33,7 @@ export const oauthTools: ToolDef[] = [
     name: 'revoke-integration',
     description:
       'Revoke an existing integration (deletes stored OAuth tokens, removes the MCP entry). STUB — disabled until /api/integrations/:id lands.',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     disabled: { reason: PENDING },
     inputSchema: {
       type: 'object',

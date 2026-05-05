@@ -1,7 +1,7 @@
 {
-  "name": "paraclaw",
-  "version": "0.0.14-rc.41",
-  "description": "Paraclaw — Parachute's per-session containerized AI agent companion.",
+  "name": "@openparachute/agent",
+  "version": "0.1.0",
+  "description": "Parachute Agent — per-session containerized AI agent companion.",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "main": "src/index.ts",

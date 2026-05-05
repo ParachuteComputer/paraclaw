@@ -1,6 +1,6 @@
 /**
  * Local secrets store: AES-256-GCM encryption with a master key at
- * `~/.parachute/claw/master.key`, decrypted in-process at session spawn,
+ * `~/.parachute/agent/master.key`, decrypted in-process at session spawn,
  * injected into per-session containers as env vars.
  *
  *   - `value_encrypted` is `iv || ciphertext || authTag` (12 + N + 16 bytes),

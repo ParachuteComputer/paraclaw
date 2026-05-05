@@ -1,6 +1,6 @@
 /**
  * Master key bootstrap. Stores a 32-byte (256-bit) random key at
- * `~/.parachute/claw/master.key` with mode 0600. Generated on first start;
+ * `~/.parachute/agent/master.key` with mode 0600. Generated on first start;
  * loaded from disk on subsequent starts.
  *
  * The key is never written to logs, never sent over the wire, never put in
@@ -15,7 +15,7 @@ import { CENTRAL_DB_DIR } from '../config.js';
 
 const KEY_LEN = 32;
 // `master.key` lives next to the central DB so a single backup of
-// `<PARACHUTE_DIR>/claw/` captures both crypto material and DB state, and
+// `<PARACHUTE_DIR>/agent/` captures both crypto material and DB state, and
 // so `PARACHUTE_HOME` overrides reroute both atoms together — sandboxes
 // that override the home dir get a fresh DB AND a fresh master.key.
 const KEY_DIR = CENTRAL_DB_DIR;

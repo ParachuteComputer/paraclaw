@@ -2,7 +2,7 @@
  * HTTP client to the Paraclaw web server.
  *
  * In dev: Vite proxies /api/* to localhost:1944.
- * In prod: server serves the built UI under /claw/, /api/* on the same origin.
+ * In prod: server serves the built UI under /agent/, /api/* on the same origin.
  *
  * Auth: every /api/* request gets `Authorization: Bearer <jwt>` from the
  * hub-OAuth flow in `./auth.ts`. On a 401 we refresh once; if the refresh
@@ -15,10 +15,10 @@
  */
 import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from './auth.ts';
 
-// Mount-aware: when paraclaw is served at /claw/ (under hub on tailnet), API
-// calls must go to /claw/api/* — the bare /api/* path goes to the hub origin's
-// root, where it 404s. BASE_URL has the trailing slash already; the trim keeps
-// us from emitting //api when BASE_URL is /.
+// Mount-aware: when parachute-agent is served at /agent/ (under hub on tailnet),
+// API calls must go to /agent/api/* — the bare /api/* path goes to the hub
+// origin's root, where it 404s. BASE_URL has the trailing slash already; the
+// trim keeps us from emitting //api when BASE_URL is /.
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 export type VaultScope = 'vault:read' | 'vault:write' | 'vault:admin';
@@ -81,7 +81,7 @@ async function doFetch(
 }
 
 // Hub's scope-validation 403 (cli#71) responds with a body like
-// `{"error":"This endpoint requires the claw:admin scope"}`; the vault
+// `{"error":"This endpoint requires the agent:admin scope"}`; the vault
 // uses single-quoted scope names: `requires the 'vault:work:admin' scope
 // (or 'vault:work:admin')`. We match either quoting so paraclaw#56's
 // vault path doesn't slip past the gate. Reads via .clone() so
@@ -129,7 +129,7 @@ export class HttpError extends Error {
  * re-auth (401-after-refresh-failure or 403 scope-mismatch). Use it on
  * endpoints that gate on a per-resource narrow scope the broad
  * REQUESTED_SCOPES set doesn't carry — e.g. vault token mgmt requires
- * `vault:<name>:admin` on top of `claw:admin`. Without this hint the
+ * `vault:<name>:admin` on top of `agent:admin`. Without this hint the
  * re-auth would loop with the same broad-only JWT (paraclaw#56).
  */
 export interface RequestInitWithAuth extends RequestInit {
@@ -160,7 +160,7 @@ export async function request<T>(path: string, init?: RequestInitWithAuth): Prom
   // 403 with a scope-mismatch body means the cached token was minted before
   // a newly-required scope was added (paraclaw#33). Without this, existing
   // users were stuck behind a manual `localStorage.clear()` after the Phase 1
-  // wizard bumped REQUESTED_SCOPES to include claw:admin. Refresh won't help
+  // wizard bumped REQUESTED_SCOPES to include agent:admin. Refresh won't help
   // (refresh tokens carry the original scope set), so drop straight to
   // re-auth — beginLogin() will request the new scope set, plus any
   // narrow per-resource scope the caller threaded via authExtraScopes
@@ -274,7 +274,7 @@ export interface VaultDetail {
   attachedGroups: VaultAttachedGroup[];
 }
 
-/** GET /api/vaults/:name — listing entry + attached-group derivation. claw:read. */
+/** GET /api/vaults/:name — listing entry + attached-group derivation. agent:read. */
 export async function getVaultDetail(name: string): Promise<VaultDetail> {
   return request<VaultDetail>(`/vaults/${encodeURIComponent(name)}`);
 }
@@ -398,7 +398,7 @@ export interface VaultToken {
 
 /**
  * GET /api/vaults/:name/tokens — listing + attached-to merge. paraclaw-side
- * scope is `claw:admin`; vault-side `vault:<name>:admin` is enforced by the
+ * scope is `agent:admin`; vault-side `vault:<name>:admin` is enforced by the
  * vault itself and a 401/403 from the vault is mirrored verbatim. Callers
  * use `HttpError.status` to detect the vault-narrow-scope-missing case and
  * trigger a consent prompt (Phase 3 detail page only).
@@ -642,7 +642,7 @@ export interface AuthorizeAppResult {
 /**
  * Kick off the OAuth dance — the caller is expected to navigate the browser
  * to `redirectUrl`. The server completes the exchange on its callback and
- * redirects back to `/claw/apps?connected=:id`.
+ * redirects back to `/agent/apps?connected=:id`.
  */
 export async function authorizeApp(provider: string, options: AuthorizeAppOptions = {}): Promise<AuthorizeAppResult> {
   return request<AuthorizeAppResult>(`/apps/${encodeURIComponent(provider)}/authorize`, {

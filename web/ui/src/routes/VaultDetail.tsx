@@ -81,7 +81,7 @@ export function VaultDetail() {
     );
 
     (async () => {
-      // Load detail (claw:read) and tokens (claw:admin + vault:<name>:admin)
+      // Load detail (agent:read) and tokens (agent:admin + vault:<name>:admin)
       // in parallel. The detail call always succeeds for an operator with
       // a valid session JWT; the tokens call may 401/403 vault-side if the
       // operator hasn't consented to the narrow vault scope yet.
@@ -329,7 +329,7 @@ function LoadedView({ name, state, reload }: LoadedViewProps) {
 
       <MintSection
         name={name}
-        defaultLabel={`claw-${name}`}
+        defaultLabel={`agent-${name}`}
         onMinted={onMinted}
         onError={(text) => setFlash({ kind: 'error', text })}
       />
@@ -617,7 +617,7 @@ function MintSection({ name, defaultLabel, onMinted, onError }: MintSectionProps
             onChange={(e) => setLabel(e.target.value)}
             disabled={busy}
             maxLength={64}
-            placeholder="claw-research"
+            placeholder="agent-research"
             required
           />
           <p className="dim">Identifier for revocation — alphanumeric + dashes, 64 chars max.</p>
@@ -882,7 +882,7 @@ function DetachModal({
     try {
       // Thread the narrow per-vault admin scope only when we're actually
       // calling vault — Keep-token (revokeToken=false) just hits the
-      // paraclaw-side claw:write check, which the broad re-auth set
+      // parachute-agent-side agent:write check, which the broad re-auth set
       // already covers. Asking for vault:<name>:admin on the Keep path
       // would be a no-op extra scope on the consent screen.
       const result = await detachVault(target.folder, {

@@ -52,7 +52,7 @@ export function TestMessageStep({ state, next, back }: StepProps) {
       <h3>Test message</h3>
       <p>
         Open {state.adapter ? ADAPTER_LABELS[state.adapter] : 'your chat app'} and DM your bot. The wizard advances
-        as soon as paraclaw records the inbound.
+        as soon as parachute-agent records the inbound.
       </p>
       <p className="muted">
         Bot: <code>@{state.botUsername ?? '(unknown — re-run test connection)'}</code>

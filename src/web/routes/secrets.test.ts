@@ -4,7 +4,7 @@
  * DELETE, /assignments) are exercised by `src/secrets/secrets.test.ts` at
  * the helper level; this file complements that with the route dispatcher.
  *
- * Auth gating (`claw:read` for GET, `claw:admin` for mutation) lives in
+ * Auth gating (`agent:read` for GET, `agent:admin` for mutation) lives in
  * `src/web/server.ts` upstream of `handleSecretsRoute`, so 401/403 cases
  * belong to `auth.test.ts` rather than the route layer — the handler is
  * never reached without a passing scope check. We assert the handler's

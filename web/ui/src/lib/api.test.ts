@@ -116,7 +116,7 @@ describe('detachVault — auth gate on 403', () => {
   it('omits scope hint when caller did not supply one', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(jsonResponse(403, { error: 'This endpoint requires the claw:admin scope' }));
+      .mockResolvedValue(jsonResponse(403, { error: 'This endpoint requires the agent:admin scope' }));
     vi.stubGlobal('fetch', fetchMock);
 
     const api = await import('./api.ts');

@@ -52,7 +52,7 @@ A more upstream-friendly fix would be to make Paraclaw's config compute paths fr
 
 ## Pinned to canonical port?
 
-Yes — paraclaw claims slot **1944** in the `1939–1949` Parachute range (per `parachute-patterns/patterns/canonical-ports.md`). The default is set in `web/server/src/server.ts`; override with `PARACLAW_WEB_PORT=<n>` for tests or non-default deployments. The hub-side reservation lives in `parachute-hub/src/service-spec.ts` (`PORT_RESERVATIONS`).
+Yes — parachute-agent claims slot **1944** in the `1939–1949` Parachute range (per `parachute-patterns/patterns/canonical-ports.md`). The default is set in `web/server/src/server.ts`; override with `PARACHUTE_AGENT_WEB_PORT=<n>` for tests or non-default deployments (legacy `PARACLAW_WEB_PORT` accepted through 0.1.x). The hub-side reservation lives in `parachute-hub/src/service-spec.ts` (`PORT_RESERVATIONS`).
 
 ## What's next
 

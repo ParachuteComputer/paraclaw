@@ -164,7 +164,7 @@ export function readVaultAttachment(folder: string, mcpName = DEFAULT_VAULT_MCP_
 
 /**
  * Read every vault attachment record across the given folders. Used by the
- * `/claw/vaults` UI to compute "this token is attached to these groups" by
+ * `/agent/vaults` UI to compute "this token is attached to these groups" by
  * matching `tokenLabel` against the vault's listed tokens.
  *
  * Returns one entry per (folder, mcpName) — a single group can have multiple

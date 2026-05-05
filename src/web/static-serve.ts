@@ -2,18 +2,19 @@
  * Static-file handler for the built UI bundle, with optional mount-prefix
  * stripping.
  *
- * When paraclaw is fronted by `parachute expose tailnet` at a path prefix
- * (e.g. `https://<host>/claw/`), tailscale serve forwards the request with
- * the prefix preserved. Combined with a Vite build that bakes the prefix
- * into asset URLs (`VITE_BASE_PATH=/claw/`), the browser asks for
- * `/claw/assets/index-X.js` — which a 1:1 path-to-dist map turns into the
- * non-existent `dist/claw/assets/index-X.js`, falls back to the SPA shell,
- * and ships `text/html` for what should be a JS module. Page never boots.
+ * When parachute-agent is fronted by `parachute expose tailnet` at a path
+ * prefix (e.g. `https://<host>/agent/`), tailscale serve forwards the
+ * request with the prefix preserved. Combined with a Vite build that bakes
+ * the prefix into asset URLs (`VITE_BASE_PATH=/agent/`), the browser asks
+ * for `/agent/assets/index-X.js` — which a 1:1 path-to-dist map turns into
+ * the non-existent `dist/agent/assets/index-X.js`, falls back to the SPA
+ * shell, and ships `text/html` for what should be a JS module. Page never
+ * boots.
  *
  * Mirrors `parachute-hub/src/notes-serve.ts:96-115` — strip the mount
  * prefix off the request path before resolving against `dist/`. Standalone
- * paraclaw (`mount=""`) is unchanged: the strip is a no-op when no prefix
- * is configured.
+ * parachute-agent (`mount=""`) is unchanged: the strip is a no-op when no
+ * prefix is configured.
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -32,7 +33,7 @@ export const MIME_TYPES: Record<string, string> = {
 
 /**
  * Normalize a mount value to either `""` (no strip) or a prefix without a
- * trailing slash (e.g. `/claw`). `""` and `"/"` both mean "no strip" so
+ * trailing slash (e.g. `/agent`). `""` and `"/"` both mean "no strip" so
  * standalone deployments at the origin root don't accidentally strip a
  * leading `/`.
  */
@@ -43,7 +44,7 @@ export function normalizeMount(raw: string): string {
 
 export interface StaticServeOpts {
   distDir: string;
-  /** Mount prefix to strip before resolving against `distDir` (e.g. `/claw`). */
+  /** Mount prefix to strip before resolving against `distDir` (e.g. `/agent`). */
   mount: string;
 }
 
@@ -65,8 +66,8 @@ export function makeServeStatic(opts: StaticServeOpts) {
       res.end(
         'UI bundle not found at ' +
           distDir +
-          '\n\nIn dev: run `pnpm --filter @paraclaw/web-ui dev` and open http://localhost:5173/.\n' +
-          'In prod: run `pnpm --filter @paraclaw/web-ui build` first.',
+          '\n\nIn dev: run `pnpm --filter @parachute-agent/web-ui dev` and open http://localhost:5173/.\n' +
+          'In prod: run `pnpm --filter @parachute-agent/web-ui build` first.',
       );
       return;
     }

@@ -57,8 +57,11 @@ export function GroupDetail() {
       const g = await getGroup(folder);
       setGroup(g);
       setError(null);
-      // Default the token-label field to claw-<folder> when not set.
-      if (!tokenLabel) setTokenLabel(`claw-${folder}`);
+      // Default the token-label field to agent-<folder> when not set.
+      // The label is opaque to the vault — operators with existing
+      // `claw-<folder>` tokens keep them; only fresh mints from this UI
+      // pick up the new prefix.
+      if (!tokenLabel) setTokenLabel(`agent-${folder}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -398,10 +401,10 @@ export function GroupDetail() {
                     value={tokenLabel}
                     onChange={(e) => setTokenLabel(e.target.value)}
                     disabled={submitting}
-                    placeholder={`claw-${folder}`}
+                    placeholder={`agent-${folder}`}
                   />
                   <p className="dim">
-                    Used for revocation. Default: <code>claw-{folder}</code>.
+                    Used for revocation. Default: <code>agent-{folder}</code>.
                   </p>
                 </div>
 
@@ -418,7 +421,7 @@ export function GroupDetail() {
                   <p className="dim">
                     When blank: the server runs{' '}
                     <code>
-                      parachute vault tokens create --scope {scope} --label {tokenLabel || `claw-${folder}`}
+                      parachute vault tokens create --scope {scope} --label {tokenLabel || `agent-${folder}`}
                     </code>{' '}
                     for you. (Until vault OAuth is wired in Phase B; then you'll never see <code>pvt_…</code> tokens at
                     all.)
@@ -443,7 +446,7 @@ export function GroupDetail() {
               <code>find-path</code>, <code>vault-info</code>. Constrained by the scope you chose.
             </p>
             <p className="muted">
-              Paraclaw doesn't impose a vault-note layout on the agent — the claw decides how to use vault access. (See{' '}
+              Parachute Agent doesn't impose a vault-note layout — the agent decides how to use vault access. (See{' '}
               <a
                 href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
                 target="_blank"

@@ -76,8 +76,8 @@ export function bootstrapChannelTokensToSecrets(): void {
     } else {
       // `.env` value diverged from what we previously stored — operator
       // rotated the token. Single line so token-rotation events show up
-      // in `logs/paraclaw.log` without needing a separate observability
-      // surface.
+      // in `logs/parachute-agent.log` without needing a separate
+      // observability surface.
       log.info('Channel bot token rotated', {
         channelType: adapter.channelType,
         botId: adapter.botId,

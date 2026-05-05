@@ -132,7 +132,7 @@ export function SetupWizard() {
         ← Skip setup, view groups
       </Link>
       <h2 style={{ marginTop: '0.5rem' }}>
-        Set up paraclaw
+        Set up parachute-agent
         {state.adapter && (
           <span className="dim" style={{ fontSize: '0.7em', marginLeft: '0.5rem' }}>
             · {ADAPTER_LABELS[state.adapter]}
@@ -140,7 +140,7 @@ export function SetupWizard() {
         )}
       </h2>
       <p className="muted" style={{ marginTop: '-0.5rem' }}>
-        Fresh install? Walk these steps to land your first agent. You can re-open this wizard any time at <code>/claw/setup</code>.
+        Fresh install? Walk these steps to land your first agent. You can re-open this wizard any time at <code>/agent/setup</code>.
       </p>
       <SetupStepIndicator current={state.currentStep} furthest={state.furthestStep} onJump={goto} />
 

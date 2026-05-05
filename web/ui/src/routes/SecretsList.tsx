@@ -246,7 +246,7 @@ function LoadedView(props: LoadedProps) {
       </div>
 
       <p className="muted">
-        Encrypted at rest under <code>~/.parachute/claw/master.key</code>. Injected into agent containers at session
+        Encrypted at rest under <code>~/.parachute/agent/master.key</code>. Injected into agent containers at session
         spawn — values are never read back over the API. To rotate, edit a row.
       </p>
 

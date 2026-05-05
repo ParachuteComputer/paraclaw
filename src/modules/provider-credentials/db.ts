@@ -7,6 +7,11 @@
  * Encryption: `api_key_encrypted` is AES-GCM ciphertext (HKDF-derived
  * key, info `paraclaw.provider-credentials.v1`). Plaintext only crosses
  * this module's boundary at put/get time.
+ *
+ * ⚠ The `paraclaw.` prefix in the HKDF info string is a cryptographic
+ * domain separator and is frozen across the paraclaw → parachute-agent
+ * rename. Renaming it derives a different key and renders existing
+ * ciphertext undecryptable. The brand sweep does not touch these bytes.
  */
 import { getDb } from '../../db/connection.js';
 import { decryptSecret, deriveKey, encryptSecret } from '../../secrets/crypto.js';

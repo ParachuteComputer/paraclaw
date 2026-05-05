@@ -34,6 +34,7 @@ let prevHub: string | undefined;
 
 beforeEach(() => {
   prevHub = process.env.PARACHUTE_HUB_ORIGIN;
+  delete process.env.PARACHUTE_AGENT_HUB_ORIGIN;
   delete process.env.PARACLAW_HUB_ORIGIN;
   process.env.PARACHUTE_HUB_ORIGIN = 'https://parachute.example';
   clearHubDiscoveryCache();

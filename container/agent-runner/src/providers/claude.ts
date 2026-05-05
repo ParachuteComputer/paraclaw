@@ -18,14 +18,14 @@ function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
 }
 
-// Deferred SDK builtins that either sidestep paraclaw's own scheduling or
+// Deferred SDK builtins that either sidestep parachute-agent's own scheduling or
 // don't fit our async message-passing model (they're designed for Claude
 // Code's interactive UI and would hang here).
 //
 // - CronCreate / CronDelete / CronList / ScheduleWakeup: we have durable
-//   scheduling via mcp__paraclaw__schedule_task.
+//   scheduling via mcp__parachute_agent__schedule_task.
 // - AskUserQuestion: SDK returns a placeholder instead of blocking on a
-//   real answer — we have mcp__paraclaw__ask_user_question that persists
+//   real answer — we have mcp__parachute_agent__ask_user_question that persists
 //   the question and blocks on the real reply.
 // - EnterPlanMode / ExitPlanMode / EnterWorktree / ExitWorktree: Claude
 //   Code UI affordances; in a headless container they'd appear stuck.
@@ -41,7 +41,7 @@ const SDK_DISALLOWED_TOOLS = [
   'ExitWorktree',
 ];
 
-// Tool allowlist for Paraclaw agent containers
+// Tool allowlist for parachute-agent containers
 const TOOL_ALLOWLIST = [
   'Bash',
   'Read',
@@ -61,7 +61,7 @@ const TOOL_ALLOWLIST = [
   'ToolSearch',
   'Skill',
   'NotebookEdit',
-  'mcp__paraclaw__*',
+  'mcp__parachute_agent__*',
 ];
 
 interface SDKUserMessage {
@@ -171,7 +171,7 @@ const preToolUseHook: HookCallback = async (input) => {
   if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
     return {
       decision: 'block',
-      stopReason: `Tool '${toolName}' is not available in this environment — use the paraclaw equivalent.`,
+      stopReason: `Tool '${toolName}' is not available in this environment — use the parachute-agent equivalent.`,
     } as unknown as ReturnType<HookCallback>;
   }
   // Bash exposes its timeout via the tool_input.timeout field (ms). Any other

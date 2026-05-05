@@ -7,34 +7,56 @@
  * The shared scope-guard library proposed in cli#59 will eventually absorb
  * both.
  *
- * Hub origin resolution: `PARACLAW_HUB_ORIGIN` (test override) →
+ * Hub origin resolution: `PARACHUTE_AGENT_HUB_ORIGIN` (test override; legacy
+ * `PARACLAW_HUB_ORIGIN` accepted through 0.1.x with a one-shot warning) →
  * `PARACHUTE_HUB_ORIGIN` (the hub lifecycle stamps this on every spawned
  * service — see `parachute-hub/src/commands/lifecycle.ts`) → loopback
  * `http://127.0.0.1:1939`. We intentionally do NOT read services.json —
  * the hub is the dispatcher, not a registered service in that file
- * (matching vault's choice). Tailnet-served paraclaw must see the hub's
- * tailnet origin or `iss` mismatch rejects every JWT.
+ * (matching vault's choice). Tailnet-served parachute-agent must see the
+ * hub's tailnet origin or `iss` mismatch rejects every JWT.
  *
- * Scope vocabulary introduced here: `claw:read` / `claw:write` / `claw:admin`
- * with `admin ⊇ write ⊇ read` inheritance per
+ * Scope vocabulary: `agent:read` / `agent:write` / `agent:admin` with
+ * `admin ⊇ write ⊇ read` inheritance per
  * `parachute-patterns/patterns/oauth-scopes.md`. `vault:admin` is the
- * operator-token catch-all and satisfies any claw scope check (operator
+ * operator-token catch-all and satisfies any agent scope check (operator
  * token is what local CLI/scripts present; it carries `vault:admin` per
  * `parachute-hub/src/operator-token.ts`).
+ *
+ * Pre-0.1.0 compat: hub-issued tokens may still carry `claw:*` scopes for
+ * one cycle. `hasScope` normalizes legacy `claw:*` to `agent:*` so callers
+ * with grandfathered grants keep working. Drop the compat normalization in
+ * 0.2.0 (tracked as a follow-up at PR open time).
  */
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 
+import { readEnvWithLegacy } from '../env.js';
+
 const DEFAULT_HUB_LOOPBACK = 'http://127.0.0.1:1939';
 
-export const SCOPE_CLAW_READ = 'claw:read' as const;
-export const SCOPE_CLAW_WRITE = 'claw:write' as const;
-export const SCOPE_CLAW_ADMIN = 'claw:admin' as const;
+export const SCOPE_AGENT_READ = 'agent:read' as const;
+export const SCOPE_AGENT_WRITE = 'agent:write' as const;
+export const SCOPE_AGENT_ADMIN = 'agent:admin' as const;
 export const SCOPE_VAULT_ADMIN = 'vault:admin' as const;
 
-export type ClawScope = typeof SCOPE_CLAW_READ | typeof SCOPE_CLAW_WRITE | typeof SCOPE_CLAW_ADMIN;
+export type AgentScope = typeof SCOPE_AGENT_READ | typeof SCOPE_AGENT_WRITE | typeof SCOPE_AGENT_ADMIN;
+
+/**
+ * Pre-0.1.0 compat: map legacy `claw:*` scope grants to their `agent:*`
+ * equivalents so hub-issued tokens minted before the rename keep working.
+ * Drop in 0.2.0.
+ */
+const LEGACY_SCOPE_MAP: Record<string, string> = {
+  'claw:read': SCOPE_AGENT_READ,
+  'claw:write': SCOPE_AGENT_WRITE,
+  'claw:admin': SCOPE_AGENT_ADMIN,
+};
+function normalizeGranted(s: string): string {
+  return LEGACY_SCOPE_MAP[s] ?? s;
+}
 
 export function getHubOrigin(): string {
-  const override = process.env.PARACLAW_HUB_ORIGIN?.replace(/\/$/, '');
+  const override = readEnvWithLegacy('PARACHUTE_AGENT_HUB_ORIGIN', 'PARACLAW_HUB_ORIGIN')?.replace(/\/$/, '');
   if (override && override.length > 0) return override;
   const fromHub = process.env.PARACHUTE_HUB_ORIGIN?.replace(/\/$/, '');
   if (fromHub && fromHub.length > 0) return fromHub;
@@ -117,19 +139,22 @@ export function parseScopes(raw: string | null | undefined): string[] {
  * Does `granted` satisfy `required`?
  *
  * Inheritance rules:
- *   - `claw:admin` ⊇ `claw:write` ⊇ `claw:read`
- *   - `vault:admin` (operator-token catch-all) satisfies every `claw:*`
+ *   - `agent:admin` ⊇ `agent:write` ⊇ `agent:read`
+ *   - `vault:admin` (operator-token catch-all) satisfies every `agent:*`
  *   - `hub:admin` does NOT — narrow boundary; admins of the hub identity
  *     surface aren't implicitly admins of every resource server.
+ *   - Legacy `claw:*` grants are normalized to `agent:*` (pre-0.1.0 compat;
+ *     drop in 0.2.0).
  */
-export function hasScope(granted: string[], required: ClawScope): boolean {
-  if (granted.includes(required)) return true;
-  if (granted.includes(SCOPE_VAULT_ADMIN)) return true;
-  if (required === SCOPE_CLAW_READ) {
-    return granted.includes(SCOPE_CLAW_WRITE) || granted.includes(SCOPE_CLAW_ADMIN);
+export function hasScope(granted: string[], required: AgentScope): boolean {
+  const normalized = granted.map(normalizeGranted);
+  if (normalized.includes(required)) return true;
+  if (normalized.includes(SCOPE_VAULT_ADMIN)) return true;
+  if (required === SCOPE_AGENT_READ) {
+    return normalized.includes(SCOPE_AGENT_WRITE) || normalized.includes(SCOPE_AGENT_ADMIN);
   }
-  if (required === SCOPE_CLAW_WRITE) {
-    return granted.includes(SCOPE_CLAW_ADMIN);
+  if (required === SCOPE_AGENT_WRITE) {
+    return normalized.includes(SCOPE_AGENT_ADMIN);
   }
   return false;
 }
@@ -143,7 +168,7 @@ export interface AuthFail {
   status: 401 | 403;
   error: string;
   errorType?: 'insufficient_scope';
-  requiredScope?: ClawScope;
+  requiredScope?: AgentScope;
   grantedScopes?: string[];
 }
 export type AuthResult = AuthOk | AuthFail;
@@ -160,7 +185,7 @@ function extractBearer(header: string | undefined): string | null {
  * structured pass/fail rather than throwing so callers can shape the
  * response uniformly (RFC-6749-style 403 body for insufficient_scope).
  */
-export async function authenticate(authHeader: string | undefined, required: ClawScope): Promise<AuthResult> {
+export async function authenticate(authHeader: string | undefined, required: AgentScope): Promise<AuthResult> {
   const token = extractBearer(authHeader);
   if (!token) {
     return { ok: false, status: 401, error: 'missing or malformed Authorization header' };

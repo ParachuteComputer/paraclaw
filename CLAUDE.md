@@ -2,20 +2,20 @@
 
 **If you are reading this because you just ran `git pull`, `git merge`, `git fetch && git merge`, or any equivalent to bring in upstream changes — and you see merge conflicts or a large diff involving this file — HALT IMMEDIATELY.**
 
-This is Paraclaw, a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing NanoClaw v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
+This is parachute-agent (formerly paraclaw), a ground-up rewrite with breaking changes throughout. It cannot be merged into an existing NanoClaw v1 install. Attempting to resolve the conflicts by hand, run builds, or "fix" anything will corrupt the user's install and burn tokens for no result.
 
 **Do this instead:**
 1. Abort the merge: `git merge --abort` (or `git reset --hard ORIG_HEAD` if the merge already completed).
-2. Tell the user, verbatim: *"This is Paraclaw — it can't be merged into your existing NanoClaw install. Run `bash migrate-v2.sh` to migrate instead."*
+2. Tell the user, verbatim: *"This is parachute-agent — it can't be merged into your existing NanoClaw install. Run `bash migrate-v2.sh` to migrate instead."*
 3. Wait for the user to confirm before doing anything else. Do not attempt the migration yourself.
 
 If you are a fresh install (you ran `git clone`, not `git pull`) and there are no conflicts, ignore this banner and continue below.
 
 ---
 
-# Paraclaw
+# parachute-agent
 
-Parachute's per-session containerized AI agent companion. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
+Parachute's per-session containerized AI agent companion. (Formerly **paraclaw**, renamed in 0.1.0.) See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
 
 ## Quick Context
 
@@ -97,16 +97,16 @@ A second tier (direct source-level self-edits via a draft/activate flow) is plan
 
 ## Secrets / Credentials
 
-Paraclaw owns its credential store. API keys, OAuth tokens, and auth credentials are stored locally as AES-GCM ciphertext in the central DB, with the master key at `~/.parachute/claw/master.key` (chmod 0600, generated on first boot). Code in `src/secrets/` decrypts the rows assigned to a given agent group at container spawn and injects them as env vars; nothing goes through chat context.
+parachute-agent owns its credential store. API keys, OAuth tokens, and auth credentials are stored locally as AES-GCM ciphertext in the central DB, with the master key at `~/.parachute/agent/master.key` (chmod 0600, generated on first boot — pre-0.1.0 installs auto-migrate from `~/.parachute/claw/master.key` on startup). Code in `src/secrets/` decrypts the rows assigned to a given agent group at container spawn and injects them as env vars; nothing goes through chat context.
 
 Surfaces:
-- **Web UI** — `/claw/secrets` lists, creates, updates, deletes secrets and assigns them to agent groups (mirrors the `selective` / `all` allow-list semantics).
-- **HTTP API** — `/api/secrets` (GET / POST / PATCH / DELETE) is the same code path the UI uses; scope-gated by `claw:admin`.
+- **Web UI** — `/agent/secrets` lists, creates, updates, deletes secrets and assigns them to agent groups (mirrors the `selective` / `all` allow-list semantics).
+- **HTTP API** — `/api/secrets` (GET / POST / PATCH / DELETE) is the same code path the UI uses; scope-gated by `agent:admin`.
 - **Per-agent assignment** — every secret carries `assigned_mode` (`all` = injected into every group; `selective` = injected only into groups in `secret_assignments`).
 
 ### Approval-gated credential use
 
-Approval flows for credential use are paraclaw-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`.
+Approval flows for credential use are parachute-agent-native: a module (or self-mod handler) calls `requestApproval()` from `src/modules/approvals/primitive.ts`, which persists a `pending_approvals` row, picks an approver via `pickApprover` (scoped admins → global admins → owners, all from `user_roles` in the central DB), and routes a card via `pickApprovalDelivery`. The approver decides via either the chat card or `POST /api/approvals/:id/decide` from the UI; both go through `handleApprovalsResponse`.
 
 ## Skills
 
@@ -125,24 +125,24 @@ Four types of skills. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxono
 
 ## MCP server
 
-Paraclaw exposes its host-side admin surface (the things `/api/*` and `/claw/*` mediate from the web UI: agent-groups, sessions, channel wires, secrets metadata, approvals) as MCP tools. The same registry serves both transports — handlers call internal helpers directly, not back through HTTP, so there's no extra round-trip and no second auth seam to keep in sync.
+parachute-agent exposes its host-side admin surface (the things `/api/*` and `/agent/*` mediate from the web UI: agent-groups, sessions, channel wires, secrets metadata, approvals) as MCP tools. The same registry serves both transports — handlers call internal helpers directly, not back through HTTP, so there's no extra round-trip and no second auth seam to keep in sync.
 
 | Transport | Endpoint | Auth | Effective scope |
 |-----------|----------|------|-----------------|
-| stdio | `bun src/mcp/stdio.ts` | ambient (filesystem trust) | `claw:admin` |
-| HTTP  | `POST /mcp` on port 1944 | hub-issued JWT (`Authorization: Bearer …`) | strongest `claw:*` scope on the JWT grant |
+| stdio | `bun src/mcp/stdio.ts` | ambient (filesystem trust) | `agent:admin` |
+| HTTP  | `POST /mcp` on port 1944 | hub-issued JWT (`Authorization: Bearer …`) | strongest `agent:*` scope on the JWT grant (legacy `claw:*` grants normalize to `agent:*` through 0.1.x) |
 
 Wire stdio into Claude Code:
 
 ```bash
-claude mcp add paraclaw bun /absolute/path/to/paraclaw/src/mcp/stdio.ts
+claude mcp add parachute-agent bun /absolute/path/to/parachute-agent/src/mcp/stdio.ts
 ```
 
-Tools advertise as `mcp__paraclaw__<verb>-<noun>` client-side: `list-agent-groups`, `create-agent-group`, `attach-vault`, `detach-vault`, `list-sessions`, `close-session`, `list-channels`, `update-channel-wire`, `delete-channel-wire`, `list-secrets`, `put-secret`, `delete-secret`, `assign-secret`, `list-approvals`, `decide-approval`, `get-activity`. The remaining stubs (`start-oauth`, `revoke-integration`) are advertised but `disabled` until the matching paraclaw-server endpoints land — they're filtered out of `tools/list` and refused on `tools/call`.
+Tools advertise as `mcp__parachute_agent__<verb>-<noun>` client-side: `list-agent-groups`, `create-agent-group`, `attach-vault`, `detach-vault`, `list-sessions`, `close-session`, `list-channels`, `update-channel-wire`, `delete-channel-wire`, `list-secrets`, `put-secret`, `delete-secret`, `assign-secret`, `list-approvals`, `decide-approval`, `get-activity`. The remaining stubs (`start-oauth`, `revoke-integration`) are advertised but `disabled` until the matching server endpoints land — they're filtered out of `tools/list` and refused on `tools/call`.
 
 Secret values **never** traverse MCP. `list-secrets` and `put-secret` return row metadata only; the plaintext flows in once on `put-secret` and lands in the encrypted DB column. Container injection happens at session-spawn time, not over the tool surface.
 
-Stdio gotcha: paraclaw's `log.ts` writes info-level messages to `process.stdout`, which corrupts JSON-RPC frames. `src/mcp/stdio.ts` promotes `LOG_LEVEL` to `warn` before any log-using import. Don't move that block below the dynamic imports.
+Stdio gotcha: parachute-agent's `log.ts` writes info-level messages to `process.stdout`, which corrupts JSON-RPC frames. `src/mcp/stdio.ts` promotes `LOG_LEVEL` to `warn` before any log-using import. Don't move that block below the dynamic imports.
 
 ## Contributing
 
@@ -156,7 +156,7 @@ Run commands directly — don't tell the user to run them.
 # Host (Node + pnpm)
 pnpm run dev          # Host with hot reload
 pnpm run build        # Compile host TypeScript (src/)
-./container/build.sh  # Rebuild agent container image (paraclaw-agent-<slug>:latest)
+./container/build.sh  # Rebuild agent container image (parachute-agent-image-<slug>:latest)
 pnpm test             # Host tests (vitest)
 
 # Agent-runner (Bun — separate package tree under container/agent-runner/)
@@ -166,18 +166,18 @@ cd container/agent-runner && bun test      # Container tests (bun:test)
 
 Container typecheck is a separate tsconfig — if you edit `container/agent-runner/src/`, run `pnpm exec tsc -p container/agent-runner/tsconfig.json --noEmit` from root (or `bun run typecheck` from `container/agent-runner/`).
 
-Service management (substitute `<slug>` with the 8-char hash from `getInstallSlug()` — each checkout gets its own service so two installs on one host don't collide):
+Service management is owned by the hub install path (`parachute install parachute-agent`), which generates the launchd plist / systemd unit. Existing pre-0.1.0 installs still use the old `computer.parachute.claw-<slug>` / `paraclaw-<slug>` labels until the operator re-runs the hub installer; the new label is `computer.parachute.agent-<slug>` / `parachute-agent-<slug>`. Substitute `<slug>` with the 8-char hash from `getInstallSlug()` — each checkout gets its own service so two installs on one host don't collide:
 ```bash
-# macOS (launchd) — Label is computer.parachute.claw-<slug>
-launchctl load   ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist
-launchctl unload ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist
-launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>  # restart
+# macOS (launchd)
+launchctl load   ~/Library/LaunchAgents/computer.parachute.agent-<slug>.plist
+launchctl unload ~/Library/LaunchAgents/computer.parachute.agent-<slug>.plist
+launchctl kickstart -k gui/$(id -u)/computer.parachute.agent-<slug>  # restart
 
-# Linux (systemd) — unit is paraclaw-<slug>.service
-systemctl --user start|stop|restart paraclaw-<slug>
+# Linux (systemd)
+systemctl --user start|stop|restart parachute-agent-<slug>
 ```
 
-Host logs: `logs/paraclaw.log` (normal) and `logs/paraclaw.error.log` (errors only — some delivery/approval failures only show up here).
+Host logs: `logs/parachute-agent.log` (normal) and `logs/parachute-agent.error.log` (errors only — some delivery/approval failures only show up here). On 0.1.0 first boot, any pre-existing `logs/paraclaw{,.error}.log` are renamed in place so the historical file stays accessible under the new name. The supervisor unit (launchd plist / systemd unit, generated by `parachute install parachute-agent`) is what controls *where new entries are written*; until the operator re-runs the installer, the supervisor still routes stdout to `paraclaw.log` and a fresh file is recreated under the legacy name on each daemon respawn. Re-running the installer regenerates the unit so subsequent boots write to `parachute-agent.log`.
 
 ## Supply Chain Security (pnpm)
 
@@ -223,9 +223,9 @@ The agent container runs on **Bun**; the host runs on **Node** (pnpm). They comm
 
 ## Web UI (mount-aware)
 
-The paraclaw SPA in `web/ui/` is served at the origin root in dev (`/`) and under a mount prefix in prod (`/claw/` when running behind the parachute hub on tailnet). The hub owns `/`; an absolute `/api/...` from the browser goes to the hub origin, NOT paraclaw — and the hub 404s on it. Anything the bundle sends to paraclaw must include the mount prefix.
+The parachute-agent SPA in `web/ui/` is served at the origin root in dev (`/`) and under a mount prefix in prod (`/agent/` when running behind the parachute hub on tailnet). The hub owns `/`; an absolute `/api/...` from the browser goes to the hub origin, NOT parachute-agent — and the hub 404s on it. Anything the bundle sends to parachute-agent must include the mount prefix.
 
-**Rule:** every URL the UI builds for `fetch`, router basenames, or OAuth redirects must be derived from `import.meta.env.BASE_URL`, not hardcoded with a leading `/`. Same bundle has to work whether the deploy lands at `/`, `/claw/`, or `/some/other/mount/`.
+**Rule:** every URL the UI builds for `fetch`, router basenames, or OAuth redirects must be derived from `import.meta.env.BASE_URL`, not hardcoded with a leading `/`. Same bundle has to work whether the deploy lands at `/`, `/agent/`, or `/some/other/mount/`.
 
 Pattern (BASE_URL has a trailing slash; trim it for joining):
 
@@ -235,11 +235,11 @@ const cb       = `${window.location.origin}${import.meta.env.BASE_URL}oauth/call
 <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
 ```
 
-The server-side mirror lives in `web/server/src/server.ts`: `MOUNT` (from `PARACLAW_WEB_MOUNT`) is stripped uniformly before dispatch so `/api/*` and static-serve both see paths without the prefix.
+The server-side mirror lives in `web/server/src/server.ts`: `MOUNT` (from `PARACHUTE_AGENT_WEB_MOUNT`, with legacy `PARACLAW_WEB_MOUNT` accepted through 0.1.x) is stripped uniformly before dispatch so `/api/*` and static-serve both see paths without the prefix.
 
 ### SPA build is wired into install
 
-`web/ui/dist/` is gitignored. The root `package.json` runs `build:spa` from a `postinstall` hook so a fresh `pnpm install` produces a working `/claw/*` without a manual rebuild step. If `static-serve` 503s with "UI bundle not found", the install most likely fired with `--ignore-scripts` (which suppresses `postinstall` lifecycle hooks) — fall back to `pnpm run build:spa` to rebuild manually.
+`web/ui/dist/` is gitignored. The root `package.json` runs `build:spa` from a `postinstall` hook so a fresh `pnpm install` produces a working `/agent/*` without a manual rebuild step. If `static-serve` 503s with "UI bundle not found", the install most likely fired with `--ignore-scripts` (which suppresses `postinstall` lifecycle hooks) — fall back to `pnpm run build:spa` to rebuild manually.
 
 ## CJK font support
 
@@ -251,41 +251,42 @@ grep -q '^INSTALL_CJK_FONTS=' .env && sed -i.bak 's/^INSTALL_CJK_FONTS=.*/INSTAL
 
 # Rebuild and restart so new sessions pick up the new image
 ./container/build.sh
-launchctl kickstart -k gui/$(id -u)/computer.parachute.claw-<slug>   # macOS
-# systemctl --user restart paraclaw-<slug>                            # Linux
+launchctl kickstart -k gui/$(id -u)/computer.parachute.agent-<slug>  # macOS
+# systemctl --user restart parachute-agent-<slug>                     # Linux
 ```
 
 `container/build.sh` reads `INSTALL_CJK_FONTS` from `.env` and passes it through as a Docker build-arg. Without CJK fonts, Chromium-rendered screenshots and PDFs containing CJK text show tofu (empty rectangles) instead of characters.
 
 ## ⚠ Sandbox isolation — DO NOT clobber the live install
 
-If you spin a paraclaw sandbox **on the same host as a live install**, three things must be different from the live install or you will reap its containers and clobber its DB. This bit Aaron once (paraclaw#91); guard against repeating it.
+If you spin a parachute-agent sandbox **on the same host as a live install**, three things must be different from the live install or you will reap its containers and clobber its DB. This bit Aaron once (paraclaw#91); guard against repeating it.
 
 ### What collides
 
 | Atom | Default | Why a same-host sandbox collides |
 |------|---------|----------------------------------|
-| `INSTALL_SLUG` | `sha1(cwd)[:8]` | Same project root → same slug → `cleanupOrphans` reaps live containers via the `paraclaw-install=<slug>` label |
-| Central DB + `master.key` | `~/.parachute/claw/` | Both installs share the operator-owned home dir |
+| `INSTALL_SLUG` | `sha1(cwd)[:8]` | Same project root → same slug → `cleanupOrphans` reaps live containers via the `parachute-agent-install=<slug>` label (and the legacy `paraclaw-install=<slug>` label, reaped through 0.1.x) |
+| Central DB + `master.key` | `~/.parachute/agent/` | Both installs share the operator-owned home dir |
 | Webhook port | `WEBHOOK_PORT` (default 3000) | Two listeners on one port → `EADDRINUSE` |
-| Web port | `PARACLAW_WEB_PORT` (default 1944) | Same |
+| Web port | `PARACHUTE_AGENT_WEB_PORT` (default 1944) | Same. Legacy `PARACLAW_WEB_PORT` accepted through 0.1.x with a deprecation warning |
 
 ### Safe sandbox pattern
 
 ```bash
 # 1. New cwd → new INSTALL_SLUG. Use a worktree, not a fresh checkout —
 #    same-branch state, isolated filesystem.
-git worktree add /tmp/paraclaw-sandbox <branch>
-cd /tmp/paraclaw-sandbox
+git worktree add /tmp/parachute-agent-sandbox <branch>
+cd /tmp/parachute-agent-sandbox
 
 # 2. Fresh PARACHUTE_HOME → fresh DB + fresh master.key. PARACHUTE_HOME is
 #    the canonical override (parachute-hub, vault, scribe all honor it);
-#    paraclaw joins the convention as of #91. Both atoms reroute together
-#    so the sandbox's encrypted-secret reads stay self-consistent.
-export PARACHUTE_HOME=/tmp/paraclaw-sandbox-home
+#    parachute-agent joined the convention as paraclaw#91. Both atoms
+#    reroute together so the sandbox's encrypted-secret reads stay
+#    self-consistent.
+export PARACHUTE_HOME=/tmp/parachute-agent-sandbox-home
 
 # 3. Different ports — pick anything free. Don't rely on default 1944/3000.
-export PARACLAW_WEB_PORT=2944
+export PARACHUTE_AGENT_WEB_PORT=2944
 export WEBHOOK_PORT=3944
 
 # 4. Bootstrap state programmatically (init-first-agent / API). Don't
@@ -296,11 +297,11 @@ pnpm run dev
 
 ### Don't do
 
-- `cd <live-paraclaw>` and run sandbox there with overrides — same INSTALL_SLUG, `cleanupOrphans` reaps live containers regardless of DB-path overrides.
-- Override only `PARACLAW_CENTRAL_DB_PATH` — `master.key` still lands at `~/.parachute/claw/master.key` if `PARACHUTE_HOME` is unset, and you'll cross-decrypt against the live key.
-- Set `HOME=/tmp/...` instead of `PARACHUTE_HOME` — affects every other tool's home-dir lookup. Paraclaw honors HOME for ergonomic compat, but `PARACHUTE_HOME` is the precise knob for "reroute paraclaw's persistent state."
-- Combine `PARACHUTE_HOME` with `PARACLAW_CENTRAL_DB_PATH` unless you understand the split — the DB lands at the explicit override path but `master.key` still follows `PARACHUTE_HOME` (sits at `<PARACHUTE_HOME>/claw/master.key`). Exporting just the DB file alone yields unreadable ciphertext on the receiving side. The split is intentional — the override lets you put the DB on a different volume — but the two atoms only travel together when you let both default off `PARACHUTE_HOME`.
+- `cd <live-parachute-agent>` and run sandbox there with overrides — same INSTALL_SLUG, `cleanupOrphans` reaps live containers regardless of DB-path overrides.
+- Override only `PARACHUTE_AGENT_CENTRAL_DB_PATH` — `master.key` still lands at `~/.parachute/agent/master.key` if `PARACHUTE_HOME` is unset, and you'll cross-decrypt against the live key.
+- Set `HOME=/tmp/...` instead of `PARACHUTE_HOME` — affects every other tool's home-dir lookup. parachute-agent honors HOME for ergonomic compat, but `PARACHUTE_HOME` is the precise knob for "reroute parachute-agent's persistent state."
+- Combine `PARACHUTE_HOME` with `PARACHUTE_AGENT_CENTRAL_DB_PATH` unless you understand the split — the DB lands at the explicit override path but `master.key` still follows `PARACHUTE_HOME` (sits at `<PARACHUTE_HOME>/agent/master.key`). Exporting just the DB file alone yields unreadable ciphertext on the receiving side. The split is intentional — the override lets you put the DB on a different volume — but the two atoms only travel together when you let both default off `PARACHUTE_HOME`.
 
 ### After the sandbox
 
-`git worktree remove /tmp/paraclaw-sandbox && rm -rf /tmp/paraclaw-sandbox-home` cleans up. Containers tagged with the sandbox's INSTALL_SLUG won't conflict with the live install's, but a long-lived sandbox accumulates them — `docker ps -a --filter label=paraclaw-install=<sandbox-slug>` to see what's left.
+`git worktree remove /tmp/parachute-agent-sandbox && rm -rf /tmp/parachute-agent-sandbox-home` cleans up. Containers tagged with the sandbox's INSTALL_SLUG won't conflict with the live install's, but a long-lived sandbox accumulates them — `docker ps -a --filter label=parachute-agent-install=<sandbox-slug>` to see what's left.

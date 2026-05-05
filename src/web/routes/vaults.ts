@@ -1,5 +1,5 @@
 /**
- * /api/vaults — vault management surface for `/claw/vaults`.
+ * /api/vaults — vault management surface for `/agent/vaults`.
  *
  * Five endpoints, plus a list endpoint that lived inline in `server.ts`
  * before this module landed. All admin operations forward the operator's

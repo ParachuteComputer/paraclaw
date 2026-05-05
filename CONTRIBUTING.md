@@ -21,7 +21,7 @@
 
 ## Skills
 
-Paraclaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in Paraclaw, each serving a different purpose.
+parachute-agent uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in parachute-agent, each serving a different purpose.
 
 ### Why skills?
 
@@ -31,7 +31,7 @@ Every user should have clean and minimal code that does exactly what they need. 
 
 #### 1. Feature skills (branch-based)
 
-Add capabilities to Paraclaw by merging a git branch. The SKILL.md contains setup instructions; the actual code lives on a `skill/*` branch.
+Add capabilities to parachute-agent by merging a git branch. The SKILL.md contains setup instructions; the actual code lives on a `skill/*` branch.
 
 **Location:** `.claude/skills/` on `main` (instructions only), code on `skill/*` branch
 

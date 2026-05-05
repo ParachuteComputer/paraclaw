@@ -1,5 +1,5 @@
 /**
- * `/claw/apps` — OAuth integrations management.
+ * `/agent/apps` — OAuth integrations management.
  *
  * Two stacked sections per the audit-refined brief:
  *   1. **App configs** — per-provider OAuth client (paste client_id + client_secret).

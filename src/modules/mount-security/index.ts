@@ -1,15 +1,17 @@
 /**
- * Mount Security Module for Paraclaw
+ * Mount Security Module for parachute-agent
  *
  * Validates additional mounts against an allowlist stored OUTSIDE the project root.
  * This prevents container agents from modifying security configuration.
  *
- * Allowlist location: ~/.config/paraclaw/mount-allowlist.json
+ * Allowlist location: ~/.config/parachute-agent/mount-allowlist.json
+ * (pre-0.1.0 installs auto-migrate from ~/.config/paraclaw/ on startup —
+ * see migrateLegacyAllowlistDir below).
  */
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { MOUNT_ALLOWLIST_PATH } from '../../config.js';
+import { ALLOWLIST_DIR, LEGACY_ALLOWLIST_DIR, MOUNT_ALLOWLIST_PATH } from '../../config.js';
 import { log } from '../../log.js';
 
 export interface AdditionalMount {
@@ -353,6 +355,63 @@ export function validateAdditionalMounts(
   }
 
   return validatedMounts;
+}
+
+/**
+ * One-shot move of `~/.config/paraclaw/{mount,sender}-allowlist.json` to the
+ * `~/.config/parachute-agent/` dir. Called early at host startup so a 0.1.0
+ * install picks up an operator's existing allowlist without a manual `mv`.
+ *
+ * Idempotent — moves a file only when the legacy file exists and the new
+ * path is absent. The legacy directory itself is left in place: the operator
+ * may have other files there, and a missing-but-empty legacy dir on the next
+ * boot is a harmless no-op. Best-effort: rename failures (permission / race)
+ * log and continue. Drop in 0.2.0 along with the rest of the paraclaw-era
+ * compat sweep.
+ *
+ * Args default to the canonical `~/.config/{paraclaw,parachute-agent}` pair;
+ * the test injects scratch dirs.
+ */
+export function migrateLegacyAllowlistDir(
+  legacyDir: string = LEGACY_ALLOWLIST_DIR,
+  currentDir: string = ALLOWLIST_DIR,
+): void {
+  let legacyDirExists: boolean;
+  try {
+    legacyDirExists = fs.statSync(legacyDir).isDirectory();
+  } catch {
+    return;
+  }
+  if (!legacyDirExists) return;
+
+  try {
+    fs.mkdirSync(currentDir, { recursive: true });
+  } catch (err) {
+    log.warn('Could not create parachute-agent allowlist dir', { dir: currentDir, err });
+    return;
+  }
+
+  const filenames = ['mount-allowlist.json', 'sender-allowlist.json'];
+  for (const name of filenames) {
+    const legacy = path.join(legacyDir, name);
+    const current = path.join(currentDir, name);
+
+    let legacyFileExists: boolean;
+    try {
+      legacyFileExists = fs.statSync(legacy).isFile();
+    } catch {
+      continue;
+    }
+    if (!legacyFileExists) continue;
+    if (fs.existsSync(current)) continue;
+
+    try {
+      fs.renameSync(legacy, current);
+      log.info('Allowlist migrated from legacy dir', { from: legacy, to: current });
+    } catch (err) {
+      log.warn('Could not migrate legacy allowlist file', { from: legacy, to: current, err });
+    }
+  }
 }
 
 /**

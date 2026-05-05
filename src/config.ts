@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 
-import { readEnvFile } from './env.js';
+import { readEnvFile, readEnvWithLegacy } from './env.js';
 import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from './install-slug.js';
 import { isValidTimezone } from './timezone.js';
 
@@ -22,9 +22,16 @@ const HOME_DIR = process.env.HOME || os.homedir();
 // or Docker. Default: `~/.parachute/`. See docs/sandbox-isolation.md.
 export const PARACHUTE_DIR = process.env.PARACHUTE_HOME || path.join(HOME_DIR, '.parachute');
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'paraclaw', 'mount-allowlist.json');
-export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'paraclaw', 'sender-allowlist.json');
+// Mount security: allowlist stored OUTSIDE project root, never mounted into
+// containers. The directory was renamed paraclaw → parachute-agent in 0.1.0.
+// `migrateLegacyAllowlistDir` (src/modules/mount-security/index.ts) moves any
+// pre-existing files from the legacy dir on first 0.1.0 boot. The legacy
+// constants are exported for the migration to consult; nothing else should
+// read them. Drop in 0.2.0.
+export const ALLOWLIST_DIR = path.join(HOME_DIR, '.config', 'parachute-agent');
+export const LEGACY_ALLOWLIST_DIR = path.join(HOME_DIR, '.config', 'paraclaw');
+export const MOUNT_ALLOWLIST_PATH = path.join(ALLOWLIST_DIR, 'mount-allowlist.json');
+export const SENDER_ALLOWLIST_PATH = path.join(ALLOWLIST_DIR, 'sender-allowlist.json');
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
@@ -32,25 +39,40 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 // Central DB lives outside the project tree so that:
 //   1. `git clean` / fresh checkouts can never wipe operator-owned state.
 //   2. Multiple project checkouts on the same host share one source of truth.
-//   3. The DB sits next to `master.key` under `<PARACHUTE_DIR>/claw/` so a
+//   3. The DB sits next to `master.key` under `<PARACHUTE_DIR>/agent/` so a
 //      single backup of that directory captures both crypto material and DB
 //      state.
 //
-// The legacy location was `<PROJECT_ROOT>/data/v2.db`. We migrate-on-startup
-// (see `migrateCentralDbLocation` in src/db/connection.ts) so existing installs
-// pick up the new path without manual intervention.
-export const CENTRAL_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
-export const CENTRAL_DB_PATH = process.env.PARACLAW_CENTRAL_DB_PATH || path.join(CENTRAL_DB_DIR, 'paraclaw.db');
+// Two legacy locations exist and are both migrated-on-startup
+// (see `migrateCentralDbLocation` in src/db/connection.ts):
+//   - `<PROJECT_ROOT>/data/v2.db` (pre-0.0.6 in-tree path)
+//   - `<PARACHUTE_DIR>/claw/paraclaw.db` (pre-0.1.0, before the
+//     paraclaw → parachute-agent rename)
+// `PARACHUTE_AGENT_CENTRAL_DB_PATH` is the canonical override; the legacy
+// `PARACLAW_CENTRAL_DB_PATH` name is read for one cycle (0.1.x) with a
+// one-shot warning so operator scripts and `.env` files still resolve.
+// Drop the legacy read in 0.2.0.
+export const CENTRAL_DB_DIR = path.join(PARACHUTE_DIR, 'agent');
+export const CENTRAL_DB_PATH =
+  readEnvWithLegacy('PARACHUTE_AGENT_CENTRAL_DB_PATH', 'PARACLAW_CENTRAL_DB_PATH') ||
+  path.join(CENTRAL_DB_DIR, 'agent.db');
 export const LEGACY_CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
+export const LEGACY_PARACLAW_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
+export const LEGACY_PARACLAW_DB_PATH = path.join(LEGACY_PARACLAW_DB_DIR, 'paraclaw.db');
 
 // Per-checkout image tag so two installs on the same host don't share
-// `paraclaw-agent:latest` and clobber each other on rebuild.
+// `parachute-agent-image:latest` and clobber each other on rebuild.
 export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || getContainerImageBase(PROJECT_ROOT);
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
 // Install slug — stamped onto every spawned container via --label so
 // cleanupOrphans only reaps containers from this install, not peers.
 export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
-export const CONTAINER_INSTALL_LABEL = `paraclaw-install=${INSTALL_SLUG}`;
+export const CONTAINER_INSTALL_LABEL = `parachute-agent-install=${INSTALL_SLUG}`;
+// Pre-0.1.0 label, before the paraclaw → parachute-agent rename. Kept in the
+// reap query for one cycle so containers spawned by an older host process get
+// cleaned up when this one starts. Drop in 0.2.0 (tracked as a follow-up
+// issue at PR open time).
+export const LEGACY_PARACLAW_INSTALL_LABEL = `paraclaw-install=${INSTALL_SLUG}`;
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10); // 10MB default
 export const MAX_MESSAGES_PER_PROMPT = Math.max(1, parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10);

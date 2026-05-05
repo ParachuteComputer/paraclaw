@@ -242,7 +242,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
       chat = new Chat({
         adapters: { [adapter.name]: adapter },
-        userName: adapter.userName || 'Paraclaw',
+        userName: adapter.userName || 'Parachute Agent',
         concurrency: config.concurrency ?? 'concurrent',
         state,
         logger: 'silent',

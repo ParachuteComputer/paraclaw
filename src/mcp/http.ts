@@ -2,9 +2,9 @@
  * HTTP MCP transport. Mounted at `/mcp` in `src/web/server.ts`.
  *
  * Auth: hub-issued JWT via `authenticate()` — same seam every other
- * `/api/*` route uses. The strongest claw scope on the token's grant
+ * `/api/*` route uses. The strongest agent scope on the token's grant
  * becomes the server's `effectiveScope`, which gates `tools/list` +
- * `tools/call`. We require at minimum `claw:read` to even open the
+ * `tools/call`. We require at minimum `agent:read` to even open the
  * MCP session — without it there's nothing to advertise.
  *
  * Stateless mode: a fresh server + transport pair per HTTP request,
@@ -17,14 +17,23 @@ import http from 'node:http';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { authenticate, type ClawScope } from '../web/auth.js';
+import { authenticate, type AgentScope } from '../web/auth.js';
 import { log } from '../log.js';
 import { buildMcpServer } from './server.js';
 
-function pickEffectiveScope(grantedScopes: string[]): ClawScope {
-  if (grantedScopes.includes('claw:admin') || grantedScopes.includes('vault:admin')) return 'claw:admin';
-  if (grantedScopes.includes('claw:write')) return 'claw:write';
-  return 'claw:read';
+function pickEffectiveScope(grantedScopes: string[]): AgentScope {
+  // Pre-0.1.0 compat: legacy `claw:*` grants are accepted alongside the new
+  // `agent:*` vocabulary. Both map to the same effective scope. Drop the
+  // legacy half in 0.2.0.
+  if (
+    grantedScopes.includes('agent:admin') ||
+    grantedScopes.includes('claw:admin') ||
+    grantedScopes.includes('vault:admin')
+  ) {
+    return 'agent:admin';
+  }
+  if (grantedScopes.includes('agent:write') || grantedScopes.includes('claw:write')) return 'agent:write';
+  return 'agent:read';
 }
 
 export async function handleMcpHttp(
@@ -32,7 +41,7 @@ export async function handleMcpHttp(
   res: http.ServerResponse,
   parsedBody?: unknown,
 ): Promise<void> {
-  const auth = await authenticate(req.headers.authorization, 'claw:read');
+  const auth = await authenticate(req.headers.authorization, 'agent:read');
   if (!auth.ok) {
     res.writeHead(auth.status, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: auth.error }));

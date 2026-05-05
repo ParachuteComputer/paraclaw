@@ -3,7 +3,7 @@
  * agent-provider credential source (paraclaw#78).
  * `/api/groups/:folder/agent-provider` — per-agent-group override
  * (paraclaw#86); same shape, scoped to the group's id. Both back the
- * `/claw/settings/agent-provider` and `/claw/groups/<folder>` UIs.
+ * `/agent/settings/agent-provider` and `/agent/groups/<folder>` UIs.
  *
  * Three sources, all paste-only:
  *   - `claude_setup_token` — operator runs `claude setup-token` on a host

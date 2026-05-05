@@ -1,6 +1,48 @@
 # Changelog
 
-All notable changes to Paraclaw will be documented in this file.
+All notable changes to parachute-agent will be documented in this file.
+
+## [0.1.0] - 2026-05-05
+
+Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's named-after-purpose convention (vault, notes, scribe, hub). The name on disk, in the npm registry, on the mount path, and on the wire all change. Operator data migrates automatically on first boot; tokens, container labels, and module manifests carry one cycle of back-compat.
+
+- **npm package.** `paraclaw` → `@openparachute/agent`. The `parachute-agent` bin wraps the same entry point.
+- **`.parachute/module.json` `name`** → `parachute-agent`. The hub picks up the new identifier from the manifest; old installs that re-pull will see the rename without intervention.
+- **Mount path.** `/claw/*` → `/agent/*`. Hub-fronted UI lives under `/agent/`. The SPA derives its mount from `import.meta.env.BASE_URL`, so the same bundle works at any prefix. **No 301 redirect** — hard cut. Re-bookmark.
+- **Data dir.** `~/.parachute/claw/{paraclaw.db,master.key}` → `~/.parachute/agent/{agent.db,master.key}`. **Auto-migrated on startup** the first time 0.1.x boots: the legacy file copies to the new path with mode 0600, and the legacy file is left in place as a manual-rm backup. Honors `PARACHUTE_HOME`. Both legacies (pre-0.0.6 in-tree `data/v2.db` and pre-0.1.0 `~/.parachute/claw/paraclaw.db`) are preferred over an absent current; if both exist, the paraclaw-era file wins.
+- **Container labels.** Spawn label is now `parachute-agent-install=<slug>`. Cleanup reaps both the new label and the legacy `paraclaw-install=<slug>` label for one upgrade cycle, so a 0.1.x host coming up against pre-0.1.0 orphan containers cleans them up correctly. **Drop `paraclaw-install` compat in 0.2.0** (tracked as a follow-up issue).
+- **Container image tag.** `paraclaw-agent-<slug>:latest` → `parachute-agent-image-<slug>:latest`. `container/build.sh` produces the new tag; `container-runner` spawns from it. The `-image-` infix avoids colliding with the npm package name.
+- **MCP scope strings + symbols.** Wire scopes are `agent:read|write|admin` (was `claw:*`). Hub-issued JWTs carrying legacy `claw:*` grants still pass — they normalize to their `agent:*` equivalents inside `hasScope` and `pickEffectiveScope`. **Drop `claw:*` normalization in 0.2.0.** TS symbols renamed: `ClawScope` → `AgentScope`; `SCOPE_CLAW_*` → `SCOPE_AGENT_*`.
+- **MCP server name.** `paraclaw` → `parachute-agent`. Tools advertise as `mcp__parachute_agent__<verb>-<noun>` to clients. Renamed in three places that all need to agree: the host-side stdio entrypoint (operator wires this into Claude Code via `claude mcp add parachute-agent …`), the host-side HTTP `/mcp` endpoint, and the container-side built-in MCP server that the in-container agent calls. **⚠ Operator action**: restart any active sessions on first boot — existing in-flight sessions have message history referencing `mcp__paraclaw__*` tool calls and need a fresh container to pick up the new tool prefix. New tool calls in restarted sessions use the new prefix; the historical log entries stay (they're conversation history, not tool routing). Closes paraclaw#110.
+- **Service registry.** `services-manifest` displayName `Paraclaw` → `Parachute Agent`; service identifiers (`parachute-agent-web-server`) and the `name: 'agent'` route entry follow.
+- **launchd / systemd.** No service-file generator changes in this PR — service install is now owned by the hub install path. Operators on existing installs who still have the old `computer.parachute.claw-<slug>.plist` / `paraclaw-<slug>.service` units will continue to work; re-running the hub installer rewrites them with the new label/unit name.
+
+### Operator migration steps (existing installs)
+
+1. **Stop the daemon** (so the migration sees a quiescent state):
+   - macOS: `launchctl unload ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist`
+   - Linux: `systemctl --user stop paraclaw-<slug>`
+2. **Pull the rename**: `git pull --ff-only` on the install dir, then `pnpm install` (the `postinstall` hook rebuilds the SPA bundle).
+3. **Start the daemon**. On first boot, you'll see one or both of these log lines once and only once:
+   ```
+   Central DB migrated from legacy location  from=…/paraclaw.db  to=…/agent.db
+   Master key migrated from legacy location   from=…/claw/master.key  to=…/agent/master.key
+   ```
+4. **Verify** via the web UI at the new mount: `/agent/` (was `/claw/`).
+5. **Re-register the MCP server** in any Claude Code (or other MCP client) configs. The stdio entrypoint hasn't moved, but the server name has — old `claude mcp add paraclaw …` registrations keep pointing at the old name and tools advertise as `mcp__paraclaw__*` instead of `mcp__parachute_agent__*`:
+   ```sh
+   claude mcp remove paraclaw
+   claude mcp add parachute-agent bun /path/to/install/src/mcp/stdio.ts
+   ```
+6. **Cleanup (optional)**: once you've verified the new install boots and decrypts secrets, delete the legacy backups: `rm ~/.parachute/claw/paraclaw.db ~/.parachute/claw/master.key && rmdir ~/.parachute/claw`.
+
+Browser sessions auto-migrate the SPA's `paraclaw.*` localStorage / sessionStorage keys (cached OAuth discovery, DCR client_id, tokens, in-flight flow state, setup-wizard resume state) to `parachute-agent.*` on first reload after the upgrade — no manual action required.
+
+- **Log filenames.** `logs/paraclaw.log` + `logs/paraclaw.error.log` → `logs/parachute-agent.log` + `logs/parachute-agent.error.log`. **Auto-renamed on first 0.1.0 boot** so historical entries stay accessible under the new name. The supervisor (launchd plist / systemd unit) is what routes the *live* daemon's stdout/stderr — until the operator re-runs `parachute install parachute-agent` to regenerate the unit, new entries continue landing in `paraclaw.log` (recreated by the supervisor after the rename) and the next supervisor-driven respawn opens it fresh. Once the unit is regenerated, subsequent boots write to `parachute-agent.log` directly. Operators tailing the new path see migrated history immediately; live writes follow on the next install-run.
+- **Env var prefix.** `PARACLAW_*` → `PARACHUTE_AGENT_*` (six vars: `_HUB_ORIGIN`, `_WEB_PORT`, `_WEB_BIND`, `_WEB_MOUNT`, `_WEB_ORIGIN`, `_CENTRAL_DB_PATH`). Each callsite reads the new name first, falls back to the legacy `PARACLAW_*` name if only that's set, and emits a one-shot deprecation warning per legacy name read. Operators can update their `.env` files at their leisure through 0.1.x; the legacy compat-read drops in 0.2.0. The Vite type declaration `VITE_PARACLAW_WEB_SERVER_URL` is also renamed to `VITE_PARACHUTE_AGENT_WEB_SERVER_URL` (the SPA doesn't read the value — it's a leftover declaration), no operator action needed.
+- **Allowlist directory.** `~/.config/paraclaw/{mount,sender}-allowlist.json` → `~/.config/parachute-agent/{mount,sender}-allowlist.json`. **Auto-moved on first 0.1.0 boot**: the legacy directory is left in place (operators may have stashed unrelated files there) but each known allowlist file is renamed to the new dir if the new path is absent. If both exist (e.g. operator pre-populated the new dir before upgrading), the new file wins and the legacy orphan is left for the operator to `rm`. Drop the auto-move in 0.2.0.
+- **Vault token-label default.** Fresh mints from the web UI's attach-vault flow and the new-group wizard now default to `agent-<folder>` (was `claw-<folder>`). Existing operator-typed labels keep working — the label is opaque to the vault, so prior `claw-<folder>` tokens continue to authenticate. Operators who want consistency can re-mint via the vault tokens UI. Reverses the parachute-agent#108 §2 deliberation in favor of brand consistency at the 0.1.0-stable cut.
+- **HKDF info strings — intentionally NOT renamed.** Five HKDF info constants (`paraclaw.secrets.v1`, `paraclaw.oauth.{client,access,refresh}.v1`, `paraclaw.provider-credentials.v1`) keep the `paraclaw.` prefix forever. They're cryptographic domain separators mixed into key derivation, not user-facing strings — renaming them would derive a different key and render every existing ciphertext row (secrets, OAuth tokens, provider credentials) undecryptable. Documented at each constant-definition site so a future brand sweep knows to skip these five lines. No operator action.
 
 ## [Unreleased]
 

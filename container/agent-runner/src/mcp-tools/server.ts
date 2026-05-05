@@ -33,7 +33,7 @@ export function registerTools(tools: McpToolDefinition[]): void {
 }
 
 export async function startMcpServer(): Promise<void> {
-  const server = new Server({ name: 'paraclaw', version: '2.0.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'parachute-agent', version: '2.0.0' }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: allTools.map((t) => t.tool),

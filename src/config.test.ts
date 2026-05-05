@@ -29,7 +29,7 @@ describe('PARACHUTE_DIR resolution', () => {
     process.env.HOME = '/Users/test';
     const cfg = await import('./config.js');
     expect(cfg.PARACHUTE_DIR).toBe('/tmp/sandbox-home');
-    expect(cfg.CENTRAL_DB_DIR).toBe('/tmp/sandbox-home/claw');
+    expect(cfg.CENTRAL_DB_DIR).toBe('/tmp/sandbox-home/agent');
   });
 
   it('falls back to <HOME>/.parachute when PARACHUTE_HOME unset', async () => {
@@ -37,38 +37,57 @@ describe('PARACHUTE_DIR resolution', () => {
     process.env.HOME = '/Users/test';
     const cfg = await import('./config.js');
     expect(cfg.PARACHUTE_DIR).toBe(path.join('/Users/test', '.parachute'));
-    expect(cfg.CENTRAL_DB_DIR).toBe(path.join('/Users/test', '.parachute', 'claw'));
+    expect(cfg.CENTRAL_DB_DIR).toBe(path.join('/Users/test', '.parachute', 'agent'));
   });
 
-  it('master.key lives next to the central DB under PARACHUTE_DIR/claw', async () => {
+  it('master.key lives next to the central DB under PARACHUTE_DIR/agent', async () => {
     process.env.PARACHUTE_HOME = '/tmp/sandbox-home-2';
     const cfg = await import('./config.js');
     const { getMasterKeyPath } = await import('./secrets/master-key.js');
     expect(getMasterKeyPath()).toBe(path.join(cfg.CENTRAL_DB_DIR, 'master.key'));
-    expect(getMasterKeyPath().startsWith('/tmp/sandbox-home-2/claw/')).toBe(true);
+    expect(getMasterKeyPath().startsWith('/tmp/sandbox-home-2/agent/')).toBe(true);
   });
 
-  it('PARACLAW_CENTRAL_DB_PATH still overrides the DB path independently', async () => {
+  it('PARACHUTE_AGENT_CENTRAL_DB_PATH overrides the DB path independently', async () => {
     process.env.PARACHUTE_HOME = '/tmp/ignored-for-db-path';
-    process.env.PARACLAW_CENTRAL_DB_PATH = '/tmp/explicit/db.sqlite';
+    process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH = '/tmp/explicit/db.sqlite';
     const cfg = await import('./config.js');
     expect(cfg.CENTRAL_DB_PATH).toBe('/tmp/explicit/db.sqlite');
+    delete process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH;
+  });
+
+  it('legacy PARACLAW_CENTRAL_DB_PATH read through 0.1.x compat (drop in 0.2.0)', async () => {
+    process.env.PARACHUTE_HOME = '/tmp/legacy-compat';
+    process.env.PARACLAW_CENTRAL_DB_PATH = '/tmp/legacy/db.sqlite';
+    delete process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH;
+    const cfg = await import('./config.js');
+    expect(cfg.CENTRAL_DB_PATH).toBe('/tmp/legacy/db.sqlite');
     delete process.env.PARACLAW_CENTRAL_DB_PATH;
   });
 
-  it('PARACHUTE_HOME + PARACLAW_CENTRAL_DB_PATH split: DB takes the override, master.key follows PARACHUTE_HOME', async () => {
-    // Intentional split. PARACLAW_CENTRAL_DB_PATH is an escape hatch for
-    // landing the DB on a different volume (e.g. NVMe scratch) while keeping
-    // the rest of paraclaw's persistent state — including the encryption
-    // key — under PARACHUTE_HOME. Anyone exporting just the DB file alone
-    // is doing it wrong: the ciphertext is unreadable without the master
-    // key that lives next to PARACHUTE_HOME's claw/ dir.
+  it('PARACHUTE_AGENT_CENTRAL_DB_PATH takes precedence over legacy PARACLAW_CENTRAL_DB_PATH', async () => {
+    process.env.PARACHUTE_HOME = '/tmp/precedence-check';
+    process.env.PARACLAW_CENTRAL_DB_PATH = '/tmp/legacy/db.sqlite';
+    process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH = '/tmp/current/db.sqlite';
+    const cfg = await import('./config.js');
+    expect(cfg.CENTRAL_DB_PATH).toBe('/tmp/current/db.sqlite');
+    delete process.env.PARACLAW_CENTRAL_DB_PATH;
+    delete process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH;
+  });
+
+  it('PARACHUTE_HOME + PARACHUTE_AGENT_CENTRAL_DB_PATH split: DB takes the override, master.key follows PARACHUTE_HOME', async () => {
+    // Intentional split. PARACHUTE_AGENT_CENTRAL_DB_PATH is an escape hatch
+    // for landing the DB on a different volume (e.g. NVMe scratch) while
+    // keeping the rest of parachute-agent's persistent state — including
+    // the encryption key — under PARACHUTE_HOME. Anyone exporting just the
+    // DB file alone is doing it wrong: the ciphertext is unreadable without
+    // the master key that lives next to PARACHUTE_HOME's agent/ dir.
     process.env.PARACHUTE_HOME = '/tmp/sandbox-split';
-    process.env.PARACLAW_CENTRAL_DB_PATH = '/var/db/claw.db';
+    process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH = '/var/db/agent.db';
     const cfg = await import('./config.js');
     const { getMasterKeyPath } = await import('./secrets/master-key.js');
-    expect(cfg.CENTRAL_DB_PATH).toBe('/var/db/claw.db');
-    expect(getMasterKeyPath()).toBe(path.join('/tmp/sandbox-split/claw', 'master.key'));
-    delete process.env.PARACLAW_CENTRAL_DB_PATH;
+    expect(cfg.CENTRAL_DB_PATH).toBe('/var/db/agent.db');
+    expect(getMasterKeyPath()).toBe(path.join('/tmp/sandbox-split/agent', 'master.key'));
+    delete process.env.PARACHUTE_AGENT_CENTRAL_DB_PATH;
   });
 });

@@ -125,14 +125,14 @@ export const channelTools: ToolDef[] = [
     name: 'list-channels',
     description:
       'List every channel wire in the install — each row is a (messaging-group → agent-group) routing rule with its engage/sender/policy/priority settings.',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => ({ wires: listAllWires() }),
   },
   {
     name: 'delete-channel-wire',
     description: 'Delete a channel wire by id. The agent_destinations row created at wire time is left in place.',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string', description: 'Channel wire id.' } },
@@ -152,7 +152,7 @@ export const channelTools: ToolDef[] = [
     name: 'update-channel-wire',
     description:
       'Update a channel wire by id. Any subset of engageMode, engagePattern, senderScope, ignoredMessagePolicy, priority can be supplied.',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: {

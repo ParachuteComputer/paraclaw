@@ -89,7 +89,7 @@ export function PrereqStep({ next }: StepProps) {
   return (
     <>
       <h3>Prerequisites</h3>
-      <p className="muted">paraclaw needs these in place before we can wire a channel.</p>
+      <p className="muted">parachute-agent needs these in place before we can wire a channel.</p>
       <ul style={{ listStyle: 'none', padding: 0, marginTop: '0.75rem' }}>
         {rows.map(({ label, check, fixHref, fixLabel }) => (
           <li key={label} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>

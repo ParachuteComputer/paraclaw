@@ -1,5 +1,5 @@
 /**
- * Paraclaw — main entry point.
+ * parachute-agent — main entry point.
  *
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.
@@ -8,7 +8,7 @@ import http from 'node:http';
 
 import { CENTRAL_DB_PATH } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
-import { initDb, migrateCentralDbLocation } from './db/connection.js';
+import { initDb, migrateCentralDbLocation, migrateMasterKeyLocation } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
@@ -16,7 +16,8 @@ import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
 import { migrateSessionsDir } from './session-manager.js';
 import { startWebServer } from './web/server.js';
-import { log } from './log.js';
+import { log, migrateLegacyLogFilenames } from './log.js';
+import { migrateLegacyAllowlistDir } from './modules/mount-security/index.js';
 import { runStartupBootstrap } from './startup-bootstrap.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -66,12 +67,16 @@ import {
 } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
-  log.info('Paraclaw starting');
+  log.info('parachute-agent starting');
 
-  // 1. Init central DB. One-shot relocation runs before open: legacy
-  // <PROJECT_ROOT>/data/v2.db moves to ~/.parachute/claw/paraclaw.db. After
-  // that, every host process (including the web server) opens the new path.
+  // 1. Init central DB. One-shot relocations run before open:
+  //    - legacy <PROJECT_ROOT>/data/v2.db (pre-0.0.6) → new path
+  //    - legacy <PARACHUTE_DIR>/claw/paraclaw.db (pre-0.1.0) → new path
+  //    - master.key copy from <PARACHUTE_DIR>/claw → <PARACHUTE_DIR>/agent
+  // After that, every host process (including the web server) opens the
+  // new path at <PARACHUTE_DIR>/agent/agent.db.
   migrateCentralDbLocation();
+  migrateMasterKeyLocation();
   const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db);
   log.info('Central DB ready', { path: CENTRAL_DB_PATH });
@@ -79,6 +84,8 @@ async function main(): Promise<void> {
   // 1b. One-time filesystem cutovers — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
   migrateSessionsDir();
+  migrateLegacyLogFilenames(process.cwd());
+  migrateLegacyAllowlistDir();
 
   // 2. Container runtime
   ensureContainerRuntimeRunning();
@@ -188,7 +195,7 @@ async function main(): Promise<void> {
   //    standalone @paraclaw/web-server package).
   webServer = startWebServer();
 
-  log.info('Paraclaw running');
+  log.info('parachute-agent running');
 }
 
 /** Graceful shutdown. */

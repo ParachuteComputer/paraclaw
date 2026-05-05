@@ -1,7 +1,7 @@
 /**
  * /api/secrets — CRUD over paraclaw's local AES-256-GCM secret store.
  *
- * Auth: `claw:admin` for mutation (POST/PUT/DELETE), `claw:read` for GET.
+ * Auth: `agent:admin` for mutation (POST/PUT/DELETE), `agent:read` for GET.
  * The mutation gate is admin-not-write because a write-only token would
  * otherwise be enough to swap any vault credential and silently MITM
  * downstream API calls. Plaintext values are accepted on POST and never

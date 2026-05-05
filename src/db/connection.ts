@@ -2,7 +2,7 @@ import { Database as RawDatabase } from 'bun:sqlite';
 import fs from 'fs';
 import path from 'path';
 
-import { CENTRAL_DB_PATH, LEGACY_CENTRAL_DB_PATH } from '../config.js';
+import { CENTRAL_DB_PATH, LEGACY_CENTRAL_DB_PATH, LEGACY_PARACLAW_DB_DIR, LEGACY_PARACLAW_DB_PATH } from '../config.js';
 import { log } from '../log.js';
 
 let _db: WrappedDatabase | null = null;
@@ -22,9 +22,14 @@ export function initDb(dbPath: string): WrappedDatabase {
 }
 
 /**
- * One-shot migration: relocate the central DB from its legacy in-tree location
- * (`<PROJECT_ROOT>/data/v2.db`) to the operator-owned `~/.parachute/claw/paraclaw.db`.
- * Idempotent — noop if the new path already exists OR the legacy path doesn't.
+ * One-shot migration: relocate the central DB from a legacy location to the
+ * operator-owned `<PARACHUTE_DIR>/agent/agent.db`. Two legacy locations are
+ * checked in priority order:
+ *   1. `<PARACHUTE_DIR>/claw/paraclaw.db` — pre-0.1.0, before the
+ *      paraclaw → parachute-agent rename.
+ *   2. `<PROJECT_ROOT>/data/v2.db` — pre-0.0.6, before central state moved
+ *      out of the project tree.
+ * Idempotent — noop if the new path already exists OR no legacy path does.
  *
  * The legacy file is left in place as a backup. Operators can rm it after they
  * verify the new location works; we don't delete on their behalf because the
@@ -37,18 +42,53 @@ export function initDb(dbPath: string): WrappedDatabase {
 export function migrateCentralDbLocation(
   legacy: string = LEGACY_CENTRAL_DB_PATH,
   current: string = CENTRAL_DB_PATH,
+  paraclawLegacy: string = LEGACY_PARACLAW_DB_PATH,
 ): void {
   if (fs.existsSync(current)) return; // already on the new location
-  if (!fs.existsSync(legacy)) return; // fresh install, nothing to migrate
+
+  // Prefer the paraclaw-era legacy path: it's the more recent state for
+  // anyone upgrading through 0.0.x → 0.1.0.
+  const source = fs.existsSync(paraclawLegacy) ? paraclawLegacy : fs.existsSync(legacy) ? legacy : null;
+  if (!source) return; // fresh install, nothing to migrate
 
   fs.mkdirSync(path.dirname(current), { recursive: true, mode: 0o700 });
   // Use copyFile (not rename) so a partial migration doesn't strand the user
   // between locations. After successful copy the legacy file stays as backup.
-  fs.copyFileSync(legacy, current);
+  fs.copyFileSync(source, current);
   fs.chmodSync(current, 0o600);
   log.info('Central DB migrated from legacy location', {
-    from: legacy,
+    from: source,
     to: current,
+    note: 'legacy file kept as backup; rm manually after verifying',
+  });
+}
+
+/**
+ * One-shot migration: copy `<PARACHUTE_DIR>/claw/master.key` to
+ * `<PARACHUTE_DIR>/agent/master.key` so encrypted-secret rows decrypted under
+ * the old key continue to decrypt after the paraclaw → parachute-agent
+ * rename. Idempotent — noop if the new key already exists OR the legacy
+ * key doesn't.
+ *
+ * The legacy file is left in place — same rationale as the DB migration.
+ *
+ * Path overrides exist for tests; production callers pass no args.
+ */
+export function migrateMasterKeyLocation(
+  legacyDir: string = LEGACY_PARACLAW_DB_DIR,
+  currentDir: string = path.dirname(CENTRAL_DB_PATH),
+): void {
+  const legacyKey = path.join(legacyDir, 'master.key');
+  const currentKey = path.join(currentDir, 'master.key');
+  if (fs.existsSync(currentKey)) return;
+  if (!fs.existsSync(legacyKey)) return;
+
+  fs.mkdirSync(currentDir, { recursive: true, mode: 0o700 });
+  fs.copyFileSync(legacyKey, currentKey);
+  fs.chmodSync(currentKey, 0o600);
+  log.info('Master key migrated from legacy location', {
+    from: legacyKey,
+    to: currentKey,
     note: 'legacy file kept as backup; rm manually after verifying',
   });
 }

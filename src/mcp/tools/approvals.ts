@@ -74,7 +74,7 @@ export function buildApprovalTools(getCallerSubject: () => string): ToolDef[] {
       name: 'list-approvals',
       description:
         'List pending approvals — agent-requested actions awaiting human consent (install_packages, add_mcp_server, …).',
-      scope: 'claw:read',
+      scope: 'agent:read',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       handler: async () => ({ approvals: listPending() }),
     },
@@ -82,7 +82,7 @@ export function buildApprovalTools(getCallerSubject: () => string): ToolDef[] {
       name: 'decide-approval',
       description:
         "Decide a pending approval. Routes through the same dispatcher the chat-card path uses, so the side effects (row delete, module-action run, agent notify) are identical. The deciding userId is recorded as the caller's JWT sub (or 'mcp:stdio' for stdio).",
-      scope: 'claw:admin',
+      scope: 'agent:admin',
       inputSchema: {
         type: 'object',
         properties: {
@@ -105,7 +105,7 @@ export function buildApprovalTools(getCallerSubject: () => string): ToolDef[] {
           value: decision,
           userId: getCallerSubject(),
           channelType: 'mcp',
-          platformId: 'paraclaw-mcp',
+          platformId: 'parachute-agent-mcp',
           threadId: null,
         });
         if (!handled) throw new Error('approval was decided by another path before our update landed');

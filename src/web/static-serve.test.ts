@@ -81,9 +81,9 @@ describe('normalizeMount', () => {
   });
 
   it('strips trailing slash', () => {
-    expect(normalizeMount('/claw')).toBe('/claw');
-    expect(normalizeMount('/claw/')).toBe('/claw');
-    expect(normalizeMount('/claw///')).toBe('/claw');
+    expect(normalizeMount('/agent')).toBe('/agent');
+    expect(normalizeMount('/agent/')).toBe('/agent');
+    expect(normalizeMount('/agent///')).toBe('/agent');
   });
 });
 
@@ -91,7 +91,7 @@ describe('makeServeStatic', () => {
   let distDir: string;
 
   beforeEach(() => {
-    distDir = mkdtempSync(join(tmpdir(), 'paraclaw-static-'));
+    distDir = mkdtempSync(join(tmpdir(), 'parachute-agent-static-'));
     writeFileSync(join(distDir, 'index.html'), '<!doctype html><html><body>shell</body></html>');
     mkdirSync(join(distDir, 'assets'));
     writeFileSync(join(distDir, 'assets', 'index-X.js'), 'export const k = 1;');
@@ -144,12 +144,12 @@ describe('makeServeStatic', () => {
     });
   });
 
-  describe('mount="/claw"', () => {
+  describe('mount="/agent"', () => {
     let server: http.Server;
     let baseUrl: string;
 
     beforeEach(async () => {
-      const handler = makeServeStatic({ distDir, mount: '/claw' });
+      const handler = makeServeStatic({ distDir, mount: '/agent' });
       const ctx = await startServer((req, res) => {
         const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
         handler(req, res, url.pathname);
@@ -162,29 +162,29 @@ describe('makeServeStatic', () => {
       await stopServer(server);
     });
 
-    it('GET /claw/ serves index.html as text/html (prefix stripped → /)', async () => {
-      const r = await fetchPath(baseUrl, '/claw/');
+    it('GET /agent/ serves index.html as text/html (prefix stripped → /)', async () => {
+      const r = await fetchPath(baseUrl, '/agent/');
       expect(r.status).toBe(200);
       expect(r.contentType).toContain('text/html');
       expect(r.body).toContain('shell');
     });
 
-    it('GET /claw/assets/index-X.js serves the JS bundle correctly (the regression #13 fixed)', async () => {
-      const r = await fetchPath(baseUrl, '/claw/assets/index-X.js');
+    it('GET /agent/assets/index-X.js serves the JS bundle correctly (the regression #13 fixed)', async () => {
+      const r = await fetchPath(baseUrl, '/agent/assets/index-X.js');
       expect(r.status).toBe(200);
       expect(r.contentType).toContain('application/javascript');
       expect(r.body).toBe('export const k = 1;');
     });
 
-    it('GET /claw/assets/index-X.css serves CSS correctly', async () => {
-      const r = await fetchPath(baseUrl, '/claw/assets/index-X.css');
+    it('GET /agent/assets/index-X.css serves CSS correctly', async () => {
+      const r = await fetchPath(baseUrl, '/agent/assets/index-X.css');
       expect(r.status).toBe(200);
       expect(r.contentType).toContain('text/css');
       expect(r.body).toBe('body { color: red }');
     });
 
-    it('GET /claw/some/spa/route SPA-falls-back to index.html (BrowserRouter resolves)', async () => {
-      const r = await fetchPath(baseUrl, '/claw/some/spa/route');
+    it('GET /agent/some/spa/route SPA-falls-back to index.html (BrowserRouter resolves)', async () => {
+      const r = await fetchPath(baseUrl, '/agent/some/spa/route');
       expect(r.status).toBe(200);
       expect(r.contentType).toContain('text/html');
       expect(r.body).toContain('shell');
@@ -192,7 +192,7 @@ describe('makeServeStatic', () => {
 
     it('GET /assets/index-X.js (no prefix) still serves the file — matches notes-serve behavior', async () => {
       // Defense-in-depth: paths that don't start with the mount aren't 404'd.
-      // The real frontend never makes these requests (Vite bakes /claw/ into
+      // The real frontend never makes these requests (Vite bakes /agent/ into
       // the bundle's asset URLs), but a direct test from a healthcheck or
       // local-dev curl shouldn't break — same shape as
       // parachute-hub/src/notes-serve.ts at paths-without-prefix.
@@ -202,8 +202,8 @@ describe('makeServeStatic', () => {
       expect(r.body).toBe('export const k = 1;');
     });
 
-    it('GET /claw is a SPA route (no trailing slash) → SPA shell', async () => {
-      const r = await fetchPath(baseUrl, '/claw');
+    it('GET /agent is a SPA route (no trailing slash) → SPA shell', async () => {
+      const r = await fetchPath(baseUrl, '/agent');
       expect(r.status).toBe(200);
       expect(r.contentType).toContain('text/html');
       expect(r.body).toContain('shell');

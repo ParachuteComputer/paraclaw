@@ -41,7 +41,7 @@ export const agentGroupTools: ToolDef[] = [
     name: 'list-agent-groups',
     description:
       'List every agent group (workspace) in the install. Returns id, folder, name, agent provider, vault attachment, and live status (alive sessions, container state).',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => {
       return {
@@ -61,7 +61,7 @@ export const agentGroupTools: ToolDef[] = [
     name: 'get-agent-group',
     description:
       'Look up a single agent group by folder slug. Same view shape as list-agent-groups. Returns null when the folder is unknown.',
-    scope: 'claw:read',
+    scope: 'agent:read',
     inputSchema: {
       type: 'object',
       properties: { folder: { type: 'string', description: 'Folder slug, e.g. "my-agent".' } },
@@ -80,7 +80,7 @@ export const agentGroupTools: ToolDef[] = [
     name: 'create-agent-group',
     description:
       'Create a new agent group. Validates the folder slug, refuses duplicates, writes the DB row, and scaffolds the per-group filesystem (CLAUDE.md, container.json, …).',
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: {
@@ -115,7 +115,7 @@ export const agentGroupTools: ToolDef[] = [
     name: 'attach-vault',
     description:
       "Attach a Parachute Vault to an agent group as an MCP server. Writes the entry into the group's container.json and records the attachment in parachute.json. The vault token must already be minted.",
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: {
@@ -159,7 +159,7 @@ export const agentGroupTools: ToolDef[] = [
     name: 'detach-vault',
     description:
       "Detach a previously attached vault from an agent group. Removes the MCP entry from container.json and the attach record from parachute.json. Does NOT revoke the vault token — that's a separate action against the vault.",
-    scope: 'claw:admin',
+    scope: 'agent:admin',
     inputSchema: {
       type: 'object',
       properties: {
