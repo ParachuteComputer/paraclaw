@@ -2,6 +2,7 @@
   "name": "@openparachute/agent",
   "version": "0.1.0",
   "description": "Parachute Agent — per-session containerized AI agent companion.",
+  "license": "AGPL-3.0",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "main": "src/index.ts",
