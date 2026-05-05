@@ -97,13 +97,18 @@ describe('migrateLegacyAuthKeys', () => {
     localStorage.setItem('paraclaw.tokens.http://hub', '{"access_token":"t"}');
 
     migrateLegacyAuthKeys();
-    const snapshotAfterFirst = { ...localStorage };
     migrateLegacyAuthKeys();
-    const snapshotAfterSecond = { ...localStorage };
 
-    expect(snapshotAfterSecond).toEqual(snapshotAfterFirst);
+    // Spreading a Storage fake enumerates its method properties, not the
+    // stored data — so a snapshot-equality check would pass regardless of
+    // behavior. Assert the post-state explicitly: legacy keys gone, new
+    // keys hold the original values, and storage holds exactly the two
+    // migrated entries (no orphans, no duplicates).
+    expect(localStorage.getItem('paraclaw.discovery')).toBeNull();
+    expect(localStorage.getItem('paraclaw.tokens.http://hub')).toBeNull();
     expect(localStorage.getItem('parachute-agent.discovery')).toBe('{"hubOrigin":"http://hub"}');
     expect(localStorage.getItem('parachute-agent.tokens.http://hub')).toBe('{"access_token":"t"}');
+    expect(localStorage.length).toBe(2);
   });
 
   it('drops the stale legacy key when both old and new exist (new wins)', () => {

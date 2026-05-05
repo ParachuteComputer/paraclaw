@@ -42,4 +42,4 @@ If denied, you'll get a chat message telling you the request was rejected. Do no
 
 ## Credential failures
 
-Paraclaw injects credentials into your container as env vars at spawn time, not through a runtime gateway. There's nothing for you to approve or unblock — the secret is either present (call works) or absent (call fails with 401/403). If a credential call fails, tell the user the secret is missing or expired and stop. They can add or rotate it from the `/secrets` page in the paraclaw web UI.
+parachute-agent injects credentials into your container as env vars at spawn time, not through a runtime gateway. There's nothing for you to approve or unblock — the secret is either present (call works) or absent (call fails with 401/403). If a credential call fails, tell the user the secret is missing or expired and stop. They can add or rotate it from the `/secrets` page in the parachute-agent web UI.

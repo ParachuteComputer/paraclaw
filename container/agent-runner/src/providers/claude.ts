@@ -171,7 +171,7 @@ const preToolUseHook: HookCallback = async (input) => {
   if (SDK_DISALLOWED_TOOLS.includes(toolName)) {
     return {
       decision: 'block',
-      stopReason: `Tool '${toolName}' is not available in this environment — use the paraclaw equivalent.`,
+      stopReason: `Tool '${toolName}' is not available in this environment — use the parachute-agent equivalent.`,
     } as unknown as ReturnType<HookCallback>;
   }
   // Bash exposes its timeout via the tool_input.timeout field (ms). Any other

@@ -11,13 +11,13 @@ You can deploy web applications to Vercel using the `vercel` CLI.
 
 ## Auth
 
-Paraclaw injects a `VERCEL_TOKEN` env var into your container at spawn time when one is configured in the host's secret store. The Vercel CLI picks it up automatically — you don't need to pass `--token` on commands. To verify auth:
+parachute-agent injects a `VERCEL_TOKEN` env var into your container at spawn time when one is configured in the host's secret store. The Vercel CLI picks it up automatically — you don't need to pass `--token` on commands. To verify auth:
 
 ```bash
 vercel whoami
 ```
 
-If this fails with an auth error, ask the user to add a Vercel token to paraclaw's secret store (web UI → `/secrets`, name it `VERCEL_TOKEN`). They can create one at https://vercel.com/account/tokens. Once added, the next container spawn picks it up.
+If this fails with an auth error, ask the user to add a Vercel token to parachute-agent's secret store (web UI → `/secrets`, name it `VERCEL_TOKEN`). They can create one at https://vercel.com/account/tokens. Once added, the next container spawn picks it up.
 
 ## Deploying
 
@@ -74,7 +74,7 @@ echo "value" | vercel env add VAR_NAME production```
 | `Error: Rate limited` | Wait and retry. Don't loop — report to user |
 | `Error: You have reached your project limit` | User needs to upgrade Vercel plan or delete unused projects |
 | `ENOTFOUND api.vercel.com` | Network issue. Check proxy connectivity |
-| Auth error after `vercel whoami` | Credential may be expired. Ask the user to refresh `VERCEL_TOKEN` in paraclaw's `/secrets` page |
+| Auth error after `vercel whoami` | Credential may be expired. Ask the user to refresh `VERCEL_TOKEN` in parachute-agent's `/secrets` page |
 
 ## Building Websites — Delegate to Frontend Engineer
 
