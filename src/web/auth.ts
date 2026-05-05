@@ -7,13 +7,14 @@
  * The shared scope-guard library proposed in cli#59 will eventually absorb
  * both.
  *
- * Hub origin resolution: `PARACLAW_HUB_ORIGIN` (test override) →
+ * Hub origin resolution: `PARACHUTE_AGENT_HUB_ORIGIN` (test override; legacy
+ * `PARACLAW_HUB_ORIGIN` accepted through 0.1.x with a one-shot warning) →
  * `PARACHUTE_HUB_ORIGIN` (the hub lifecycle stamps this on every spawned
  * service — see `parachute-hub/src/commands/lifecycle.ts`) → loopback
  * `http://127.0.0.1:1939`. We intentionally do NOT read services.json —
  * the hub is the dispatcher, not a registered service in that file
- * (matching vault's choice). Tailnet-served paraclaw must see the hub's
- * tailnet origin or `iss` mismatch rejects every JWT.
+ * (matching vault's choice). Tailnet-served parachute-agent must see the
+ * hub's tailnet origin or `iss` mismatch rejects every JWT.
  *
  * Scope vocabulary: `agent:read` / `agent:write` / `agent:admin` with
  * `admin ⊇ write ⊇ read` inheritance per
@@ -28,6 +29,8 @@
  * 0.2.0 (tracked as a follow-up at PR open time).
  */
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+
+import { readEnvWithLegacy } from '../env.js';
 
 const DEFAULT_HUB_LOOPBACK = 'http://127.0.0.1:1939';
 
@@ -53,7 +56,7 @@ function normalizeGranted(s: string): string {
 }
 
 export function getHubOrigin(): string {
-  const override = process.env.PARACLAW_HUB_ORIGIN?.replace(/\/$/, '');
+  const override = readEnvWithLegacy('PARACHUTE_AGENT_HUB_ORIGIN', 'PARACLAW_HUB_ORIGIN')?.replace(/\/$/, '');
   if (override && override.length > 0) return override;
   const fromHub = process.env.PARACHUTE_HUB_ORIGIN?.replace(/\/$/, '');
   if (fromHub && fromHub.length > 0) return fromHub;

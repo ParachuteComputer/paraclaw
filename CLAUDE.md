@@ -235,7 +235,7 @@ const cb       = `${window.location.origin}${import.meta.env.BASE_URL}oauth/call
 <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
 ```
 
-The server-side mirror lives in `web/server/src/server.ts`: `MOUNT` (from `PARACLAW_WEB_MOUNT`) is stripped uniformly before dispatch so `/api/*` and static-serve both see paths without the prefix.
+The server-side mirror lives in `web/server/src/server.ts`: `MOUNT` (from `PARACHUTE_AGENT_WEB_MOUNT`, with legacy `PARACLAW_WEB_MOUNT` accepted through 0.1.x) is stripped uniformly before dispatch so `/api/*` and static-serve both see paths without the prefix.
 
 ### SPA build is wired into install
 
@@ -268,7 +268,7 @@ If you spin a parachute-agent sandbox **on the same host as a live install**, th
 | `INSTALL_SLUG` | `sha1(cwd)[:8]` | Same project root → same slug → `cleanupOrphans` reaps live containers via the `parachute-agent-install=<slug>` label (and the legacy `paraclaw-install=<slug>` label, reaped through 0.1.x) |
 | Central DB + `master.key` | `~/.parachute/agent/` | Both installs share the operator-owned home dir |
 | Webhook port | `WEBHOOK_PORT` (default 3000) | Two listeners on one port → `EADDRINUSE` |
-| Web port | `PARACLAW_WEB_PORT` (default 1944) | Same. Env var name retained from the paraclaw era; rename queued for 0.2.0 |
+| Web port | `PARACHUTE_AGENT_WEB_PORT` (default 1944) | Same. Legacy `PARACLAW_WEB_PORT` accepted through 0.1.x with a deprecation warning |
 
 ### Safe sandbox pattern
 
@@ -286,7 +286,7 @@ cd /tmp/parachute-agent-sandbox
 export PARACHUTE_HOME=/tmp/parachute-agent-sandbox-home
 
 # 3. Different ports — pick anything free. Don't rely on default 1944/3000.
-export PARACLAW_WEB_PORT=2944
+export PARACHUTE_AGENT_WEB_PORT=2944
 export WEBHOOK_PORT=3944
 
 # 4. Bootstrap state programmatically (init-first-agent / API). Don't
@@ -298,9 +298,9 @@ pnpm run dev
 ### Don't do
 
 - `cd <live-parachute-agent>` and run sandbox there with overrides — same INSTALL_SLUG, `cleanupOrphans` reaps live containers regardless of DB-path overrides.
-- Override only `PARACLAW_CENTRAL_DB_PATH` — `master.key` still lands at `~/.parachute/agent/master.key` if `PARACHUTE_HOME` is unset, and you'll cross-decrypt against the live key.
+- Override only `PARACHUTE_AGENT_CENTRAL_DB_PATH` — `master.key` still lands at `~/.parachute/agent/master.key` if `PARACHUTE_HOME` is unset, and you'll cross-decrypt against the live key.
 - Set `HOME=/tmp/...` instead of `PARACHUTE_HOME` — affects every other tool's home-dir lookup. parachute-agent honors HOME for ergonomic compat, but `PARACHUTE_HOME` is the precise knob for "reroute parachute-agent's persistent state."
-- Combine `PARACHUTE_HOME` with `PARACLAW_CENTRAL_DB_PATH` unless you understand the split — the DB lands at the explicit override path but `master.key` still follows `PARACHUTE_HOME` (sits at `<PARACHUTE_HOME>/agent/master.key`). Exporting just the DB file alone yields unreadable ciphertext on the receiving side. The split is intentional — the override lets you put the DB on a different volume — but the two atoms only travel together when you let both default off `PARACHUTE_HOME`.
+- Combine `PARACHUTE_HOME` with `PARACHUTE_AGENT_CENTRAL_DB_PATH` unless you understand the split — the DB lands at the explicit override path but `master.key` still follows `PARACHUTE_HOME` (sits at `<PARACHUTE_HOME>/agent/master.key`). Exporting just the DB file alone yields unreadable ciphertext on the receiving side. The split is intentional — the override lets you put the DB on a different volume — but the two atoms only travel together when you let both default off `PARACHUTE_HOME`.
 
 ### After the sandbox
 

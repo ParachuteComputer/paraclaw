@@ -15,10 +15,11 @@
  *
  * Operator setup: register `${origin}${mount}/api/apps/<provider>/callback`
  * as an authorized redirect URI in the provider's OAuth client console.
- * `${mount}` is `PARACLAW_WEB_MOUNT` (e.g. `/agent` when fronted by the
- * Parachute hub), empty when parachute-agent serves at the origin root. The
- * origin is derived from `req.headers.host` (or `PARACLAW_WEB_ORIGIN` if
- * set, for tunneled deployments).
+ * `${mount}` is `PARACHUTE_AGENT_WEB_MOUNT` (e.g. `/agent` when fronted by
+ * the Parachute hub), empty when parachute-agent serves at the origin root.
+ * The origin is derived from `req.headers.host` (or
+ * `PARACHUTE_AGENT_WEB_ORIGIN` if set, for tunneled deployments). Legacy
+ * `PARACLAW_WEB_*` names accepted through 0.1.x with a one-shot warning.
  */
 import http from 'node:http';
 
@@ -47,6 +48,7 @@ import { buildAuthorizeUrl, exchangeCode, fetchUserinfo, revokeToken } from '../
 import { getProvider } from '../../oauth/providers/index.js';
 import { consumeState, mintState } from '../../oauth/state-store.js';
 import { log } from '../../log.js';
+import { readEnvWithLegacy } from '../../env.js';
 
 interface AppConfigView {
   id: string;
@@ -137,7 +139,7 @@ async function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
 }
 
 function originFromReq(req: http.IncomingMessage): string {
-  const env = process.env.PARACLAW_WEB_ORIGIN;
+  const env = readEnvWithLegacy('PARACHUTE_AGENT_WEB_ORIGIN', 'PARACLAW_WEB_ORIGIN');
   if (env) return env.replace(/\/$/, '');
   const host = req.headers.host ?? 'localhost:1944';
   const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
@@ -145,12 +147,12 @@ function originFromReq(req: http.IncomingMessage): string {
 }
 
 function callbackUri(req: http.IncomingMessage, providerSlug: string): string {
-  // Must include PARACLAW_WEB_MOUNT (e.g. `/agent`) when the daemon is
-  // fronted at a path prefix — otherwise the provider redirects the
+  // Must include PARACHUTE_AGENT_WEB_MOUNT (e.g. `/agent`) when the daemon
+  // is fronted at a path prefix — otherwise the provider redirects the
   // browser to ${origin}/api/... which 404s on the hub. Authorize +
   // token-exchange use this same string, so the operator-registered
   // redirect_uri in the provider console must match.
-  const mount = (process.env.PARACLAW_WEB_MOUNT ?? '').replace(/\/$/, '');
+  const mount = (readEnvWithLegacy('PARACHUTE_AGENT_WEB_MOUNT', 'PARACLAW_WEB_MOUNT') ?? '').replace(/\/$/, '');
   return `${originFromReq(req)}${mount}/api/apps/${providerSlug}/callback`;
 }
 
@@ -366,7 +368,7 @@ export async function handleAppsRoute(ctx: AppsRouteContext): Promise<boolean> {
     // Redirect back to the SPA. We don't know the SPA's deep-link;
     // the operator's UI handles `/apps?connected=<id>`. Fall back to
     // root if the mount-prefix env isn't set.
-    const mount = (process.env.PARACLAW_WEB_MOUNT ?? '').replace(/\/$/, '');
+    const mount = (readEnvWithLegacy('PARACHUTE_AGENT_WEB_MOUNT', 'PARACLAW_WEB_MOUNT') ?? '').replace(/\/$/, '');
     redirect(res, `${originFromReq(req)}${mount}/apps?connected=${connectionId}`);
     return true;
   }

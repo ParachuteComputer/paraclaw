@@ -38,7 +38,7 @@ Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's name
 
 Browser sessions auto-migrate the SPA's `paraclaw.*` localStorage / sessionStorage keys (cached OAuth discovery, DCR client_id, tokens, in-flight flow state, setup-wizard resume state) to `parachute-agent.*` on first reload after the upgrade — no manual action required.
 
-`PARACLAW_*` env var names (`PARACLAW_HUB_ORIGIN`, `PARACLAW_WEB_PORT`, `PARACLAW_WEB_BIND`, `PARACLAW_WEB_MOUNT`, `PARACLAW_WEB_ORIGIN`, `PARACLAW_CENTRAL_DB_PATH`) are retained through 0.1.x for operator-config back-compat. Renaming queued for 0.2.0.
+- **Env var prefix.** `PARACLAW_*` → `PARACHUTE_AGENT_*` (six vars: `_HUB_ORIGIN`, `_WEB_PORT`, `_WEB_BIND`, `_WEB_MOUNT`, `_WEB_ORIGIN`, `_CENTRAL_DB_PATH`). Each callsite reads the new name first, falls back to the legacy `PARACLAW_*` name if only that's set, and emits a one-shot deprecation warning per legacy name read. Operators can update their `.env` files at their leisure through 0.1.x; the legacy compat-read drops in 0.2.0. The Vite type declaration `VITE_PARACLAW_WEB_SERVER_URL` is also renamed to `VITE_PARACHUTE_AGENT_WEB_SERVER_URL` (the SPA doesn't read the value — it's a leftover declaration), no operator action needed.
 
 ## [Unreleased]
 

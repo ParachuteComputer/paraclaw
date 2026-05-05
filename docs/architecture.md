@@ -629,7 +629,7 @@ The lifecycle and routing manifest the hub reads on install:
 
 Mount: parachute-agent lives under `/agent/` behind the hub on the user's tailnet.
 The UI bundle and every server route honour the mount via
-`import.meta.env.BASE_URL` and `PARACLAW_WEB_MOUNT` (see CLAUDE.md's
+`import.meta.env.BASE_URL` and `PARACHUTE_AGENT_WEB_MOUNT` (see CLAUDE.md's
 "Web UI (mount-aware)" section). The mount is not optional and not
 hardcoded.
 

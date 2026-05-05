@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 
-import { readEnvFile } from './env.js';
+import { readEnvFile, readEnvWithLegacy } from './env.js';
 import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from './install-slug.js';
 import { isValidTimezone } from './timezone.js';
 
@@ -41,10 +41,14 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 //   - `<PROJECT_ROOT>/data/v2.db` (pre-0.0.6 in-tree path)
 //   - `<PARACHUTE_DIR>/claw/paraclaw.db` (pre-0.1.0, before the
 //     paraclaw → parachute-agent rename)
-// The PARACLAW_CENTRAL_DB_PATH env var name is retained for operator-config
-// back-compat through 0.1.x; rename queued for 0.2.0.
+// `PARACHUTE_AGENT_CENTRAL_DB_PATH` is the canonical override; the legacy
+// `PARACLAW_CENTRAL_DB_PATH` name is read for one cycle (0.1.x) with a
+// one-shot warning so operator scripts and `.env` files still resolve.
+// Drop the legacy read in 0.2.0.
 export const CENTRAL_DB_DIR = path.join(PARACHUTE_DIR, 'agent');
-export const CENTRAL_DB_PATH = process.env.PARACLAW_CENTRAL_DB_PATH || path.join(CENTRAL_DB_DIR, 'agent.db');
+export const CENTRAL_DB_PATH =
+  readEnvWithLegacy('PARACHUTE_AGENT_CENTRAL_DB_PATH', 'PARACLAW_CENTRAL_DB_PATH') ||
+  path.join(CENTRAL_DB_DIR, 'agent.db');
 export const LEGACY_CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
 export const LEGACY_PARACLAW_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
 export const LEGACY_PARACLAW_DB_PATH = path.join(LEGACY_PARACLAW_DB_DIR, 'paraclaw.db');

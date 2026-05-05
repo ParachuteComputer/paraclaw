@@ -131,21 +131,21 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await fixture.stop();
-  if (prevHubOrigin === undefined) delete process.env.PARACLAW_HUB_ORIGIN;
-  else process.env.PARACLAW_HUB_ORIGIN = prevHubOrigin;
+  if (prevHubOrigin === undefined) delete process.env.PARACHUTE_AGENT_HUB_ORIGIN;
+  else process.env.PARACHUTE_AGENT_HUB_ORIGIN = prevHubOrigin;
 });
 
 beforeEach(() => {
-  prevHubOrigin = process.env.PARACLAW_HUB_ORIGIN;
-  process.env.PARACLAW_HUB_ORIGIN = fixture.origin;
+  prevHubOrigin = process.env.PARACHUTE_AGENT_HUB_ORIGIN;
+  process.env.PARACHUTE_AGENT_HUB_ORIGIN = fixture.origin;
   fixture.setUnreachable(false);
   fixture.setKeys([kp]);
   resetJwksCache();
 });
 
 afterEach(() => {
-  if (prevHubOrigin === undefined) delete process.env.PARACLAW_HUB_ORIGIN;
-  else process.env.PARACLAW_HUB_ORIGIN = prevHubOrigin;
+  if (prevHubOrigin === undefined) delete process.env.PARACHUTE_AGENT_HUB_ORIGIN;
+  else process.env.PARACHUTE_AGENT_HUB_ORIGIN = prevHubOrigin;
 });
 
 describe('validateHubJwt', () => {
@@ -184,20 +184,27 @@ describe('validateHubJwt', () => {
 describe('getHubOrigin', () => {
   // The hub lifecycle (parachute-hub/src/commands/lifecycle.ts) stamps
   // PARACHUTE_HUB_ORIGIN onto every spawned service so iss-strict JWT
-  // validation works behind tailnet proxying. PARACLAW_HUB_ORIGIN is the
-  // test/per-service override. Loopback fallback exists for local-dev when
-  // the hub isn't supervising the process.
+  // validation works behind tailnet proxying. PARACHUTE_AGENT_HUB_ORIGIN
+  // is the test/per-service override; legacy PARACLAW_HUB_ORIGIN is read
+  // through 0.1.x with a one-shot deprecation warning (drop in 0.2.0).
+  // Loopback fallback exists for local-dev when the hub isn't supervising
+  // the process.
+  let prevAgent: string | undefined;
   let prevParaclaw: string | undefined;
   let prevParachute: string | undefined;
 
   beforeEach(() => {
+    prevAgent = process.env.PARACHUTE_AGENT_HUB_ORIGIN;
     prevParaclaw = process.env.PARACLAW_HUB_ORIGIN;
     prevParachute = process.env.PARACHUTE_HUB_ORIGIN;
+    delete process.env.PARACHUTE_AGENT_HUB_ORIGIN;
     delete process.env.PARACLAW_HUB_ORIGIN;
     delete process.env.PARACHUTE_HUB_ORIGIN;
   });
 
   afterEach(() => {
+    if (prevAgent === undefined) delete process.env.PARACHUTE_AGENT_HUB_ORIGIN;
+    else process.env.PARACHUTE_AGENT_HUB_ORIGIN = prevAgent;
     if (prevParaclaw === undefined) delete process.env.PARACLAW_HUB_ORIGIN;
     else process.env.PARACLAW_HUB_ORIGIN = prevParaclaw;
     if (prevParachute === undefined) delete process.env.PARACHUTE_HUB_ORIGIN;
@@ -209,10 +216,22 @@ describe('getHubOrigin', () => {
     expect(getHubOrigin()).toBe('https://parachute.taildf9ce2.ts.net');
   });
 
-  it('PARACLAW_HUB_ORIGIN overrides PARACHUTE_HUB_ORIGIN', () => {
+  it('PARACHUTE_AGENT_HUB_ORIGIN overrides PARACHUTE_HUB_ORIGIN', () => {
     process.env.PARACHUTE_HUB_ORIGIN = 'https://parachute.taildf9ce2.ts.net';
-    process.env.PARACLAW_HUB_ORIGIN = 'http://localhost:9999';
+    process.env.PARACHUTE_AGENT_HUB_ORIGIN = 'http://localhost:9999';
     expect(getHubOrigin()).toBe('http://localhost:9999');
+  });
+
+  it('falls back to legacy PARACLAW_HUB_ORIGIN through 0.1.x compat', () => {
+    process.env.PARACHUTE_HUB_ORIGIN = 'https://parachute.taildf9ce2.ts.net';
+    process.env.PARACLAW_HUB_ORIGIN = 'http://localhost:9998';
+    expect(getHubOrigin()).toBe('http://localhost:9998');
+  });
+
+  it('PARACHUTE_AGENT_HUB_ORIGIN takes precedence over legacy PARACLAW_HUB_ORIGIN', () => {
+    process.env.PARACLAW_HUB_ORIGIN = 'http://legacy.example';
+    process.env.PARACHUTE_AGENT_HUB_ORIGIN = 'http://current.example';
+    expect(getHubOrigin()).toBe('http://current.example');
   });
 
   it('falls back to loopback when neither env is set', () => {
@@ -222,7 +241,7 @@ describe('getHubOrigin', () => {
   it('strips trailing slash from either env', () => {
     process.env.PARACHUTE_HUB_ORIGIN = 'https://hub.example/';
     expect(getHubOrigin()).toBe('https://hub.example');
-    process.env.PARACLAW_HUB_ORIGIN = 'https://override.example/';
+    process.env.PARACHUTE_AGENT_HUB_ORIGIN = 'https://override.example/';
     expect(getHubOrigin()).toBe('https://override.example');
   });
 });

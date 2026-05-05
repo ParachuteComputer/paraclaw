@@ -79,22 +79,24 @@ import { validateDiscordBotToken } from './discord-validate.js';
 import { validateTelegramBotToken } from './telegram-validate.js';
 import { getSecret, putSecret } from '../secrets/index.js';
 import { channelTokenSecretName } from '../startup-bootstrap.js';
+import { readEnvWithLegacy } from '../env.js';
 
 const PROJECT_ROOT = process.cwd();
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
 // Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
-// (1944, claimed for paraclaw 2026-04-27 via parachute-hub#…). Override
-// via PARACLAW_WEB_PORT for tests / non-default deployments.
-const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 1944);
-const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
+// (1944, claimed for parachute-agent 2026-04-27 via parachute-hub#…). Override
+// via PARACHUTE_AGENT_WEB_PORT for tests / non-default deployments. Legacy
+// `PARACLAW_WEB_PORT` accepted through 0.1.x with a one-shot warning.
+const PORT = Number(readEnvWithLegacy('PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT') ?? 1944);
+const HOST = readEnvWithLegacy('PARACHUTE_AGENT_WEB_BIND', 'PARACLAW_WEB_BIND') ?? '127.0.0.1';
 // When fronted by `parachute expose tailnet` at a path prefix, set
-// PARACLAW_WEB_MOUNT to that prefix (e.g. `/agent`) so static-serve strips
-// it before resolving against dist/. The hub-managed lifecycle (parachute-
-// hub#83) sets this from `module.json` `paths[0]` automatically. Empty
-// string = serve at the origin root (default). Env var name retains
-// the `PARACLAW_` prefix for operator-config back-compat through 0.1.x;
-// rename to `PARACHUTE_AGENT_WEB_MOUNT` is queued for 0.2.0.
-const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
+// PARACHUTE_AGENT_WEB_MOUNT to that prefix (e.g. `/agent`) so static-serve
+// strips it before resolving against dist/. The hub-managed lifecycle
+// (parachute-hub#83) sets this from `module.json` `paths[0]` automatically.
+// Empty string = serve at the origin root (default). Legacy
+// `PARACLAW_WEB_MOUNT` accepted through 0.1.x with a one-shot warning;
+// drop in 0.2.0.
+const MOUNT = normalizeMount(readEnvWithLegacy('PARACHUTE_AGENT_WEB_MOUNT', 'PARACLAW_WEB_MOUNT') ?? '');
 /** Exported for tests; serves as the value reported by `/api/health` and registered with hub. */
 export const SERVICE_VERSION: string = pkg.version;
 
@@ -916,7 +918,7 @@ export function startWebServer(): http.Server {
       }
       // MCP transport — same auth seam as /api/* routes (hub JWT, agent:read
       // minimum). Mount-aware: hits `/mcp` whether the install lives at
-      // origin root or behind PARACLAW_WEB_MOUNT.
+      // origin root or behind PARACHUTE_AGENT_WEB_MOUNT.
       if (dispatchPath === '/mcp' || dispatchPath.startsWith('/mcp/')) {
         await handleMcpHttp(req, res);
         return;
