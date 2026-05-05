@@ -111,8 +111,8 @@ describe('ensureContainerImage', () => {
 
   it('retags from a current-prefix peer when the expected image is missing', () => {
     // Operator dir-rename case: the previously-built image carries the old
-    // INSTALL_SLUG (16f7e9e8); the daemon now boots under a new slug.
-    const peer = 'parachute-agent-image-16f7e9e8:latest';
+    // INSTALL_SLUG (cafef00d); the daemon now boots under a new slug.
+    const peer = 'parachute-agent-image-cafef00d:latest';
     inspectFailed();
     mockExecSync.mockReturnValueOnce(`${peer}\nnode:24-bookworm-slim\n`); // list
     mockExecSync.mockReturnValueOnce(''); // tag
@@ -135,7 +135,7 @@ describe('ensureContainerImage', () => {
     // Operator upgrades a pre-0.1.0 install: their on-disk image is named
     // `paraclaw-agent-<slug>:latest`. Auto-retag rather than forcing a
     // 5-minute rebuild they didn't ask for.
-    const legacyPeer = 'paraclaw-agent-deadbeef:latest';
+    const legacyPeer = 'paraclaw-agent-cafef00d:latest';
     inspectFailed();
     mockExecSync.mockReturnValueOnce(legacyPeer);
     mockExecSync.mockReturnValueOnce('');
@@ -164,14 +164,14 @@ describe('ensureContainerImage', () => {
     // is absent, but the peer-search guard against picking it back up keeps
     // the function safe if a future caller pre-checks a different way.
     inspectFailed();
-    mockExecSync.mockReturnValueOnce(`${CONTAINER_IMAGE}\nparachute-agent-image-16f7e9e8:latest\n`);
+    mockExecSync.mockReturnValueOnce(`${CONTAINER_IMAGE}\nparachute-agent-image-cafef00d:latest\n`);
     mockExecSync.mockReturnValueOnce('');
 
     ensureContainerImage();
 
     const tagCall = mockExecSync.mock.calls.find((call) => String(call[0]).startsWith(`${CONTAINER_RUNTIME_BIN} tag`));
     expect(tagCall).toBeDefined();
-    expect(String(tagCall![0])).toContain('parachute-agent-image-16f7e9e8:latest');
+    expect(String(tagCall![0])).toContain('parachute-agent-image-cafef00d:latest');
   });
 
   it('ignores arbitrary non-matching tags (e.g. base images, unrelated projects)', () => {

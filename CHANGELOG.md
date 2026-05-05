@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.5] - 2026-05-05
+
+### Changed
+
+- **Depersonalize test fixtures + comments (no behavior change).** The #119 PR snuck a real install-slug (`16f7e9e8`, the sha1 prefix of one operator's specific path) into `src/container-runtime.test.ts` peer-image fixtures, and a comment in `src/container-runtime.ts` named the specific `mv` command that exposed paraclaw#114. Codebase should be operator-agnostic. Replaced the fixture slug with the synthetic `cafef00d` consistently across all current-prefix and legacy-prefix peer-image tests (the `PEER_IMAGE_PATTERN` regex matches any 8-hex slug, so the choice is cosmetic), and rephrased the comment to reference paraclaw#114 without the personal `mv` command. No behavior change; same 540/540 host tests.
+
 ## [0.1.2-rc.4] - 2026-05-05
 
 ### Fixed
