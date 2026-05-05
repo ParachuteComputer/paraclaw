@@ -2,6 +2,13 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.1] - 2026-05-05
+
+### Fixed
+
+- **Master-key migration: detect the both-exist split-state explicitly.** `migrateMasterKeyLocation` previously silent-no-op'd when both `<PARACHUTE_DIR>/claw/master.key` and `<PARACHUTE_DIR>/agent/master.key` existed — masking the case where an earlier 0.1.x boot generated a fresh key at the new path before the legacy was copied (so encrypted secrets sealed under the legacy key became undecryptable). The function now logs a `warn` with both paths and copy-pasteable recovery commands. Standalone scripts that ran `migrateCentralDbLocation` (`init-cli-agent`, `init-first-agent`, `seed-discord`) now also run `migrateMasterKeyLocation` before opening the DB, so a script-driven first touch of the central DB no longer skips the key copy.
+- **SPA browser title.** `<title>Paraclaw</title>` → `<title>Parachute Agent</title>` and the meta description now references "Parachute Agent groups". Two GitHub repo links in the navbar and the group-detail page point at `parachute-agent` (not the renamed-from `paraclaw` repo URL).
+
 ## [0.1.1] - 2026-05-05
 
 ### Changed
