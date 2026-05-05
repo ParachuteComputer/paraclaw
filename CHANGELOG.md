@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.1] - 2026-05-05
+
+### Changed
+
+- **License.** parachute-agent now declares **AGPL-3.0** in `package.json` and `LICENSE`, matching the rest of the Parachute ecosystem (vault, hub, scribe, notes). The original NanoClaw MIT license is preserved verbatim as `LICENSE-NANOCLAW-MIT` to honor the upstream copyright (Copyright (c) 2026 Gavriel — https://github.com/qwibitai/nanoclaw). Modifications and the combined work are AGPL-3.0; the original NanoClaw code remains MIT-licensed and obtainable from the upstream project. Resolves the npm "Proprietary" display that came from the missing `license` field at 0.1.0.
+
 ## [0.1.0] - 2026-05-05
 
 Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's named-after-purpose convention (vault, notes, scribe, hub). The name on disk, in the npm registry, on the mount path, and on the wire all change. Operator data migrates automatically on first boot; tokens, container labels, and module manifests carry one cycle of back-compat.

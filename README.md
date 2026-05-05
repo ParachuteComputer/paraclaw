@@ -187,4 +187,11 @@ See [CHANGELOG.md](CHANGELOG.md) for breaking changes.
 
 ## License
 
-MIT
+parachute-agent is licensed under the GNU Affero General Public License v3.0
+([LICENSE](./LICENSE)).
+
+It is a derivative of [NanoClaw](https://github.com/qwibitai/nanoclaw) (MIT —
+see [LICENSE-NANOCLAW-MIT](./LICENSE-NANOCLAW-MIT) for the original copyright
+notice). Substantial modifications and the combined work are AGPL-3.0; the
+original NanoClaw code remains MIT-licensed and can be obtained from the
+upstream project.
