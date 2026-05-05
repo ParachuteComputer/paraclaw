@@ -37,7 +37,7 @@ export function App() {
     <div className="page">
       <nav className="nav">
         <Link to="/" className="brand">
-          Paraclaw <span className="sub">claws &amp; vaults</span>
+          Parachute Agent <span className="sub">agents &amp; vaults</span>
         </Link>
         <Link to="/">Agent groups</Link>
         <Link to="/sessions">Sessions</Link>

@@ -103,7 +103,7 @@ async function ensureClient(hubOrigin: string): Promise<string> {
     body: JSON.stringify({
       redirect_uris: [redirectUri],
       scope: REQUESTED_SCOPES,
-      client_name: "Paraclaw web UI",
+      client_name: "Parachute Agent web UI",
       token_endpoint_auth_method: "none",
     }),
   });

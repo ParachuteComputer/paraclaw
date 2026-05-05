@@ -67,7 +67,7 @@ export function TestConnectionStep({ state, patchState, next, back }: StepProps)
     <>
       <h3>Test connection</h3>
       <p className="muted">
-        Confirm {adapterLabel} accepts the token by hitting <code>{apiPath}</code>. Paste the token once — paraclaw's
+        Confirm {adapterLabel} accepts the token by hitting <code>{apiPath}</code>. Paste the token once — parachute-agent's
         secrets store is write-only by design, so we can't read it back from <code>/api/secrets</code>.
       </p>
 

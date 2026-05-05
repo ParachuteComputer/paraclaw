@@ -443,7 +443,7 @@ export function GroupDetail() {
               <code>find-path</code>, <code>vault-info</code>. Constrained by the scope you chose.
             </p>
             <p className="muted">
-              Paraclaw doesn't impose a vault-note layout on the agent — the claw decides how to use vault access. (See{' '}
+              Parachute Agent doesn't impose a vault-note layout — the agent decides how to use vault access. (See{' '}
               <a
                 href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
                 target="_blank"
