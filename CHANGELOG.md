@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.4] - 2026-05-05
+
+### Fixed
+
+- **Inbound: extract attachment files only after the row commits.** `writeSessionMessage` previously decoded base64 attachment data and wrote files to `inbox/<messageId>/` *before* the `INSERT … ON CONFLICT(id) DO NOTHING` returned. After paraclaw#92 / #95 made duplicate-dispatch a warm code path (sender-approval replay, Telegram getUpdates retry, chat-sdk re-emit), a replay carrying the same `messages_in.id` but mutated attachment bytes would silently clobber the on-disk file under the original message id while the DB row stayed unchanged — divergent state with no audit trail. Reordered: insert with raw inline-base64 content, check `inserted`, and only when `inserted === true` run `extractAttachmentFiles` and `UPDATE messages_in SET content = ?` with the path-replaced form. Disk state now stays strictly downstream of the row commit. Closes paraclaw#96. Refs #95, #92.
+
 ## [0.1.2-rc.3] - 2026-05-05
 
 ### Fixed
