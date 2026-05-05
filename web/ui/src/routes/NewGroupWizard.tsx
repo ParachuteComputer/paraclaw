@@ -242,10 +242,10 @@ export function NewGroupWizard() {
                   type="text"
                   value={tokenLabel}
                   onChange={(e) => setTokenLabel(e.target.value)}
-                  placeholder={`claw-${folder || '<folder>'}`}
+                  placeholder={`agent-${folder || '<folder>'}`}
                 />
                 <p className="dim">
-                  Used for revocation. Default: <code>claw-{folder || '<folder>'}</code>.
+                  Used for revocation. Default: <code>agent-{folder || '<folder>'}</code>.
                 </p>
               </div>
 
@@ -302,7 +302,7 @@ export function NewGroupWizard() {
               <>
                 <div>token label</div>
                 <div>
-                  <code>{tokenLabel.trim() || `claw-${folder}`}</code>
+                  <code>{tokenLabel.trim() || `agent-${folder}`}</code>
                 </div>
                 <div>token</div>
                 <div>

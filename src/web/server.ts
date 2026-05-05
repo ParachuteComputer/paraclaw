@@ -515,13 +515,15 @@ async function handleApi(
           error(res, 400, `invalid vault.scope: ${scope}`);
           return;
         }
-        // Default vault-token label keeps the `claw-` prefix despite the
-        // paraclaw → parachute-agent rename. Existing operator-managed
-        // tokens already use this prefix; changing the default would
-        // surface as confusing-divergent labels with no real benefit.
-        // Operators can rename labels at-will via the vault token UI.
-        // See parachute-agent#108 §2 for the full deliberation.
-        const tokenLabel = body.vault.tokenLabel ?? `claw-${folder}`;
+        // Default vault-token label tracks the paraclaw → parachute-agent
+        // rename: fresh mints from this UI use `agent-<folder>`. Existing
+        // operator-typed `claw-<folder>` labels keep working — the label is
+        // opaque to the vault, so prior tokens are unaffected. Operators
+        // can rename labels at-will via the vault token UI; the divergent-
+        // labels concern from parachute-agent#108 §2 was reweighed at
+        // 0.1.0-stable cut and the rename was preferred for consistency
+        // with the rest of the brand sweep.
+        const tokenLabel = body.vault.tokenLabel ?? `agent-${folder}`;
         const vaultBaseUrl = body.vault.vaultBaseUrl ?? 'http://127.0.0.1:1940/vault/default';
         let token = body.vault.token;
         if (!token) {
@@ -651,7 +653,9 @@ async function handleApi(
           return;
         }
         const vaultBaseUrl = body.vaultBaseUrl ?? 'http://127.0.0.1:1940/vault/default';
-        const tokenLabel = body.tokenLabel ?? `claw-${folder}`;
+        // Same default-rename as the attach-vault path above; see the
+        // comment block there for the parachute-agent#108 §2 reweigh.
+        const tokenLabel = body.tokenLabel ?? `agent-${folder}`;
 
         let token = body.token;
         if (!token) {
