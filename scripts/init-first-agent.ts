@@ -35,7 +35,7 @@ import path from 'path';
 
 import { CENTRAL_DB_PATH, DATA_DIR } from '../src/config.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../src/db/agent-groups.js';
-import { initDb, migrateCentralDbLocation } from '../src/db/connection.js';
+import { initDb, migrateCentralDbLocation, migrateMasterKeyLocation } from '../src/db/connection.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
@@ -170,6 +170,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   migrateCentralDbLocation();
+  migrateMasterKeyLocation();
   const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db); // idempotent
 

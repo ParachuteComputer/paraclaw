@@ -4,7 +4,7 @@
  * Usage: pnpm exec tsx scripts/seed-discord.ts
  */
 import { CENTRAL_DB_PATH } from '../src/config.js';
-import { initDb, migrateCentralDbLocation } from '../src/db/connection.js';
+import { initDb, migrateCentralDbLocation, migrateMasterKeyLocation } from '../src/db/connection.js';
 import { runMigrations } from '../src/db/migrations/index.js';
 import { createAgentGroup, getAgentGroup } from '../src/db/agent-groups.js';
 import {
@@ -14,6 +14,7 @@ import {
 } from '../src/db/messaging-groups.js';
 
 migrateCentralDbLocation();
+migrateMasterKeyLocation();
 const db = initDb(CENTRAL_DB_PATH);
 runMigrations(db);
 

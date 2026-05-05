@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { migrateCentralDbLocation, migrateMasterKeyLocation } from './connection.js';
+import { log } from '../log.js';
 
 let tmp: string;
 let legacy: string;
@@ -129,15 +130,47 @@ describe('migrateMasterKeyLocation', () => {
     }
   });
 
-  it('current key already exists — legacy left untouched (no clobber)', () => {
-    mkdirSync(legacyDir, { recursive: true });
-    writeFileSync(legacyKey, 'old-key-bytes-padding-to-32-aaaa');
+  it('current key already exists, no legacy — noop (already migrated, or fresh install)', () => {
     mkdirSync(currentDir, { recursive: true });
     writeFileSync(currentKey, 'new-key-bytes-padding-to-32-aaaa');
 
     migrateMasterKeyLocation(legacyDir, currentDir);
 
     expect(readFileSync(currentKey, 'utf8')).toBe('new-key-bytes-padding-to-32-aaaa');
+    expect(existsSync(legacyKey)).toBe(false);
+  });
+
+  it('both keys exist — log a warn with recovery hint, leave both untouched', () => {
+    // Regression for parachute-agent#114: a previous boot generated a fresh
+    // key at the new path before the legacy was copied, so encrypted-secret
+    // rows sealed under the legacy key are now undecryptable. Don't
+    // clobber — surface it loudly so the operator can choose how to recover.
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(legacyKey, 'old-key-bytes-padding-to-32-aaaa');
+    mkdirSync(currentDir, { recursive: true });
+    writeFileSync(currentKey, 'new-key-bytes-padding-to-32-aaaa');
+
+    const original = log.warn;
+    const calls: Array<[string, Record<string, unknown> | undefined]> = [];
+    log.warn = ((msg: string, data?: Record<string, unknown>) => {
+      calls.push([msg, data]);
+    }) as typeof log.warn;
+    try {
+      migrateMasterKeyLocation(legacyDir, currentDir);
+    } finally {
+      log.warn = original;
+    }
+
+    expect(readFileSync(currentKey, 'utf8')).toBe('new-key-bytes-padding-to-32-aaaa');
     expect(readFileSync(legacyKey, 'utf8')).toBe('old-key-bytes-padding-to-32-aaaa');
+    expect(calls).toHaveLength(1);
+    const [msg, ctx] = calls[0]!;
+    expect(msg).toMatch(/both/i);
+    const ctxObj = ctx as { legacy: string; current: string; note: string };
+    expect(ctxObj.legacy).toBe(legacyKey);
+    expect(ctxObj.current).toBe(currentKey);
+    // Recovery hint must name both paths so an operator can copy/paste it.
+    expect(ctxObj.note).toContain(legacyKey);
+    expect(ctxObj.note).toContain(currentKey);
   });
 });
