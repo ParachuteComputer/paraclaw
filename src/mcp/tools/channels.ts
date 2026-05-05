@@ -4,9 +4,11 @@
  * mention-sticky; sender_scope = all | known; ignored_message_policy = drop
  * | accumulate); the API contract these tools speak — same as the web API —
  * uses the new vocabulary (engageMode = mention | pattern | all; senderScope
- * = allowlist | all; ignoredMessagePolicy = drop | silent). The translator
- * is small so we inline it here rather than carving out a shared module
- * that would need its own seam through the route handler.
+ * = allowlist | unrestricted; ignoredMessagePolicy = drop | silent). The
+ * translator is small so we inline it here rather than carving out a shared
+ * module that would need its own seam through the route handler. (paraclaw#94
+ * renamed wire-side `'all'` → `'unrestricted'` to keep it literal-disjoint
+ * from the DB-side `'all'`.)
  */
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getDb } from '../../db/connection.js';
@@ -25,8 +27,12 @@ import type {
 import type { ToolDef } from '../types.js';
 
 type ApiEngageMode = 'mention' | 'pattern' | 'all';
-type ApiSenderScope = 'allowlist' | 'all';
+type ApiSenderScope = 'allowlist' | 'unrestricted';
 type ApiIgnoredMessagePolicy = 'drop' | 'silent';
+
+const VALID_API_ENGAGE_MODES: ApiEngageMode[] = ['mention', 'pattern', 'all'];
+const VALID_API_SENDER_SCOPES: ApiSenderScope[] = ['allowlist', 'unrestricted'];
+const VALID_API_IGNORED_POLICIES: ApiIgnoredMessagePolicy[] = ['drop', 'silent'];
 
 const ALL_PATTERN = '.';
 
@@ -35,7 +41,7 @@ function dbToApiEngage(mode: DbEngageMode, pattern: string | null): ApiEngageMod
   return 'mention';
 }
 function dbToApiSenderScope(s: DbSenderScope): ApiSenderScope {
-  return s === 'known' ? 'allowlist' : 'all';
+  return s === 'known' ? 'allowlist' : 'unrestricted';
 }
 function dbToApiIgnoredPolicy(p: DbIgnoredMessagePolicy): ApiIgnoredMessagePolicy {
   return p === 'accumulate' ? 'silent' : 'drop';
@@ -159,7 +165,7 @@ export const channelTools: ToolDef[] = [
         id: { type: 'string' },
         engageMode: { type: 'string', enum: ['mention', 'pattern', 'all'] },
         engagePattern: { type: ['string', 'null'] },
-        senderScope: { type: 'string', enum: ['allowlist', 'all'] },
+        senderScope: { type: 'string', enum: ['allowlist', 'unrestricted'] },
         ignoredMessagePolicy: { type: 'string', enum: ['drop', 'silent'] },
         priority: { type: 'number' },
       },
@@ -170,6 +176,40 @@ export const channelTools: ToolDef[] = [
       const id = String(args.id ?? '');
       const current = getMessagingGroupAgent(id);
       if (!current) throw new Error(`channel wire not found: ${id}`);
+
+      // Validate enum-typed fields up front. The MCP SDK does NOT enforce
+      // `inputSchema` against `tools/call` args before dispatch, so a
+      // stale-schema client (e.g. one that cached the pre-rc.6 senderScope
+      // enum) can land here with values the downstream if/else chains
+      // don't recognize — and silently no-op'd patches would round-trip
+      // back as success while the column kept its previous value (the
+      // exact silent-coerce class paraclaw#94 set out to close). Mirrors
+      // validatePatchInput in src/web/routes/channels.ts.
+      if (
+        args.engageMode !== undefined &&
+        !VALID_API_ENGAGE_MODES.includes(args.engageMode as ApiEngageMode)
+      ) {
+        throw new Error(
+          `invalid engageMode: ${String(args.engageMode)} — must be one of ${JSON.stringify(VALID_API_ENGAGE_MODES)}`,
+        );
+      }
+      if (
+        args.senderScope !== undefined &&
+        !VALID_API_SENDER_SCOPES.includes(args.senderScope as ApiSenderScope)
+      ) {
+        throw new Error(
+          `invalid senderScope: ${String(args.senderScope)} — must be one of ${JSON.stringify(VALID_API_SENDER_SCOPES)}`,
+        );
+      }
+      if (
+        args.ignoredMessagePolicy !== undefined &&
+        !VALID_API_IGNORED_POLICIES.includes(args.ignoredMessagePolicy as ApiIgnoredMessagePolicy)
+      ) {
+        throw new Error(
+          `invalid ignoredMessagePolicy: ${String(args.ignoredMessagePolicy)} — must be one of ${JSON.stringify(VALID_API_IGNORED_POLICIES)}`,
+        );
+      }
+
       const patch: Partial<MessagingGroupAgent> = {};
       if (args.engageMode === 'all') {
         patch.engage_mode = 'pattern';
@@ -186,7 +226,7 @@ export const channelTools: ToolDef[] = [
         patch.engage_pattern = args.engagePattern as string | null;
       }
       if (args.senderScope === 'allowlist') patch.sender_scope = 'known';
-      else if (args.senderScope === 'all') patch.sender_scope = 'all';
+      else if (args.senderScope === 'unrestricted') patch.sender_scope = 'all';
       if (args.ignoredMessagePolicy === 'silent') patch.ignored_message_policy = 'accumulate';
       else if (args.ignoredMessagePolicy === 'drop') patch.ignored_message_policy = 'drop';
       if (typeof args.priority === 'number' && Number.isFinite(args.priority)) patch.priority = args.priority;

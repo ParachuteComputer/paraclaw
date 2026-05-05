@@ -360,7 +360,7 @@ function RoutingRulesEditor({
           onChange={(e) => setSenderScope(e.target.value as SenderScope)}
           disabled={saving}
         >
-          <option value="all">all — anyone in the thread</option>
+          <option value="unrestricted">unrestricted — anyone in the thread</option>
           <option value="allowlist">allowlist — only members of the agent group</option>
         </select>
       </div>

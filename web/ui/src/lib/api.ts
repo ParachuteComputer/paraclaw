@@ -992,8 +992,10 @@ export type ChannelKind = 'discord' | 'telegram' | 'cli';
 
 // Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type EngageMode = 'mention' | 'pattern' | 'all';
-// Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
-export type SenderScope = 'allowlist' | 'all';
+// Wire vocabulary. The wire `'unrestricted'` corresponds to the DB
+// `'all'` (paraclaw#94 — kept literal-disjoint so a grep-refactor can't
+// conflate the two unions through the translator).
+export type SenderScope = 'allowlist' | 'unrestricted';
 // Wire vocabulary. See dbToApi* in src/web/routes/channels.ts for DB equivalents in src/types.ts.
 export type IgnoredMessagePolicy = 'drop' | 'silent';
 

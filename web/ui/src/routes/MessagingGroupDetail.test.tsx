@@ -56,7 +56,7 @@ const baseDetail: api.MessagingGroupDetailView = {
       agentGroupName: 'Main agent',
       engageMode: 'mention',
       engagePattern: null,
-      senderScope: 'all',
+      senderScope: 'unrestricted',
       ignoredMessagePolicy: 'drop',
       priority: 0,
       createdAt: '2026-04-20T10:00:00Z',
