@@ -10,7 +10,7 @@
 > read and write the user's knowledge graph.
 
 This document is the canonical architecture reference for parachute-agent
-(formerly paraclaw, renamed in 0.1.0-rc.1). It defines the primitives every
+(formerly paraclaw, renamed in 0.1.0). It defines the primitives every
 other doc references, the runtime shape, the schema, the API surface, the
 trust model, and the integration contract with the rest of the Parachute
 ecosystem. It is aimed at contributors who want to understand or extend

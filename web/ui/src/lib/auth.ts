@@ -62,7 +62,7 @@ function tokensKey(hubOrigin: string): string {
  * the paraclaw-era prefix (`paraclaw.*`) to the post-rename prefix
  * (`parachute-agent.*`). Idempotent — safe to call on every bootstrap.
  *
- * Without this, an existing operator hitting 0.1.0-rc.1 would lose their
+ * Without this, an existing operator hitting 0.1.0 would lose their
  * cached discovery, registered client_id, and tokens, and get bounced to
  * the hub for a fresh consent. The DCR client_id is one-shot per origin,
  * so re-registering would also leave a stale client row on the hub.

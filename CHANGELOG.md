@@ -2,7 +2,7 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
-## [0.1.0-rc.1] - 2026-05-04
+## [0.1.0] - 2026-05-05
 
 Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's named-after-purpose convention (vault, notes, scribe, hub). The name on disk, in the npm registry, on the mount path, and on the wire all change. Operator data migrates automatically on first boot; tokens, container labels, and module manifests carry one cycle of back-compat.
 

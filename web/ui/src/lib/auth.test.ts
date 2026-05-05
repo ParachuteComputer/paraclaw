@@ -3,7 +3,7 @@
  * key migration from the paraclaw-era prefix to `parachute-agent.*`. Existing
  * 0.0.x operators have cached discovery + DCR client_id + tokens under the
  * old prefix; without migration their first reload after upgrading to
- * 0.1.0-rc.1 silently re-runs OAuth + leaves a stale client row on the hub.
+ * 0.1.0 silently re-runs OAuth + leaves a stale client row on the hub.
  *
  * Tracked in parachute-agent#108. The migration is meant to be called once
  * at SPA bootstrap (in main.tsx) before anything else touches storage.

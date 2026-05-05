@@ -15,7 +15,7 @@ If you are a fresh install (you ran `git clone`, not `git pull`) and there are n
 
 # parachute-agent
 
-Parachute's per-session containerized AI agent companion. (Formerly **paraclaw**, renamed in 0.1.0-rc.1.) See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
+Parachute's per-session containerized AI agent companion. (Formerly **paraclaw**, renamed in 0.1.0.) See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
 
 ## Quick Context
 
