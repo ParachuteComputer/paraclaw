@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.3] - 2026-05-05
+
+### Fixed
+
+- **Auto-retag the per-install container image when `INSTALL_SLUG` shifts.** `INSTALL_SLUG = sha1(process.cwd())[:8]`, so an operator dir-rename (the trigger that exposed this bug today: `mv paraclaw parachute-agent`) flips the slug. The previously-built image carried the old slug; new container spawns went out under the new slug; `docker run` returned `code=125` ("image not found") and every Telegram message produced a silent crashloop. New `ensureContainerImage()` step in `src/index.ts` (between `ensureContainerRuntimeRunning` and `cleanupOrphans`) detects the mismatch at boot and `docker tag`s any `parachute-agent-image-<peer-slug>:latest` it finds onto the expected name. Pre-0.1.0 `paraclaw-agent-<slug>:latest` peers also match (one cycle of compat). When no peer is on disk at all (fresh install, no `./container/build.sh` run yet), the daemon now fails visibly at startup with an actionable error instead of crashlooping silently. Closes paraclaw#114.
+
 ## [0.1.2-rc.2] - 2026-05-05
 
 ### Fixed

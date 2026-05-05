@@ -22,9 +22,10 @@ import {
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
+  ensureContainerImage,
   cleanupOrphans,
 } from './container-runtime.js';
-import { CONTAINER_INSTALL_LABEL, LEGACY_PARACLAW_INSTALL_LABEL } from './config.js';
+import { CONTAINER_IMAGE, CONTAINER_INSTALL_LABEL, LEGACY_PARACLAW_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
 
 beforeEach(() => {
@@ -79,6 +80,105 @@ describe('ensureContainerRuntimeRunning', () => {
 
     expect(() => ensureContainerRuntimeRunning()).toThrow('Container runtime is required but failed to start');
     expect(log.error).toHaveBeenCalled();
+  });
+});
+
+// --- ensureContainerImage ---
+
+describe('ensureContainerImage', () => {
+  // Each test enumerates its own queue rather than going through a helper —
+  // throwing scenarios skip the retag call, so a generic helper would queue
+  // a `mockReturnValueOnce` that never gets consumed and leaks into the next
+  // test (vi.clearAllMocks doesn't drain the response queue).
+  const inspectFailed = () => {
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('No such image');
+    });
+  };
+
+  it('no-ops when the expected image is already present', () => {
+    mockExecSync.mockReturnValueOnce('{}'); // inspect — image exists
+
+    ensureContainerImage();
+
+    expect(mockExecSync).toHaveBeenCalledTimes(1);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      `${CONTAINER_RUNTIME_BIN} image inspect ${CONTAINER_IMAGE}`,
+      expect.objectContaining({ stdio: 'pipe' }),
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('retags from a current-prefix peer when the expected image is missing', () => {
+    // Operator dir-rename case: the previously-built image carries the old
+    // INSTALL_SLUG (16f7e9e8); the daemon now boots under a new slug.
+    const peer = 'parachute-agent-image-16f7e9e8:latest';
+    inspectFailed();
+    mockExecSync.mockReturnValueOnce(`${peer}\nnode:24-bookworm-slim\n`); // list
+    mockExecSync.mockReturnValueOnce(''); // tag
+
+    ensureContainerImage();
+
+    expect(mockExecSync).toHaveBeenCalledTimes(3);
+    expect(mockExecSync).toHaveBeenNthCalledWith(
+      3,
+      `${CONTAINER_RUNTIME_BIN} tag ${peer} ${CONTAINER_IMAGE}`,
+      expect.objectContaining({ stdio: 'pipe' }),
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      'Container image missing for current install slug — retagging from peer',
+      expect.objectContaining({ expected: CONTAINER_IMAGE, peer }),
+    );
+  });
+
+  it('retags from a pre-0.1.0 paraclaw-agent peer (one cycle of back-compat)', () => {
+    // Operator upgrades a pre-0.1.0 install: their on-disk image is named
+    // `paraclaw-agent-<slug>:latest`. Auto-retag rather than forcing a
+    // 5-minute rebuild they didn't ask for.
+    const legacyPeer = 'paraclaw-agent-deadbeef:latest';
+    inspectFailed();
+    mockExecSync.mockReturnValueOnce(legacyPeer);
+    mockExecSync.mockReturnValueOnce('');
+
+    ensureContainerImage();
+
+    expect(mockExecSync).toHaveBeenNthCalledWith(
+      3,
+      `${CONTAINER_RUNTIME_BIN} tag ${legacyPeer} ${CONTAINER_IMAGE}`,
+      expect.objectContaining({ stdio: 'pipe' }),
+    );
+  });
+
+  it('throws an actionable error when no peer exists (fresh install, no build yet)', () => {
+    // No matching prefix on disk: only unrelated base images. Better to fail
+    // visibly at startup than crashloop code=125 on every container spawn.
+    inspectFailed();
+    mockExecSync.mockReturnValueOnce('node:24-bookworm-slim\nubuntu:22.04\n');
+
+    expect(() => ensureContainerImage()).toThrow(/build\.sh/);
+    expect(mockExecSync).toHaveBeenCalledTimes(2); // inspect + list, no tag
+  });
+
+  it('skips the (missing) expected name when picking a peer from the listing', () => {
+    // Belt-and-suspenders: the inspect already confirmed the expected name
+    // is absent, but the peer-search guard against picking it back up keeps
+    // the function safe if a future caller pre-checks a different way.
+    inspectFailed();
+    mockExecSync.mockReturnValueOnce(`${CONTAINER_IMAGE}\nparachute-agent-image-16f7e9e8:latest\n`);
+    mockExecSync.mockReturnValueOnce('');
+
+    ensureContainerImage();
+
+    const tagCall = mockExecSync.mock.calls.find((call) => String(call[0]).startsWith(`${CONTAINER_RUNTIME_BIN} tag`));
+    expect(tagCall).toBeDefined();
+    expect(String(tagCall![0])).toContain('parachute-agent-image-16f7e9e8:latest');
+  });
+
+  it('ignores arbitrary non-matching tags (e.g. base images, unrelated projects)', () => {
+    inspectFailed();
+    mockExecSync.mockReturnValueOnce('node:24-bookworm-slim\nparachute-vault:latest\nrandomthing:v2\n');
+
+    expect(() => ensureContainerImage()).toThrow(/build\.sh/);
   });
 });
 
