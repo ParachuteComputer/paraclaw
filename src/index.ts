@@ -16,7 +16,7 @@ import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
 import { migrateSessionsDir } from './session-manager.js';
 import { startWebServer } from './web/server.js';
-import { log } from './log.js';
+import { log, migrateLegacyLogFilenames } from './log.js';
 import { runStartupBootstrap } from './startup-bootstrap.js';
 
 // Response + shutdown registries live in response-registry.ts to break the
@@ -83,6 +83,7 @@ async function main(): Promise<void> {
   // 1b. One-time filesystem cutovers — idempotent, no-op after first run.
   migrateGroupsToClaudeLocal();
   migrateSessionsDir();
+  migrateLegacyLogFilenames(process.cwd());
 
   // 2. Container runtime
   ensureContainerRuntimeRunning();
