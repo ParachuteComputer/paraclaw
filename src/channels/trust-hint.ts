@@ -1,7 +1,7 @@
 /**
  * Operator-self-wire trust hint (paraclaw#67 — Proposal B).
  *
- * When the operator submits `/claw/channels/new`, we record an in-memory
+ * When the operator submits `/agent/channels/new`, we record an in-memory
  * hint keyed `(channelType, botId, operatorUserId)` saying "the operator
  * just wired this bot themselves; the next inbound from them on this bot
  * should bypass the unwired-channel approval gate and route as trusted."

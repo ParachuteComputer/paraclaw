@@ -73,8 +73,8 @@ function writeJson(storage: Storage, key: string, value: unknown): void {
 }
 
 function getRedirectUri(): string {
-  // Vite's BASE_URL has a trailing slash (`/` or `/claw/`), so the join
-  // yields `http://host/oauth/callback` or `http://host/claw/oauth/callback`.
+  // Vite's BASE_URL has a trailing slash (`/` or `/agent/`), so the join
+  // yields `http://host/oauth/callback` or `http://host/agent/oauth/callback`.
   return `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
 }
 
@@ -83,8 +83,8 @@ async function getDiscovery(): Promise<DiscoveryResponse> {
   if (cached) return cached;
   // Fetch raw — discovery is unauthenticated, and routing it through the API
   // wrapper would create a bootstrap dep cycle (api ↔ auth). Mount-aware:
-  // BASE_URL prepended so the request hits paraclaw under /claw/ on tailnet
-  // rather than the hub origin's root (which 404s on /api/discovery).
+  // BASE_URL prepended so the request hits parachute-agent under /agent/ on
+  // tailnet rather than the hub origin's root (which 404s on /api/discovery).
   const url = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/discovery`;
   const res = await fetch(url, { headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`${url} failed: ${res.status}`);

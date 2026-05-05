@@ -31,7 +31,7 @@ describe('upsertService', () => {
       {
         name: 'claw',
         port: 1944,
-        paths: ['/claw'],
+        paths: ['/agent'],
         health: '/api/health',
         version: '0.0.6-rc.1',
         displayName: 'Paraclaw',
@@ -45,7 +45,7 @@ describe('upsertService', () => {
         {
           name: 'claw',
           port: 1944,
-          paths: ['/claw'],
+          paths: ['/agent'],
           health: '/api/health',
           version: '0.0.6-rc.1',
           displayName: 'Paraclaw',
@@ -56,8 +56,8 @@ describe('upsertService', () => {
   });
 
   it('replaces an existing entry with the same name in-place', () => {
-    upsertService({ name: 'claw', port: 1944, paths: ['/claw'], health: '/api/health', version: 'a' }, path);
-    upsertService({ name: 'claw', port: 1944, paths: ['/claw'], health: '/api/health', version: 'b' }, path);
+    upsertService({ name: 'claw', port: 1944, paths: ['/agent'], health: '/api/health', version: 'a' }, path);
+    upsertService({ name: 'claw', port: 1944, paths: ['/agent'], health: '/api/health', version: 'b' }, path);
     const raw = JSON.parse(readFileSync(path, 'utf8')) as { services: { version: string }[] };
     expect(raw.services).toHaveLength(1);
     expect(raw.services[0].version).toBe('b');
@@ -65,7 +65,7 @@ describe('upsertService', () => {
 
   it('appends a different-name entry without disturbing existing rows', () => {
     upsertService({ name: 'vault', port: 1940, paths: ['/vault'], health: '/health', version: '0.3.0' }, path);
-    upsertService({ name: 'claw', port: 1944, paths: ['/claw'], health: '/api/health', version: '0.0.6-rc.1' }, path);
+    upsertService({ name: 'claw', port: 1944, paths: ['/agent'], health: '/api/health', version: '0.0.6-rc.1' }, path);
     const raw = JSON.parse(readFileSync(path, 'utf8')) as {
       services: { name: string }[];
     };
@@ -85,7 +85,7 @@ describe('upsertService', () => {
           {
             name: 'claw',
             port: 1944,
-            paths: ['/claw'],
+            paths: ['/agent'],
             health: '/api/health',
             version: '0.0.7-rc.1',
             installDir: '/Users/test/.parachute/claw',
@@ -97,7 +97,7 @@ describe('upsertService', () => {
       {
         name: 'claw',
         port: 1944,
-        paths: ['/claw'],
+        paths: ['/agent'],
         health: '/api/health',
         version: '0.0.8-rc.1',
       },
@@ -114,7 +114,7 @@ describe('upsertService', () => {
   it('throws on a malformed existing manifest (so we never silently overwrite)', () => {
     writeFileSync(path, '{"services": "not an array"}');
     expect(() =>
-      upsertService({ name: 'claw', port: 1944, paths: ['/claw'], health: '/api/health', version: 'x' }, path),
+      upsertService({ name: 'claw', port: 1944, paths: ['/agent'], health: '/api/health', version: 'x' }, path),
     ).toThrow(/malformed/);
   });
 });

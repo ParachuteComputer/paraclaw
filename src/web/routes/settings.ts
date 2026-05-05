@@ -2,7 +2,7 @@
  * /api/settings/approval-routing — read + write the channel-default bot
  * for approval delivery.
  *
- * Backs the `/claw/settings/approvals` page. The shape it exposes is
+ * Backs the `/agent/settings/approvals` page. The shape it exposes is
  * one row per (approver, channel) pair: which bot's DM currently sits
  * in the `bot_id = ''` slot of `user_dms`, and which other bots on
  * that channel are reachable.

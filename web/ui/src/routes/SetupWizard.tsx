@@ -140,7 +140,7 @@ export function SetupWizard() {
         )}
       </h2>
       <p className="muted" style={{ marginTop: '-0.5rem' }}>
-        Fresh install? Walk these steps to land your first agent. You can re-open this wizard any time at <code>/claw/setup</code>.
+        Fresh install? Walk these steps to land your first agent. You can re-open this wizard any time at <code>/agent/setup</code>.
       </p>
       <SetupStepIndicator current={state.currentStep} furthest={state.furthestStep} onJump={goto} />
 

@@ -2,7 +2,7 @@
  * HTTP client to the Paraclaw web server.
  *
  * In dev: Vite proxies /api/* to localhost:1944.
- * In prod: server serves the built UI under /claw/, /api/* on the same origin.
+ * In prod: server serves the built UI under /agent/, /api/* on the same origin.
  *
  * Auth: every /api/* request gets `Authorization: Bearer <jwt>` from the
  * hub-OAuth flow in `./auth.ts`. On a 401 we refresh once; if the refresh
@@ -15,10 +15,10 @@
  */
 import { beginLogin, clearTokens, getAccessToken, refreshAccessToken } from './auth.ts';
 
-// Mount-aware: when paraclaw is served at /claw/ (under hub on tailnet), API
-// calls must go to /claw/api/* — the bare /api/* path goes to the hub origin's
-// root, where it 404s. BASE_URL has the trailing slash already; the trim keeps
-// us from emitting //api when BASE_URL is /.
+// Mount-aware: when parachute-agent is served at /agent/ (under hub on tailnet),
+// API calls must go to /agent/api/* — the bare /api/* path goes to the hub
+// origin's root, where it 404s. BASE_URL has the trailing slash already; the
+// trim keeps us from emitting //api when BASE_URL is /.
 const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 export type VaultScope = 'vault:read' | 'vault:write' | 'vault:admin';
@@ -642,7 +642,7 @@ export interface AuthorizeAppResult {
 /**
  * Kick off the OAuth dance — the caller is expected to navigate the browser
  * to `redirectUrl`. The server completes the exchange on its callback and
- * redirects back to `/claw/apps?connected=:id`.
+ * redirects back to `/agent/apps?connected=:id`.
  */
 export async function authorizeApp(provider: string, options: AuthorizeAppOptions = {}): Promise<AuthorizeAppResult> {
   return request<AuthorizeAppResult>(`/apps/${encodeURIComponent(provider)}/authorize`, {

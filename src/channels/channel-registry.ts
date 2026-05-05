@@ -219,7 +219,7 @@ export async function registerBotAdapter(
  * boot, because doing so would re-introduce the validate-then-poll race
  * that pre-A behavior had: an adapter polling without a wire feeds
  * inbounds straight into the unwired-channel approval cascade. Operators
- * recover by completing the wire from `/claw/channels/new` (the wire
+ * recover by completing the wire from `/agent/channels/new` (the wire
  * endpoint spawns the adapter atomically with the MGA insert).
  *
  * Skips channels with no `spawnFromSecret` hook. Logs but doesn't throw

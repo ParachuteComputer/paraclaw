@@ -15,8 +15,8 @@
  *
  * Operator setup: register `${origin}${mount}/api/apps/<provider>/callback`
  * as an authorized redirect URI in the provider's OAuth client console.
- * `${mount}` is `PARACLAW_WEB_MOUNT` (e.g. `/claw` when fronted by the
- * Parachute hub), empty when paraclaw serves at the origin root. The
+ * `${mount}` is `PARACLAW_WEB_MOUNT` (e.g. `/agent` when fronted by the
+ * Parachute hub), empty when parachute-agent serves at the origin root. The
  * origin is derived from `req.headers.host` (or `PARACLAW_WEB_ORIGIN` if
  * set, for tunneled deployments).
  */
@@ -145,7 +145,7 @@ function originFromReq(req: http.IncomingMessage): string {
 }
 
 function callbackUri(req: http.IncomingMessage, providerSlug: string): string {
-  // Must include PARACLAW_WEB_MOUNT (e.g. `/claw`) when the daemon is
+  // Must include PARACLAW_WEB_MOUNT (e.g. `/agent`) when the daemon is
   // fronted at a path prefix — otherwise the provider redirects the
   // browser to ${origin}/api/... which 404s on the hub. Authorize +
   // token-exchange use this same string, so the operator-registered

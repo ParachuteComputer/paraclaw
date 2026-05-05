@@ -1,6 +1,6 @@
 /**
  * MCP tools for the secret store. Mirrors `/api/secrets` (and the matching
- * UI under `/claw/secrets`), with one important wrinkle: the MCP surface
+ * UI under `/agent/secrets`), with one important wrinkle: the MCP surface
  * NEVER returns plaintext values. Even on `put-secret`, the response only
  * carries the row id + metadata — the value flows in once over the
  * transport, lands in the encrypted DB column, and is read back only by

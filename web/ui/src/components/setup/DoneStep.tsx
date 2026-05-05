@@ -33,7 +33,7 @@ export function DoneStep({ state }: StepProps) {
           onClick={() => {
             if (
               confirm(
-                'Clear local wizard state? Returning to /claw/setup later will restart from step 1 (your installed adapters / agent groups / wired channels are unaffected).',
+                'Clear local wizard state? Returning to /agent/setup later will restart from step 1 (your installed adapters / agent groups / wired channels are unaffected).',
               )
             ) {
               localStorage.removeItem(SETUP_STORAGE_KEY);

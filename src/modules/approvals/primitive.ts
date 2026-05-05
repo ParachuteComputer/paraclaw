@@ -105,7 +105,7 @@ export function pickApprover(agentGroupId: string | null): string[] {
  *      best case, the card delivers via the same bot the inbound
  *      came in on.
  *   2. Same-channel approver, channel-default DM (`bot_id = ''` slot
- *      in `user_dms`, configured via `/claw/settings/approvals`) —
+ *      in `user_dms`, configured via `/agent/settings/approvals`) —
  *      `viaFallbackBot: true`, so callers can name the origin bot in
  *      the card body to avoid confusion.
  *   3. Cross-channel approver, channel-default DM — same-channel
@@ -275,5 +275,5 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
 export function appendFallbackNotice(question: string, viaFallbackBot: boolean, originBotId: string | null): string {
   if (!viaFallbackBot) return question;
   const hint = originBotId ? ` (inbound bot ${originBotId})` : '';
-  return `${question}\n\n_Routed via your default approval bot${hint}. Change in /claw/settings/approvals._`;
+  return `${question}\n\n_Routed via your default approval bot${hint}. Change in /agent/settings/approvals._`;
 }

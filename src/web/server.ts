@@ -88,10 +88,12 @@ const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
 const PORT = Number(process.env.PARACLAW_WEB_PORT ?? 1944);
 const HOST = process.env.PARACLAW_WEB_BIND ?? '127.0.0.1';
 // When fronted by `parachute expose tailnet` at a path prefix, set
-// PARACLAW_WEB_MOUNT to that prefix (e.g. `/claw`) so static-serve strips
+// PARACLAW_WEB_MOUNT to that prefix (e.g. `/agent`) so static-serve strips
 // it before resolving against dist/. The hub-managed lifecycle (parachute-
 // hub#83) sets this from `module.json` `paths[0]` automatically. Empty
-// string = serve at the origin root (default).
+// string = serve at the origin root (default). Env var name retains
+// the `PARACLAW_` prefix for operator-config back-compat through 0.1.x;
+// rename to `PARACHUTE_AGENT_WEB_MOUNT` is queued for 0.2.0.
 const MOUNT = normalizeMount(process.env.PARACLAW_WEB_MOUNT ?? '');
 /** Exported for tests; serves as the value reported by `/api/health` and registered with hub. */
 export const SERVICE_VERSION: string = pkg.version;
@@ -894,9 +896,9 @@ export function startWebServer(): http.Server {
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-      // Strip MOUNT (e.g. `/claw`) once, here, before dispatch — Tailscale
+      // Strip MOUNT (e.g. `/agent`) once, here, before dispatch — Tailscale
       // serve / the hub's reverse proxy preserve the prefix when forwarding.
-      // Without this, `/claw/api/health` falls through `/api/`-startsWith
+      // Without this, `/agent/api/health` falls through `/api/`-startsWith
       // and gets SPA-shelled as text/html.
       const dispatchPath =
         MOUNT && (url.pathname === MOUNT || url.pathname.startsWith(`${MOUNT}/`))
@@ -972,7 +974,7 @@ export function startWebServer(): http.Server {
       upsertService({
         name: 'claw',
         port: PORT,
-        paths: ['/claw'],
+        paths: ['/agent'],
         health: '/api/health',
         version: SERVICE_VERSION,
         displayName: 'Paraclaw',
