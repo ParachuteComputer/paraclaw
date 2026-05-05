@@ -991,6 +991,10 @@ export function startWebServer(): http.Server {
         version: SERVICE_VERSION,
         displayName: 'Parachute Agent',
         tagline: 'Manage your Parachute agent groups + vault attachments.',
+        // Lets hub resolve `parachute restart agent` back to the checkout
+        // it should drive without a vendored fallback (paraclaw#115,
+        // third-party-module hook from parachute-hub#84).
+        installDir: PROJECT_ROOT,
       });
     } catch (err) {
       log.warn('Skipped services manifest update', {

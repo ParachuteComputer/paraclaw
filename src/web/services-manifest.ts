@@ -4,14 +4,14 @@
  * Mirrors `parachute-scribe/src/services-manifest.ts` deliberately — the
  * shape is the contract between every Parachute service and the hub
  * (`parachute-hub/src/services-manifest.ts` is the canonical reader).
- * Once paraclaw earns a slot in the hub's vendored fallback, the
- * manifest read flips to `.parachute/module.json`-backed and this file
- * becomes the live state-side companion. Until then, this is what makes
- * `parachute status` / `parachute expose` see paraclaw at all.
- *
  * Failure mode: any write error is logged + swallowed. Self-registration
  * is best-effort — the server still serves locally even if the manifest
  * write fails (permissions, disk full, race with another writer).
+ *
+ * `installDir` is the third-party-module hook (parachute-hub#84): hub
+ * looks the field up to resolve `parachute restart agent` back to the
+ * checkout it should drive. Self-registering it here means the agent
+ * doesn't need a vendored fallback in hub — paraclaw#115.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -26,6 +26,7 @@ export interface ServiceEntry {
   version: string;
   displayName?: string;
   tagline?: string;
+  installDir?: string;
 }
 
 interface ServicesManifest {

@@ -36,6 +36,7 @@ describe('upsertService', () => {
         version: '0.0.6-rc.1',
         displayName: 'Parachute Agent',
         tagline: 'Manage your Parachute agent groups + vault attachments.',
+        installDir: '/Users/test/parachute-agent',
       },
       path,
     );
@@ -50,9 +51,33 @@ describe('upsertService', () => {
           version: '0.0.6-rc.1',
           displayName: 'Parachute Agent',
           tagline: 'Manage your Parachute agent groups + vault attachments.',
+          installDir: '/Users/test/parachute-agent',
         },
       ],
     });
+  });
+
+  it('self-registers installDir so hub can resolve `parachute restart agent`', () => {
+    // Regression for paraclaw#115: pre-fix the agent registered without
+    // installDir, so hub's third-party lifecycle resolution path (parachute-
+    // hub#84) couldn't find a startCmd target and `parachute restart agent`
+    // dead-ended. Self-registering the field here is the proper fix —
+    // hub#177's graceful-degradation is the safety net.
+    upsertService(
+      {
+        name: 'agent',
+        port: 1944,
+        paths: ['/agent'],
+        health: '/api/health',
+        version: '0.1.2-rc.2',
+        installDir: '/Users/test/parachute-agent',
+      },
+      path,
+    );
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as {
+      services: { name: string; installDir?: string }[];
+    };
+    expect(raw.services[0].installDir).toBe('/Users/test/parachute-agent');
   });
 
   it('replaces an existing entry with the same name in-place', () => {
@@ -72,12 +97,13 @@ describe('upsertService', () => {
     expect(raw.services.map((s) => s.name).sort()).toEqual(['agent', 'vault']);
   });
 
-  it('preserves hub-stamped fields on the row (e.g. installDir from parachute-hub#84)', () => {
-    // The hub stamps `installDir` onto the row at install time. Paraclaw's
-    // self-registration row shape doesn't know about that field, but the
-    // upsert must merge rather than replace so the hub-stamped value
-    // survives the second write — otherwise `parachute start agent` after
-    // an auto-start round-trip can't resolve installDir → "unknown service".
+  it('preserves fields not in the new entry on the row (merge, not replace)', () => {
+    // The agent now self-registers `installDir` (paraclaw#115), but the
+    // merge-not-replace behavior is still load-bearing for any other field
+    // the hub stamps that the agent's entry doesn't know about. Simulate
+    // that with a synthetic `extraField`: the upsert must spread `existing`
+    // first so unknown fields survive, otherwise hub stamps get clobbered
+    // on the next agent boot.
     writeFileSync(
       path,
       JSON.stringify({
@@ -88,7 +114,7 @@ describe('upsertService', () => {
             paths: ['/agent'],
             health: '/api/health',
             version: '0.0.7-rc.1',
-            installDir: '/Users/test/.parachute/agent',
+            extraField: 'hub-stamped-value',
           },
         ],
       }),
@@ -104,11 +130,11 @@ describe('upsertService', () => {
       path,
     );
     const raw = JSON.parse(readFileSync(path, 'utf8')) as {
-      services: { version: string; installDir?: string }[];
+      services: { version: string; extraField?: string }[];
     };
     expect(raw.services).toHaveLength(1);
     expect(raw.services[0].version).toBe('0.0.8-rc.1');
-    expect(raw.services[0].installDir).toBe('/Users/test/.parachute/agent');
+    expect(raw.services[0].extraField).toBe('hub-stamped-value');
   });
 
   it('throws on a malformed existing manifest (so we never silently overwrite)', () => {
