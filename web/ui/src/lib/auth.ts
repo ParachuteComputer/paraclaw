@@ -1,5 +1,5 @@
 /**
- * OAuth 2.0 client for the Paraclaw web UI. The hub is the authorization
+ * OAuth 2.0 client for the Parachute Agent web UI. The hub is the authorization
  * server (parachute-patterns/patterns/hub-as-issuer.md):
  *
  *   1. GET  /api/discovery           — returns `{ hubOrigin }` so the bundle
@@ -47,14 +47,69 @@ interface FlowState {
 }
 
 const REQUESTED_SCOPES = "agent:admin agent:write vault:read vault:write";
-const DISCOVERY_KEY = "paraclaw.discovery";
-const FLOW_KEY = "paraclaw.flow";
+const DISCOVERY_KEY = "parachute-agent.discovery";
+const FLOW_KEY = "parachute-agent.flow";
 
 function clientKey(hubOrigin: string): string {
-  return `paraclaw.client.${hubOrigin}`;
+  return `parachute-agent.client.${hubOrigin}`;
 }
 function tokensKey(hubOrigin: string): string {
-  return `paraclaw.tokens.${hubOrigin}`;
+  return `parachute-agent.tokens.${hubOrigin}`;
+}
+
+/**
+ * One-shot migration of the OAuth localStorage / sessionStorage keys from
+ * the paraclaw-era prefix (`paraclaw.*`) to the post-rename prefix
+ * (`parachute-agent.*`). Idempotent — safe to call on every bootstrap.
+ *
+ * Without this, an existing operator hitting 0.1.0-rc.1 would lose their
+ * cached discovery, registered client_id, and tokens, and get bounced to
+ * the hub for a fresh consent. The DCR client_id is one-shot per origin,
+ * so re-registering would also leave a stale client row on the hub.
+ *
+ * The static keys are migrated by name. The per-hub-origin keys
+ * (`paraclaw.client.<origin>`, `paraclaw.tokens.<origin>`) are
+ * pattern-scanned because we don't know the operator's hub origin until
+ * after we've already read DISCOVERY_KEY — which has its own migration.
+ *
+ * Tracked in parachute-agent#108. Keep this through 0.2.0 then drop;
+ * by then every operator who's going to migrate has hit the SPA at
+ * least once.
+ */
+export function migrateLegacyAuthKeys(): void {
+  if (typeof localStorage === "undefined") return;
+  migrateOneKey(localStorage, "paraclaw.discovery", "parachute-agent.discovery");
+  migrateOneKey(localStorage, "paraclaw.setupWizard.v2", "parachute-agent.setupWizard.v2");
+  migratePrefix(localStorage, "paraclaw.client.", "parachute-agent.client.");
+  migratePrefix(localStorage, "paraclaw.tokens.", "parachute-agent.tokens.");
+  if (typeof sessionStorage !== "undefined") {
+    migrateOneKey(sessionStorage, "paraclaw.flow", "parachute-agent.flow");
+  }
+}
+
+function migrateOneKey(storage: Storage, oldKey: string, newKey: string): void {
+  const oldVal = storage.getItem(oldKey);
+  if (oldVal === null) return;
+  // If both exist (rare — only happens if migration ran, then old was
+  // re-set somehow), the new one wins as the already-migrated truth.
+  if (storage.getItem(newKey) === null) {
+    storage.setItem(newKey, oldVal);
+  }
+  storage.removeItem(oldKey);
+}
+
+function migratePrefix(storage: Storage, oldPrefix: string, newPrefix: string): void {
+  // Snapshot keys before mutating — iterating Object.keys while removing
+  // is implementation-defined.
+  const stale: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k && k.startsWith(oldPrefix)) stale.push(k);
+  }
+  for (const oldKey of stale) {
+    const suffix = oldKey.slice(oldPrefix.length);
+    migrateOneKey(storage, oldKey, `${newPrefix}${suffix}`);
+  }
 }
 
 function readJson<T>(storage: Storage, key: string): T | null {

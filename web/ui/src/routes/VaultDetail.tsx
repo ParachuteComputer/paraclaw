@@ -882,7 +882,7 @@ function DetachModal({
     try {
       // Thread the narrow per-vault admin scope only when we're actually
       // calling vault — Keep-token (revokeToken=false) just hits the
-      // paraclaw-side agent:write check, which the broad re-auth set
+      // parachute-agent-side agent:write check, which the broad re-auth set
       // already covers. Asking for vault:<name>:admin on the Keep path
       // would be a no-op extra scope on the consent screen.
       const result = await detachVault(target.folder, {

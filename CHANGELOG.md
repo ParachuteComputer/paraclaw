@@ -36,6 +36,8 @@ Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's name
    ```
 6. **Cleanup (optional)**: once you've verified the new install boots and decrypts secrets, delete the legacy backups: `rm ~/.parachute/claw/paraclaw.db ~/.parachute/claw/master.key && rmdir ~/.parachute/claw`.
 
+Browser sessions auto-migrate the SPA's `paraclaw.*` localStorage / sessionStorage keys (cached OAuth discovery, DCR client_id, tokens, in-flight flow state, setup-wizard resume state) to `parachute-agent.*` on first reload after the upgrade — no manual action required.
+
 `PARACLAW_*` env var names (`PARACLAW_HUB_ORIGIN`, `PARACLAW_WEB_PORT`, `PARACLAW_WEB_BIND`, `PARACLAW_WEB_MOUNT`, `PARACLAW_WEB_ORIGIN`, `PARACLAW_CENTRAL_DB_PATH`) are retained through 0.1.x for operator-config back-compat. Renaming queued for 0.2.0.
 
 ## [Unreleased]

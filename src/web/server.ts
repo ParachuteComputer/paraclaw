@@ -513,6 +513,12 @@ async function handleApi(
           error(res, 400, `invalid vault.scope: ${scope}`);
           return;
         }
+        // Default vault-token label keeps the `claw-` prefix despite the
+        // paraclaw → parachute-agent rename. Existing operator-managed
+        // tokens already use this prefix; changing the default would
+        // surface as confusing-divergent labels with no real benefit.
+        // Operators can rename labels at-will via the vault token UI.
+        // See parachute-agent#108 §2 for the full deliberation.
         const tokenLabel = body.vault.tokenLabel ?? `claw-${folder}`;
         const vaultBaseUrl = body.vault.vaultBaseUrl ?? 'http://127.0.0.1:1940/vault/default';
         let token = body.vault.token;
