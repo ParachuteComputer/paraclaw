@@ -67,10 +67,29 @@ export function migrateCentralDbLocation(
  * One-shot migration: copy `<PARACHUTE_DIR>/claw/master.key` to
  * `<PARACHUTE_DIR>/agent/master.key` so encrypted-secret rows decrypted under
  * the old key continue to decrypt after the paraclaw → parachute-agent
- * rename. Idempotent — noop if the new key already exists OR the legacy
- * key doesn't.
+ * rename. Idempotent.
  *
- * The legacy file is left in place — same rationale as the DB migration.
+ * Three cases:
+ *   1. Only legacy exists  → copy to current, chmod 0600. Legacy stays as
+ *      backup (operators verify and rm manually — same rationale as the DB).
+ *   2. Both exist          → log a `warn` with both paths and a recovery
+ *      hint, then noop. This is the silent-corruption bug from
+ *      `parachute-agent#114`: a previous boot generated a fresh key at the
+ *      new path before the legacy was copied, so the new key can't decrypt
+ *      the operator's existing secret rows. Don't overwrite — a partial
+ *      restore would lose secrets that were re-encrypted under the fresh
+ *      key. Surface it loudly so the operator can choose.
+ *   3. Neither exists      → noop (fresh install).
+ *   4. Only current exists → noop (already migrated, or fresh install where
+ *      first boot created the key directly at the new path).
+ *
+ * MUST run before any caller of `loadOrCreateMasterKey()`. That function
+ * generates a fresh 32-byte key at the new path on first miss, which would
+ * shadow the legacy and trip case 2 on the next boot. `src/index.ts:main`
+ * calls this immediately after `migrateCentralDbLocation`. Standalone
+ * scripts (init-cli-agent, init-first-agent, seed-discord) call it for
+ * the same reason: any path that may end up touching the secrets store
+ * needs the legacy in place first.
  *
  * Path overrides exist for tests; production callers pass no args.
  */
@@ -80,8 +99,24 @@ export function migrateMasterKeyLocation(
 ): void {
   const legacyKey = path.join(legacyDir, 'master.key');
   const currentKey = path.join(currentDir, 'master.key');
-  if (fs.existsSync(currentKey)) return;
-  if (!fs.existsSync(legacyKey)) return;
+  const legacyExists = fs.existsSync(legacyKey);
+  const currentExists = fs.existsSync(currentKey);
+
+  if (currentExists && legacyExists) {
+    log.warn('Master key exists at both new and legacy locations', {
+      legacy: legacyKey,
+      current: currentKey,
+      note:
+        'this means an earlier boot created a fresh key at the new path before the legacy was copied; ' +
+        `existing encrypted secrets were sealed under the legacy key and the fresh key cannot decrypt them. ` +
+        `If you have NOT yet entered new secrets under the fresh key, recover with: ` +
+        `mv ${currentKey} ${currentKey}.fresh-backup && cp ${legacyKey} ${currentKey} && chmod 600 ${currentKey}. ` +
+        `If you HAVE entered new secrets, the two are now mixed and you must re-enter the legacy ones manually.`,
+    });
+    return;
+  }
+  if (currentExists) return;
+  if (!legacyExists) return;
 
   fs.mkdirSync(currentDir, { recursive: true, mode: 0o700 });
   fs.copyFileSync(legacyKey, currentKey);

@@ -49,7 +49,7 @@ export function App() {
         <Link to="/settings/approvals">Settings</Link>
         <Link to="/setup">Setup</Link>
         <a
-          href="https://github.com/ParachuteComputer/paraclaw/blob/main/docs/parachute-integration.md"
+          href="https://github.com/ParachuteComputer/parachute-agent/blob/main/docs/parachute-integration.md"
           target="_blank"
           rel="noreferrer"
         >
