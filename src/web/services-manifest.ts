@@ -50,10 +50,14 @@ export function upsertService(entry: ServiceEntry, path: string = resolveManifes
   mkdirSync(dirname(path), { recursive: true });
   const manifest = readManifest(path);
   const idx = manifest.services.findIndex((s) => s.name === entry.name);
-  // Merge rather than replace so fields the hub stamps onto the row
-  // (`installDir` from parachute-hub#84, etc.) survive a self-registration
-  // pass. Paraclaw still wins for the fields it owns — port, paths,
-  // version, health — because they spread last.
+  // Merge rather than replace, intentionally diverging from
+  // `parachute-hub/src/services-manifest.ts` which full-replaces the row.
+  // The asymmetry tracks who's authoritative: hub owns the first-party
+  // shape (read → schema-validate → write), so it can replace safely;
+  // we're a third-party self-registrant preserving any fields hub stamps
+  // that we don't own (the hub#84 `installDir` slot, future hub-stamped
+  // metadata). The agent still wins for the fields it owns — port, paths,
+  // version, health, installDir — because `entry` spreads last.
   if (idx >= 0) manifest.services[idx] = { ...manifest.services[idx], ...entry };
   else manifest.services.push(entry);
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;

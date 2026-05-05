@@ -99,11 +99,13 @@ describe('upsertService', () => {
 
   it('preserves fields not in the new entry on the row (merge, not replace)', () => {
     // The agent now self-registers `installDir` (paraclaw#115), but the
-    // merge-not-replace behavior is still load-bearing for any other field
-    // the hub stamps that the agent's entry doesn't know about. Simulate
-    // that with a synthetic `extraField`: the upsert must spread `existing`
-    // first so unknown fields survive, otherwise hub stamps get clobbered
-    // on the next agent boot.
+    // merge-not-replace behavior is still load-bearing for any field hub
+    // stamps that the agent's entry doesn't carry. `publicExposure` is the
+    // realistic case: it's a real first-party-schema field on hub's side
+    // (set when the operator runs `parachute expose`) but absent from
+    // paraclaw's `ServiceEntry` — so a self-registration round trip must
+    // not drop it. Spread order is `{ ...existing, ...entry }`, so the
+    // agent still wins on the fields it owns.
     writeFileSync(
       path,
       JSON.stringify({
@@ -114,7 +116,7 @@ describe('upsertService', () => {
             paths: ['/agent'],
             health: '/api/health',
             version: '0.0.7-rc.1',
-            extraField: 'hub-stamped-value',
+            publicExposure: 'loopback',
           },
         ],
       }),
@@ -130,11 +132,11 @@ describe('upsertService', () => {
       path,
     );
     const raw = JSON.parse(readFileSync(path, 'utf8')) as {
-      services: { version: string; extraField?: string }[];
+      services: { version: string; publicExposure?: string }[];
     };
     expect(raw.services).toHaveLength(1);
     expect(raw.services[0].version).toBe('0.0.8-rc.1');
-    expect(raw.services[0].extraField).toBe('hub-stamped-value');
+    expect(raw.services[0].publicExposure).toBe('loopback');
   });
 
   it('throws on a malformed existing manifest (so we never silently overwrite)', () => {

@@ -29,7 +29,7 @@ import path from 'node:path';
 // pattern (see parachute-vault src/routing.ts).
 import pkg from '../../package.json' with { type: 'json' };
 
-import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR } from '../config.js';
+import { CENTRAL_DB_PATH, DATA_DIR, GROUPS_DIR, PROJECT_ROOT } from '../config.js';
 import { openDb, type Database } from '../db/connection.js';
 import {
   attachVaultToGroup,
@@ -81,7 +81,6 @@ import { getSecret, putSecret } from '../secrets/index.js';
 import { channelTokenSecretName } from '../startup-bootstrap.js';
 import { readEnvWithLegacy } from '../env.js';
 
-const PROJECT_ROOT = process.cwd();
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
 // Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
 // (1944, claimed for parachute-agent 2026-04-27 via parachute-hub#…). Override
