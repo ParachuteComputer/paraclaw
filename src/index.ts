@@ -10,7 +10,7 @@ import { CENTRAL_DB_PATH } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb, migrateCentralDbLocation, migrateMasterKeyLocation } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
-import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
+import { ensureContainerRuntimeRunning, ensureContainerImage, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
 import { routeInbound } from './router.js';
@@ -89,6 +89,11 @@ async function main(): Promise<void> {
 
   // 2. Container runtime
   ensureContainerRuntimeRunning();
+  // Auto-retag the per-install image when an operator dir-rename has flipped
+  // INSTALL_SLUG out from under a previously-built image (paraclaw#114).
+  // Throws with an actionable hint when no image at all is on disk — better
+  // than the silent code=125 crashloop the daemon used to fall into.
+  ensureContainerImage();
   cleanupOrphans();
 
   // 3. Channel adapters
