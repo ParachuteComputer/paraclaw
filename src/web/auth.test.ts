@@ -17,9 +17,9 @@ import {
   hasScope,
   HubJwtError,
   resetJwksCache,
-  SCOPE_CLAW_ADMIN,
-  SCOPE_CLAW_READ,
-  SCOPE_CLAW_WRITE,
+  SCOPE_AGENT_ADMIN,
+  SCOPE_AGENT_READ,
+  SCOPE_AGENT_WRITE,
   SCOPE_VAULT_ADMIN,
   validateHubJwt,
 } from './auth.js';
@@ -229,78 +229,78 @@ describe('getHubOrigin', () => {
 
 describe('hasScope', () => {
   it('exact match', () => {
-    expect(hasScope([SCOPE_CLAW_READ], SCOPE_CLAW_READ)).toBe(true);
+    expect(hasScope([SCOPE_AGENT_READ], SCOPE_AGENT_READ)).toBe(true);
   });
 
   it('agent:admin ⊇ agent:write ⊇ agent:read', () => {
-    expect(hasScope([SCOPE_CLAW_ADMIN], SCOPE_CLAW_READ)).toBe(true);
-    expect(hasScope([SCOPE_CLAW_ADMIN], SCOPE_CLAW_WRITE)).toBe(true);
-    expect(hasScope([SCOPE_CLAW_WRITE], SCOPE_CLAW_READ)).toBe(true);
-    expect(hasScope([SCOPE_CLAW_READ], SCOPE_CLAW_WRITE)).toBe(false);
-    expect(hasScope([SCOPE_CLAW_WRITE], SCOPE_CLAW_ADMIN)).toBe(false);
+    expect(hasScope([SCOPE_AGENT_ADMIN], SCOPE_AGENT_READ)).toBe(true);
+    expect(hasScope([SCOPE_AGENT_ADMIN], SCOPE_AGENT_WRITE)).toBe(true);
+    expect(hasScope([SCOPE_AGENT_WRITE], SCOPE_AGENT_READ)).toBe(true);
+    expect(hasScope([SCOPE_AGENT_READ], SCOPE_AGENT_WRITE)).toBe(false);
+    expect(hasScope([SCOPE_AGENT_WRITE], SCOPE_AGENT_ADMIN)).toBe(false);
   });
 
   it('vault:admin (operator-token catch-all) satisfies every agent scope', () => {
-    expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_CLAW_READ)).toBe(true);
-    expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_CLAW_WRITE)).toBe(true);
-    expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_CLAW_ADMIN)).toBe(true);
+    expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_AGENT_READ)).toBe(true);
+    expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_AGENT_WRITE)).toBe(true);
+    expect(hasScope([SCOPE_VAULT_ADMIN], SCOPE_AGENT_ADMIN)).toBe(true);
   });
 
   it('hub:admin does NOT satisfy agent scopes', () => {
-    expect(hasScope(['hub:admin'], SCOPE_CLAW_READ)).toBe(false);
-    expect(hasScope(['hub:admin'], SCOPE_CLAW_WRITE)).toBe(false);
-    expect(hasScope(['hub:admin'], SCOPE_CLAW_ADMIN)).toBe(false);
+    expect(hasScope(['hub:admin'], SCOPE_AGENT_READ)).toBe(false);
+    expect(hasScope(['hub:admin'], SCOPE_AGENT_WRITE)).toBe(false);
+    expect(hasScope(['hub:admin'], SCOPE_AGENT_ADMIN)).toBe(false);
   });
 
   it('legacy `claw:*` grants are normalized to `agent:*` (pre-0.1.0 compat)', () => {
-    expect(hasScope(['claw:read'], SCOPE_CLAW_READ)).toBe(true);
-    expect(hasScope(['claw:write'], SCOPE_CLAW_READ)).toBe(true);
-    expect(hasScope(['claw:admin'], SCOPE_CLAW_WRITE)).toBe(true);
-    expect(hasScope(['claw:admin'], SCOPE_CLAW_ADMIN)).toBe(true);
-    expect(hasScope(['claw:read'], SCOPE_CLAW_WRITE)).toBe(false);
+    expect(hasScope(['claw:read'], SCOPE_AGENT_READ)).toBe(true);
+    expect(hasScope(['claw:write'], SCOPE_AGENT_READ)).toBe(true);
+    expect(hasScope(['claw:admin'], SCOPE_AGENT_WRITE)).toBe(true);
+    expect(hasScope(['claw:admin'], SCOPE_AGENT_ADMIN)).toBe(true);
+    expect(hasScope(['claw:read'], SCOPE_AGENT_WRITE)).toBe(false);
   });
 
   it('empty scopes never satisfy', () => {
-    expect(hasScope([], SCOPE_CLAW_READ)).toBe(false);
+    expect(hasScope([], SCOPE_AGENT_READ)).toBe(false);
   });
 });
 
 describe('authenticate', () => {
   it('returns ok with claims for a valid Bearer + sufficient scope', async () => {
     const token = await signJwt(kp, { iss: fixture.origin, scope: 'agent:write' });
-    const r = await authenticate(`Bearer ${token}`, SCOPE_CLAW_READ);
+    const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_READ);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.claims.scopes).toContain('agent:write');
   });
 
   it('401 on missing header', async () => {
-    const r = await authenticate(undefined, SCOPE_CLAW_READ);
+    const r = await authenticate(undefined, SCOPE_AGENT_READ);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(401);
   });
 
   it('401 on malformed header (no Bearer prefix)', async () => {
     const token = await signJwt(kp, { iss: fixture.origin });
-    const r = await authenticate(token, SCOPE_CLAW_READ);
+    const r = await authenticate(token, SCOPE_AGENT_READ);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(401);
   });
 
   it('401 on invalid token (wrong issuer)', async () => {
     const token = await signJwt(kp, { iss: 'http://attacker.example' });
-    const r = await authenticate(`Bearer ${token}`, SCOPE_CLAW_READ);
+    const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_READ);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.status).toBe(401);
   });
 
   it('403 on insufficient scope — surfaces error_type + required + granted', async () => {
     const token = await signJwt(kp, { iss: fixture.origin, scope: 'agent:read' });
-    const r = await authenticate(`Bearer ${token}`, SCOPE_CLAW_WRITE);
+    const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_WRITE);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(403);
       expect(r.errorType).toBe('insufficient_scope');
-      expect(r.requiredScope).toBe(SCOPE_CLAW_WRITE);
+      expect(r.requiredScope).toBe(SCOPE_AGENT_WRITE);
       expect(r.grantedScopes).toEqual(['agent:read']);
     }
   });
@@ -310,7 +310,7 @@ describe('authenticate', () => {
       iss: fixture.origin,
       scope: 'hub:admin vault:admin scribe:admin channel:send',
     });
-    const r = await authenticate(`Bearer ${token}`, SCOPE_CLAW_ADMIN);
+    const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_ADMIN);
     expect(r.ok).toBe(true);
   });
 });

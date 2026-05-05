@@ -13,7 +13,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { hasScope, type ClawScope } from '../web/auth.js';
+import { hasScope, type AgentScope } from '../web/auth.js';
 import type { ToolDef } from './types.js';
 import { buildAllTools } from './tools/index.js';
 
@@ -22,7 +22,7 @@ export const MCP_SERVER_VERSION = '0.1.0';
 
 export interface ServerHooks {
   /** Strongest agent scope the caller has. Used to filter advertise + gate calls. */
-  effectiveScope: ClawScope;
+  effectiveScope: AgentScope;
   /** JWT `sub` for HTTP, `mcp:stdio` for stdio. Threaded into approval-decide attribution. */
   callerSubject: string;
 }

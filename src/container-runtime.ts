@@ -49,7 +49,7 @@ export function ensureContainerRuntimeRunning(): void {
     console.error('║  Agents cannot run without a container runtime. To fix:        ║');
     console.error('║  1. Ensure Docker is installed and running                     ║');
     console.error('║  2. Run: docker info                                           ║');
-    console.error('║  3. Restart Paraclaw                                           ║');
+    console.error('║  3. Restart parachute-agent                                    ║');
     console.error('╚════════════════════════════════════════════════════════════════╝\n');
     throw new Error('Container runtime is required but failed to start', {
       cause: err,

@@ -91,7 +91,7 @@ describe('makeServeStatic', () => {
   let distDir: string;
 
   beforeEach(() => {
-    distDir = mkdtempSync(join(tmpdir(), 'paraclaw-static-'));
+    distDir = mkdtempSync(join(tmpdir(), 'parachute-agent-static-'));
     writeFileSync(join(distDir, 'index.html'), '<!doctype html><html><body>shell</body></html>');
     mkdirSync(join(distDir, 'assets'));
     writeFileSync(join(distDir, 'assets', 'index-X.js'), 'export const k = 1;');

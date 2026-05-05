@@ -31,12 +31,12 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 
 const DEFAULT_HUB_LOOPBACK = 'http://127.0.0.1:1939';
 
-export const SCOPE_CLAW_READ = 'agent:read' as const;
-export const SCOPE_CLAW_WRITE = 'agent:write' as const;
-export const SCOPE_CLAW_ADMIN = 'agent:admin' as const;
+export const SCOPE_AGENT_READ = 'agent:read' as const;
+export const SCOPE_AGENT_WRITE = 'agent:write' as const;
+export const SCOPE_AGENT_ADMIN = 'agent:admin' as const;
 export const SCOPE_VAULT_ADMIN = 'vault:admin' as const;
 
-export type ClawScope = typeof SCOPE_CLAW_READ | typeof SCOPE_CLAW_WRITE | typeof SCOPE_CLAW_ADMIN;
+export type AgentScope = typeof SCOPE_AGENT_READ | typeof SCOPE_AGENT_WRITE | typeof SCOPE_AGENT_ADMIN;
 
 /**
  * Pre-0.1.0 compat: map legacy `claw:*` scope grants to their `agent:*`
@@ -44,9 +44,9 @@ export type ClawScope = typeof SCOPE_CLAW_READ | typeof SCOPE_CLAW_WRITE | typeo
  * Drop in 0.2.0.
  */
 const LEGACY_SCOPE_MAP: Record<string, string> = {
-  'claw:read': SCOPE_CLAW_READ,
-  'claw:write': SCOPE_CLAW_WRITE,
-  'claw:admin': SCOPE_CLAW_ADMIN,
+  'claw:read': SCOPE_AGENT_READ,
+  'claw:write': SCOPE_AGENT_WRITE,
+  'claw:admin': SCOPE_AGENT_ADMIN,
 };
 function normalizeGranted(s: string): string {
   return LEGACY_SCOPE_MAP[s] ?? s;
@@ -143,15 +143,15 @@ export function parseScopes(raw: string | null | undefined): string[] {
  *   - Legacy `claw:*` grants are normalized to `agent:*` (pre-0.1.0 compat;
  *     drop in 0.2.0).
  */
-export function hasScope(granted: string[], required: ClawScope): boolean {
+export function hasScope(granted: string[], required: AgentScope): boolean {
   const normalized = granted.map(normalizeGranted);
   if (normalized.includes(required)) return true;
   if (normalized.includes(SCOPE_VAULT_ADMIN)) return true;
-  if (required === SCOPE_CLAW_READ) {
-    return normalized.includes(SCOPE_CLAW_WRITE) || normalized.includes(SCOPE_CLAW_ADMIN);
+  if (required === SCOPE_AGENT_READ) {
+    return normalized.includes(SCOPE_AGENT_WRITE) || normalized.includes(SCOPE_AGENT_ADMIN);
   }
-  if (required === SCOPE_CLAW_WRITE) {
-    return normalized.includes(SCOPE_CLAW_ADMIN);
+  if (required === SCOPE_AGENT_WRITE) {
+    return normalized.includes(SCOPE_AGENT_ADMIN);
   }
   return false;
 }
@@ -165,7 +165,7 @@ export interface AuthFail {
   status: 401 | 403;
   error: string;
   errorType?: 'insufficient_scope';
-  requiredScope?: ClawScope;
+  requiredScope?: AgentScope;
   grantedScopes?: string[];
 }
 export type AuthResult = AuthOk | AuthFail;
@@ -182,7 +182,7 @@ function extractBearer(header: string | undefined): string | null {
  * structured pass/fail rather than throwing so callers can shape the
  * response uniformly (RFC-6749-style 403 body for insufficient_scope).
  */
-export async function authenticate(authHeader: string | undefined, required: ClawScope): Promise<AuthResult> {
+export async function authenticate(authHeader: string | undefined, required: AgentScope): Promise<AuthResult> {
   const token = extractBearer(authHeader);
   if (!token) {
     return { ok: false, status: 401, error: 'missing or malformed Authorization header' };

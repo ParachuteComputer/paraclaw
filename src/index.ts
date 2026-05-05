@@ -66,7 +66,7 @@ import {
 } from './channels/channel-registry.js';
 
 async function main(): Promise<void> {
-  log.info('Paraclaw starting');
+  log.info('parachute-agent starting');
 
   // 1. Init central DB. One-shot relocations run before open:
   //    - legacy <PROJECT_ROOT>/data/v2.db (pre-0.0.6) → new path
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
   //    standalone @paraclaw/web-server package).
   webServer = startWebServer();
 
-  log.info('Paraclaw running');
+  log.info('parachute-agent running');
 }
 
 /** Graceful shutdown. */

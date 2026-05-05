@@ -42,8 +42,8 @@ describe('readonlyMountArgs', () => {
 
 describe('stopContainer', () => {
   it('calls docker stop for valid container names', () => {
-    stopContainer('paraclaw-test-123');
-    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} stop -t 1 paraclaw-test-123`, {
+    stopContainer('parachute-agent-test-123');
+    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} stop -t 1 parachute-agent-test-123`, {
       stdio: 'pipe',
     });
   });

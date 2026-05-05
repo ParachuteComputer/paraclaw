@@ -66,8 +66,8 @@ export function makeServeStatic(opts: StaticServeOpts) {
       res.end(
         'UI bundle not found at ' +
           distDir +
-          '\n\nIn dev: run `pnpm --filter @paraclaw/web-ui dev` and open http://localhost:5173/.\n' +
-          'In prod: run `pnpm --filter @paraclaw/web-ui build` first.',
+          '\n\nIn dev: run `pnpm --filter @parachute-agent/web-ui dev` and open http://localhost:5173/.\n' +
+          'In prod: run `pnpm --filter @parachute-agent/web-ui build` first.',
       );
       return;
     }

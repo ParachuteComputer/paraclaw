@@ -17,11 +17,11 @@ import http from 'node:http';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { authenticate, type ClawScope } from '../web/auth.js';
+import { authenticate, type AgentScope } from '../web/auth.js';
 import { log } from '../log.js';
 import { buildMcpServer } from './server.js';
 
-function pickEffectiveScope(grantedScopes: string[]): ClawScope {
+function pickEffectiveScope(grantedScopes: string[]): AgentScope {
   // Pre-0.1.0 compat: legacy `claw:*` grants are accepted alongside the new
   // `agent:*` vocabulary. Both map to the same effective scope. Drop the
   // legacy half in 0.2.0.

@@ -156,7 +156,7 @@ export async function handleApprovalsRoute(ctx: ApprovalsRouteContext): Promise<
       value: body.decision,
       userId: claims.sub,
       channelType: 'web',
-      platformId: 'paraclaw-web',
+      platformId: 'parachute-agent-web',
       threadId: null,
     });
     if (!handled) {

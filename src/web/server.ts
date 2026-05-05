@@ -51,11 +51,11 @@ import { log } from '../log.js';
 import {
   authenticate,
   getHubOrigin,
-  SCOPE_CLAW_ADMIN,
-  SCOPE_CLAW_READ,
-  SCOPE_CLAW_WRITE,
+  SCOPE_AGENT_ADMIN,
+  SCOPE_AGENT_READ,
+  SCOPE_AGENT_WRITE,
   type AuthResult,
-  type ClawScope,
+  type AgentScope,
 } from './auth.js';
 import { handleMcpHttp } from '../mcp/http.js';
 import { handleAppsRoute } from './routes/apps.js';
@@ -183,7 +183,7 @@ function send401or403(res: http.ServerResponse, fail: Extract<AuthResult, { ok: 
   json(res, fail.status, body);
 }
 
-async function gate(req: http.IncomingMessage, res: http.ServerResponse, required: ClawScope): Promise<boolean> {
+async function gate(req: http.IncomingMessage, res: http.ServerResponse, required: AgentScope): Promise<boolean> {
   const result = await authenticate(req.headers.authorization, required);
   if (result.ok) return true;
   send401or403(res, result);
@@ -214,7 +214,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/setup/status' && method === 'GET') {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_READ))) return;
     try {
       const handled = await handleSetupStatusRoute({ pathname, method, res });
       if (handled) return;
@@ -225,7 +225,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/approvals' || pathname.startsWith('/api/approvals/')) {
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_WRITE;
     const auth = await authenticate(req.headers.authorization, required);
     if (!auth.ok) {
       send401or403(res, auth);
@@ -244,7 +244,7 @@ async function handleApi(
     // approval-routing write touches DM cache + cold-resolves through an
     // adapter; gate writes at admin. operator-identity is read-only — the
     // /channels/new form pre-fills from it.
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+    const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_ADMIN;
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSettingsRoute({ pathname, method, req, res });
@@ -258,7 +258,7 @@ async function handleApi(
   if (pathname === '/api/settings/agent-provider') {
     // Reads return only "is this slot populated?" booleans (no secret
     // material crosses HTTP). Writes accept and store API keys, so admin.
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+    const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_ADMIN;
     const auth = await authenticate(req.headers.authorization, required);
     if (!auth.ok) {
       send401or403(res, auth);
@@ -288,7 +288,7 @@ async function handleApi(
   // identity rejection for our hub-JWT being expired and trigger a
   // re-auth loop. Body still carries the precise validator status field.
   if (method === 'POST' && /^\/api\/channels\/[^/]+\/test$/.test(pathname)) {
-    if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_WRITE))) return;
     const adapter = pathname.split('/')[3];
     if (adapter !== 'discord' && adapter !== 'telegram') {
       // Without this branch, slack/whatsapp/etc fall through to the
@@ -318,7 +318,7 @@ async function handleApi(
   // operators wiring a second bot.) Idempotent: re-posting the same
   // (channelType, botId) just refreshes the stored ciphertext.
   if (method === 'POST' && /^\/api\/channels\/[^/]+\/register-bot$/.test(pathname)) {
-    if (!(await gate(req, res, SCOPE_CLAW_ADMIN))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_ADMIN))) return;
     const adapter = pathname.split('/')[3];
     if (adapter !== 'discord' && adapter !== 'telegram') {
       error(res, 404, `unknown adapter: ${adapter}`);
@@ -353,7 +353,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/channels' || pathname.startsWith('/api/channels/')) {
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+    const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_ADMIN;
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleChannelsRoute({ pathname, method, req, res });
@@ -370,7 +370,7 @@ async function handleApi(
     method === 'GET' &&
     (/^\/api\/groups\/[^/]+\/activity$/.test(pathname) || /^\/api\/sessions\/[^/]+\/activity$/.test(pathname))
   ) {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_READ))) return;
     try {
       const handled = await handleActivityRoute({ pathname, method, url, res });
       if (handled) return;
@@ -381,7 +381,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/sessions' || pathname.startsWith('/api/sessions/')) {
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_WRITE;
+    const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_WRITE;
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSessionsRoute({ pathname, method, res });
@@ -395,7 +395,7 @@ async function handleApi(
   // Read-only provider registry — data-drives the SPA's "add integration"
   // picker so new providers don't require a UI bundle change.
   if (pathname === '/api/oauth/providers' && method === 'GET') {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_READ))) return;
     try {
       const handled = handleOauthProvidersRoute({ pathname, method, res });
       if (handled) return;
@@ -412,7 +412,7 @@ async function handleApi(
   if (pathname === '/api/apps' || pathname.startsWith('/api/apps/')) {
     const isCallback = /^\/api\/apps\/[^/]+\/callback$/.test(pathname) && method === 'GET';
     if (!isCallback) {
-      const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+      const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_ADMIN;
       if (!(await gate(req, res, required))) return;
     }
     try {
@@ -428,7 +428,7 @@ async function handleApi(
   // would otherwise be enough to swap any vault credential and silently
   // MITM downstream API calls. Plaintext values are never returned by GET.
   if (pathname === '/api/secrets' || pathname.startsWith('/api/secrets/')) {
-    const required: ClawScope = method === 'GET' ? SCOPE_CLAW_READ : SCOPE_CLAW_ADMIN;
+    const required: AgentScope = method === 'GET' ? SCOPE_AGENT_READ : SCOPE_AGENT_ADMIN;
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleSecretsRoute({ pathname, method, url, req, res });
@@ -440,7 +440,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/groups' && method === 'GET') {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_READ))) return;
     try {
       const groups = listAgentGroups();
       json(res, 200, { groups });
@@ -455,7 +455,7 @@ async function handleApi(
     // and detail views are agent:read. Refer to § API surface in
     // docs/design/2026-04-29-vault-management-ui.md for the full table.
     const isTokenPath = /\/tokens(\/[^/]+)?$/.test(pathname);
-    const required: ClawScope = isTokenPath ? SCOPE_CLAW_ADMIN : SCOPE_CLAW_READ;
+    const required: AgentScope = isTokenPath ? SCOPE_AGENT_ADMIN : SCOPE_AGENT_READ;
     if (!(await gate(req, res, required))) return;
     try {
       const handled = await handleVaultsRoute({
@@ -474,7 +474,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/groups' && method === 'POST') {
-    if (!(await gate(req, res, SCOPE_CLAW_WRITE))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_WRITE))) return;
     try {
       const body = await readJsonBody<{
         name?: string;
@@ -575,7 +575,7 @@ async function handleApi(
 
   const folderAvail = pathname.match(/^\/api\/folder-availability\/([^/]+)$/);
   if (folderAvail && method === 'GET') {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_READ))) return;
     const slug = decodeURIComponent(folderAvail[1]);
     const v = validateFolderSlug(slug);
     if (!v.ok) {
@@ -587,7 +587,7 @@ async function handleApi(
   }
 
   if (pathname === '/api/folder-suggestion' && method === 'GET') {
-    if (!(await gate(req, res, SCOPE_CLAW_READ))) return;
+    if (!(await gate(req, res, SCOPE_AGENT_READ))) return;
     const name = url.searchParams.get('name') ?? '';
     json(res, 200, { name, slug: suggestFolderSlug(name) });
     return;
@@ -602,12 +602,12 @@ async function handleApi(
     // agent:read; writes default to agent:write; agent-provider writes
     // (paraclaw#86) bump to agent:admin since they store API keys.
     const isAgentProviderSub = sub === '/agent-provider';
-    const requiredScope: ClawScope =
+    const requiredScope: AgentScope =
       method === 'GET' && (sub === '' || isAgentProviderSub)
-        ? SCOPE_CLAW_READ
+        ? SCOPE_AGENT_READ
         : isAgentProviderSub
-          ? SCOPE_CLAW_ADMIN
-          : SCOPE_CLAW_WRITE;
+          ? SCOPE_AGENT_ADMIN
+          : SCOPE_AGENT_WRITE;
     // Authenticate once; capture sub so the agent-provider sub-route's
     // audit log doesn't have to re-decode the JWT.
     const auth = await authenticate(req.headers.authorization, requiredScope);
@@ -977,7 +977,7 @@ export function startWebServer(): http.Server {
         paths: ['/agent'],
         health: '/api/health',
         version: SERVICE_VERSION,
-        displayName: 'Paraclaw',
+        displayName: 'Parachute Agent',
         tagline: 'Manage your Parachute agent groups + vault attachments.',
       });
     } catch (err) {

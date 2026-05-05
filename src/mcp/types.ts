@@ -10,9 +10,9 @@
  * `ToolHandlerContext` so individual tool handlers can refuse mutating ops
  * when the caller only holds `agent:read`.
  */
-import type { ClawScope } from '../web/auth.js';
+import type { AgentScope } from '../web/auth.js';
 
-export type { ClawScope };
+export type { AgentScope };
 
 /**
  * Per-call context handed to a tool handler. `effectiveScope` is the
@@ -25,7 +25,7 @@ export type { ClawScope };
  * tools that need an attribution string.
  */
 export interface ToolHandlerContext {
-  effectiveScope: ClawScope;
+  effectiveScope: AgentScope;
   callerSubject: string;
 }
 
@@ -39,7 +39,7 @@ export interface ToolDef {
    */
   inputSchema: Record<string, unknown>;
   /** Required scope to advertise + invoke. */
-  scope: ClawScope;
+  scope: AgentScope;
   /**
    * If set, the tool is advertised in the registry (for human introspection)
    * but filtered out of `tools/list` and refused on `tools/call`. Used for
