@@ -1,4 +1,4 @@
-# Paraclaw
+# parachute-agent
 
 <p align="center">
   An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs. A [Parachute](https://parachute.computer) module.
@@ -13,29 +13,29 @@
 
 ---
 
-## Why Paraclaw
+## Why parachute-agent
 
 Most AI-assistant frameworks fall into one of two camps: heavyweight platforms with hundreds of thousands of lines of code, dozens of config files, and security at the application layer (allowlists, pairing codes); or DIY scripts with no isolation at all. Both ask you to either trust software you can't read, or hand the agent direct access to your machine.
 
-Paraclaw runs each agent group in its own Linux container with filesystem isolation, in a codebase small enough to read in an afternoon — one process and a handful of files. Bash access is safe because commands run inside the container, not on your host. The user's [Parachute Vault](https://github.com/ParachuteComputer/parachute-vault) is the agent's substrate: scoped vault tokens grant exactly the read/write surface you choose, and credentials live in a local AES-GCM-encrypted store, never round-tripped through chat context.
+parachute-agent runs each agent group in its own Linux container with filesystem isolation, in a codebase small enough to read in an afternoon — one process and a handful of files. Bash access is safe because commands run inside the container, not on your host. The user's [Parachute Vault](https://github.com/ParachuteComputer/parachute-vault) is the agent's substrate: scoped vault tokens grant exactly the read/write surface you choose, and credentials live in a local AES-GCM-encrypted store, never round-tripped through chat context.
 
 ## Quick Start
 
-Paraclaw is a [Parachute](https://parachute.computer) module — install it through the hub and configure it from the web UI:
+parachute-agent is a [Parachute](https://parachute.computer) module — install it through the hub and configure it from the web UI:
 
 ```bash
-parachute install paraclaw
+parachute install parachute-agent
 ```
 
-The hub builds the agent container, brings the host process up under `bun src/index.ts`, and serves the configuration UI at `http://127.0.0.1:1944/claw/`. From there: drop in your Anthropic API key, pick a channel (Telegram, Discord, or the local CLI), and pair your first agent — no shell scripts required. See [`docs/parachute-integration.md`](docs/parachute-integration.md) for the full Parachute path.
+The hub builds the agent container, brings the host process up under `bun src/index.ts`, and serves the configuration UI at `http://127.0.0.1:1944/agent/`. From there: drop in your Anthropic API key, pick a channel (Telegram, Discord, or the local CLI), and pair your first agent — no shell scripts required. See [`docs/parachute-integration.md`](docs/parachute-integration.md) for the full Parachute path.
 
 ## Philosophy
 
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full Paraclaw codebase, just ask Claude Code to walk you through it.
+**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full parachute-agent codebase, just ask Claude Code to walk you through it.
 
 **Secure by isolation.** Agents run in Linux containers and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
-**Built for the individual user.** Paraclaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, Paraclaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
+**Built for the individual user.** parachute-agent isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, parachute-agent is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
 
 **Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
 
@@ -43,7 +43,7 @@ The hub builds the agent container, brings the host process up under `bun src/in
 
 **Skills over features.** Trunk ships the registry and infrastructure, not specific channel adapters or alternative agent providers. Channels (Discord, Slack, Telegram, WhatsApp, …) live on a long-lived `channels` branch; alternative providers (OpenCode, Ollama) live on `providers`. You run `/add-telegram`, `/add-opencode`, etc. and the skill copies exactly the module(s) you need into your fork. No feature you didn't ask for.
 
-**Best harness, best model.** Paraclaw natively uses Claude Code via Anthropic's official Claude Agent SDK, so you get the latest Claude models and Claude Code's full toolset, including the ability to modify and expand your own Paraclaw fork. Other providers are drop-in options: `/add-codex` for OpenAI's Codex (ChatGPT subscription or API key), `/add-opencode` for OpenRouter, Google, DeepSeek and more via OpenCode, and `/add-ollama-provider` for local open-weight models. Provider is configurable per agent group.
+**Best harness, best model.** parachute-agent natively uses Claude Code via Anthropic's official Claude Agent SDK, so you get the latest Claude models and Claude Code's full toolset, including the ability to modify and expand your own parachute-agent fork. Other providers are drop-in options: `/add-codex` for OpenAI's Codex (ChatGPT subscription or API key), `/add-opencode` for OpenRouter, Google, DeepSeek and more via OpenCode, and `/add-ollama-provider` for local open-weight models. Provider is configurable per agent group.
 
 ## What It Supports
 
@@ -53,7 +53,7 @@ The hub builds the agent container, brings the host process up under `bun src/in
 - **Scheduled tasks** — recurring jobs that run Claude and can message you back
 - **Web access** — search and fetch content from the web
 - **Container isolation** — agents are sandboxed in Docker (macOS/Linux/WSL2), with optional [Docker Sandboxes](docs/docker-sandboxes.md) micro-VM isolation or Apple Container as a macOS-native opt-in
-- **Credential security** — agents never hold raw API keys. Paraclaw stores credentials in a local AES-GCM-encrypted secret store (`~/.parachute/claw/master.key` + the central DB), injects them into the container's environment at spawn time, and never round-trips them through chat context.
+- **Credential security** — agents never hold raw API keys. parachute-agent stores credentials in a local AES-GCM-encrypted secret store (`~/.parachute/agent/master.key` + the central DB), injects them into the container's environment at spawn time, and never round-trips them through chat context.
 
 ## Usage
 
@@ -74,7 +74,7 @@ From a channel you own or administer, you can manage groups and tasks:
 
 ## Customizing
 
-Paraclaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
+parachute-agent doesn't use configuration files. To make changes, just tell Claude Code what you want:
 
 - "Change the trigger word to @Bob"
 - "Remember in the future to make responses shorter and more direct"
@@ -140,15 +140,15 @@ Docker provides cross-platform support (macOS, Linux and Windows via WSL2) and a
 
 **Can I run this on Linux or Windows?**
 
-Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Install via the Parachute hub: `parachute install paraclaw`.
+Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Install via the Parachute hub: `parachute install parachute-agent`.
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials live in paraclaw's AES-GCM-encrypted secret store (master key at `~/.parachute/claw/master.key`, ciphertext in the central DB), injected into each container at spawn time and scoped per agent group. You should still review what you're running, but the codebase is small enough that you actually can.
+Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials live in parachute-agent's AES-GCM-encrypted secret store (master key at `~/.parachute/agent/master.key`, ciphertext in the central DB), injected into each container at spawn time and scoped per agent group. You should still review what you're running, but the codebase is small enough that you actually can.
 
 **Why no configuration files?**
 
-We don't want configuration sprawl. Every user should customize Paraclaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
+We don't want configuration sprawl. Every user should customize parachute-agent so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
 
 **Can I use third-party or open-source models?**
 
@@ -163,7 +163,7 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 
 **How do I debug issues?**
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies Paraclaw.
+Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies parachute-agent.
 
 **Why isn't the setup working for me?**
 

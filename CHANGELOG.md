@@ -1,6 +1,37 @@
 # Changelog
 
-All notable changes to Paraclaw will be documented in this file.
+All notable changes to parachute-agent will be documented in this file.
+
+## [0.1.0-rc.1] - 2026-05-04
+
+Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's named-after-purpose convention (vault, notes, scribe, hub). The name on disk, in the npm registry, on the mount path, and on the wire all change. Operator data migrates automatically on first boot; tokens, container labels, and module manifests carry one cycle of back-compat.
+
+- **npm package.** `paraclaw` → `@openparachute/agent`. The `parachute-agent` bin wraps the same entry point.
+- **`.parachute/module.json` `name`** → `parachute-agent`. The hub picks up the new identifier from the manifest; old installs that re-pull will see the rename without intervention.
+- **Mount path.** `/claw/*` → `/agent/*`. Hub-fronted UI lives under `/agent/`. The SPA derives its mount from `import.meta.env.BASE_URL`, so the same bundle works at any prefix. **No 301 redirect** — hard cut. Re-bookmark.
+- **Data dir.** `~/.parachute/claw/{paraclaw.db,master.key}` → `~/.parachute/agent/{agent.db,master.key}`. **Auto-migrated on startup** the first time 0.1.x boots: the legacy file copies to the new path with mode 0600, and the legacy file is left in place as a manual-rm backup. Honors `PARACHUTE_HOME`. Both legacies (pre-0.0.6 in-tree `data/v2.db` and pre-0.1.0 `~/.parachute/claw/paraclaw.db`) are preferred over an absent current; if both exist, the paraclaw-era file wins.
+- **Container labels.** Spawn label is now `parachute-agent-install=<slug>`. Cleanup reaps both the new label and the legacy `paraclaw-install=<slug>` label for one upgrade cycle, so a 0.1.x host coming up against pre-0.1.0 orphan containers cleans them up correctly. **Drop `paraclaw-install` compat in 0.2.0** (tracked as a follow-up issue).
+- **Container image tag.** `paraclaw-agent-<slug>:latest` → `parachute-agent-image-<slug>:latest`. `container/build.sh` produces the new tag; `container-runner` spawns from it. The `-image-` infix avoids colliding with the npm package name.
+- **MCP scope strings + symbols.** Wire scopes are `agent:read|write|admin` (was `claw:*`). Hub-issued JWTs carrying legacy `claw:*` grants still pass — they normalize to their `agent:*` equivalents inside `hasScope` and `pickEffectiveScope`. **Drop `claw:*` normalization in 0.2.0.** TS symbols renamed: `ClawScope` → `AgentScope`; `SCOPE_CLAW_*` → `SCOPE_AGENT_*`.
+- **MCP server name.** `paraclaw` → `parachute-agent`. Tools advertise as `mcp__parachute_agent__<verb>-<noun>` client-side. The stdio + HTTP transports both serve the same registry.
+- **Service registry.** `services-manifest` displayName `Paraclaw` → `Parachute Agent`; service identifiers (`parachute-agent-web-server`) and the `name: 'agent'` route entry follow.
+- **launchd / systemd.** No service-file generator changes in this PR — service install is now owned by the hub install path. Operators on existing installs who still have the old `computer.parachute.claw-<slug>.plist` / `paraclaw-<slug>.service` units will continue to work; re-running the hub installer rewrites them with the new label/unit name.
+
+### Operator migration steps (existing installs)
+
+1. **Stop the daemon** (so the migration sees a quiescent state):
+   - macOS: `launchctl unload ~/Library/LaunchAgents/computer.parachute.claw-<slug>.plist`
+   - Linux: `systemctl --user stop paraclaw-<slug>`
+2. **Pull the rename**: `git pull --ff-only` on the install dir, then `pnpm install` (the `postinstall` hook rebuilds the SPA bundle).
+3. **Start the daemon**. On first boot, you'll see one or both of these log lines once and only once:
+   ```
+   Central DB migrated from legacy location  from=…/paraclaw.db  to=…/agent.db
+   Master key migrated from legacy location   from=…/claw/master.key  to=…/agent/master.key
+   ```
+4. **Verify** via the web UI at the new mount: `/agent/` (was `/claw/`).
+5. **Cleanup (optional)**: once you've verified the new install boots and decrypts secrets, delete the legacy backups: `rm ~/.parachute/claw/paraclaw.db ~/.parachute/claw/master.key && rmdir ~/.parachute/claw`.
+
+`PARACLAW_*` env var names (`PARACLAW_HUB_ORIGIN`, `PARACLAW_WEB_PORT`, `PARACLAW_WEB_BIND`, `PARACLAW_WEB_MOUNT`, `PARACLAW_WEB_ORIGIN`, `PARACLAW_CENTRAL_DB_PATH`) are retained through 0.1.x for operator-config back-compat. Renaming queued for 0.2.0.
 
 ## [Unreleased]
 

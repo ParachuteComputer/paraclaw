@@ -1,6 +1,6 @@
-# Paraclaw — Central DB Schema
+# parachute-agent — Central DB Schema
 
-Complete reference for `~/.parachute/claw/paraclaw.db`, the host-owned admin-plane database. Start with [db.md](db.md) for the three-DB overview, the map, and the cross-mount rules.
+Complete reference for `~/.parachute/agent/agent.db`, the host-owned admin-plane database. Start with [db.md](db.md) for the three-DB overview, the map, and the cross-mount rules.
 
 Access layer: `src/db/`. Authoritative schema reference: `src/db/schema.ts` (comments only — actual creation runs via migrations in `src/db/migrations/`).
 
@@ -250,7 +250,7 @@ Writer: `recordDroppedMessage()` in `src/db/dropped-messages.ts`. On conflict, b
 
 ### 1.13 Chat SDK bridge tables
 
-State backing the `SqliteStateAdapter` used by the Chat SDK bridge (see [api-details.md](api-details.md)). Paraclaw code rarely touches these directly — they're owned by `src/state-sqlite.ts`.
+State backing the `SqliteStateAdapter` used by the Chat SDK bridge (see [api-details.md](api-details.md)). parachute-agent code rarely touches these directly — they're owned by `src/state-sqlite.ts`.
 
 ```sql
 CREATE TABLE chat_sdk_kv (

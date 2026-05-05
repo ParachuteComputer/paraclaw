@@ -1,4 +1,4 @@
-# Paraclaw Database Architecture — Overview
+# parachute-agent Database Architecture — Overview
 
 Orientation for the data model: the three databases, how they fit together, and the invariants that hold across them. For table-level schemas, follow the links below.
 
@@ -11,11 +11,11 @@ Related: [architecture.md](architecture.md) for the high-level design; [api-deta
 
 ## 1. The three databases
 
-Paraclaw uses **three kinds of SQLite database**, all on the host filesystem:
+parachute-agent uses **three kinds of SQLite database**, all on the host filesystem:
 
 | DB | Location | Writer | Readers | Purpose |
 |----|----------|--------|---------|---------|
-| **Central** | `~/.parachute/claw/paraclaw.db` | host | host | Identity, permissions, routing, wiring — the admin plane |
+| **Central** | `~/.parachute/agent/agent.db` | host | host | Identity, permissions, routing, wiring — the admin plane |
 | **Session inbound** | `data/sessions/<agent_group_id>/<session_id>/inbound.db` | host | host (sync), container (read-only) | Host → container messages + routing projections |
 | **Session outbound** | `data/sessions/<agent_group_id>/<session_id>/outbound.db` | container | host (poll), container | Container → host messages + processing status |
 
@@ -30,7 +30,7 @@ Paraclaw uses **three kinds of SQLite database**, all on the host filesystem:
 ## 2. Database map
 
 ```
-~/.parachute/claw/paraclaw.db             ← CENTRAL (host ↔ host)
+~/.parachute/agent/agent.db               ← CENTRAL (host ↔ host)
 data/
   sessions/
     <agent_group_id>/

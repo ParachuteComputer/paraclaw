@@ -1,4 +1,4 @@
-# Paraclaw Security Model
+# parachute-agent Security Model
 
 ## Trust Model
 
@@ -66,11 +66,11 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credential Isolation (Local Secret Store)
 
-Paraclaw stores third-party credentials (API keys, OAuth tokens) in a local AES-GCM-encrypted store and injects them into per-agent containers as environment variables at spawn time. There is no proxy in the request path — the credential is plaintext inside the container at runtime, the same posture as any standard process environment.
+parachute-agent stores third-party credentials (API keys, OAuth tokens) in a local AES-GCM-encrypted store and injects them into per-agent containers as environment variables at spawn time. There is no proxy in the request path — the credential is plaintext inside the container at runtime, the same posture as any standard process environment.
 
 **How it works:**
-1. Credentials are written via the `/secrets` page in the paraclaw web UI (or the `secrets` table directly). Ciphertext lives in the central DB; the master key is at `~/.parachute/claw/master.key` on the host (mode 0600).
-2. When paraclaw spawns a container, it resolves the secrets assigned to that agent group, decrypts them on the host, and passes them as `-e KEY=VAL` Docker flags.
+1. Credentials are written via the `/secrets` page in the parachute-agent web UI (or the `secrets` table directly). Ciphertext lives in the central DB; the master key is at `~/.parachute/agent/master.key` on the host (mode 0600).
+2. When parachute-agent spawns a container, it resolves the secrets assigned to that agent group, decrypts them on the host, and passes them as `-e KEY=VAL` Docker flags.
 3. Agents see the credentials as ordinary env vars. The host process is the only thing that ever holds the master key — containers cannot decrypt the ciphertext on their own.
 
 **Per-agent assignment:**

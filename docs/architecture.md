@@ -1,32 +1,34 @@
-# Paraclaw Architecture
+# parachute-agent Architecture
 
-> Paraclaw is a single-process Bun service that runs an AI agent companion
+> parachute-agent is a single-process Bun service that runs an AI agent companion
 > across many channels — Telegram, Discord, CLI, web. State lives in
 > SQLite — one central DB on the host plus a small per-session DB mounted
 > into each container. Per-session Docker containers sandbox agent
 > execution; secrets are managed natively at rest in AES-256-GCM.
-> Paraclaw is a first-class Parachute module: it discovers the hub,
+> parachute-agent is a first-class Parachute module: it discovers the hub,
 > accepts hub-issued JWTs, and attaches Parachute vaults so agents can
 > read and write the user's knowledge graph.
 
-This document is the canonical architecture reference for paraclaw. It
-defines the primitives every other doc references, the runtime shape, the
-schema, the API surface, the trust model, and the integration contract with
-the rest of the Parachute ecosystem. It is aimed at contributors who want
-to understand or extend paraclaw — not at users picking it up for the first
-time. For that, start at the project README.
+This document is the canonical architecture reference for parachute-agent
+(formerly paraclaw, renamed in 0.1.0-rc.1). It defines the primitives every
+other doc references, the runtime shape, the schema, the API surface, the
+trust model, and the integration contract with the rest of the Parachute
+ecosystem. It is aimed at contributors who want to understand or extend
+parachute-agent — not at users picking it up for the first time. For that,
+start at the project README.
 
-Paraclaw draws engine-room patterns from NanoClaw (per-session containers,
-channel adapters, the message-as-IO discipline), from OneCLI (per-agent
-secret modes, approval gating), and from tinyclaw/borg (single-process
-collapse, in-process secrets, security zones). None of those are
-dependencies of paraclaw v1; paraclaw owns its surface end to end.
+parachute-agent draws engine-room patterns from NanoClaw (per-session
+containers, channel adapters, the message-as-IO discipline), from OneCLI
+(per-agent secret modes, approval gating), and from tinyclaw/borg
+(single-process collapse, in-process secrets, security zones). None of those
+are dependencies of parachute-agent v1; parachute-agent owns its surface end
+to end.
 
 ## Shape at a glance
 
 ```
                 ┌──────────────────────────────────────────────┐
-                │  paraclaw  (single Bun process, port 1944)   │
+                │  parachute-agent  (single Bun process, 1944) │
                 │                                              │
    inbound ─────▶  channel adapters  ──▶  router  ──▶  session manager
    (telegram,    │  (telegram,            │             │      │
@@ -42,7 +44,7 @@ dependencies of paraclaw v1; paraclaw owns its surface end to end.
                  │                   │    │   mounts inbound.db (RO) │
                  │                   │    │   mounts outbound.db (RW)│
                  │            ▲──────┴────┴─────────────▼      │
-                 │       central paraclaw.db    per-session DBs│
+                 │       central agent.db    per-session DBs│
                  │       (host-only writer)     (one writer    │
                  │                               per file)     │
                  │   agent_groups · sessions    inbound.db:    │
@@ -68,7 +70,7 @@ heartbeat file.
 ## Primitives
 
 The schema is the contract. Most primitives below correspond to a table
-in the **central** `~/.parachute/claw/paraclaw.db`. The message-bus
+in the **central** `~/.parachute/agent/agent.db`. The message-bus
 tables — `messages_in`, `messages_out`, `session_state` — live in
 **per-session** files under `data/sessions/<agent_group_id>/<session_id>/`, split into
 `inbound.db` and `outbound.db` so each file has exactly one writer
@@ -98,7 +100,7 @@ to it. Deleting an agent group cascades through all of them.
 ### Session
 
 A live conversation state for an agent group. Every session has a
-per-session Docker container. Sessions are how paraclaw scales context
+per-session Docker container. Sessions are how parachute-agent scales context
 horizontally — each session has its own Claude conversation, its own
 `messages_in` / `messages_out` slices, its own container resource budget.
 
@@ -130,7 +132,7 @@ matching wire.
 |---|---|
 | `id` | ULID |
 | `channel_type` | `telegram` · `discord` · `cli` (others land as plugins later) |
-| `messaging_group_id` | paraclaw-internal id for the platform thread |
+| `messaging_group_id` | host-internal id for the platform thread |
 | `agent_group_id` | foreign key |
 | `engage_mode` | `mention` · `pattern` · `all` |
 | `engage_pattern` | regex (when `engage_mode = pattern`) |
@@ -169,8 +171,8 @@ the full flow.
 
 ### Secret
 
-An encrypted credential value managed by paraclaw. Secrets replace
-OneCLI-as-a-dependency for the v1 line: paraclaw owns the layer. The
+An encrypted credential value managed by parachute-agent. Secrets replace
+OneCLI-as-a-dependency for the v1 line: parachute-agent owns the layer. The
 threat model and the on-disk format are described in `docs/SECURITY.md`;
 the schema is summarized here.
 
@@ -178,20 +180,20 @@ the schema is summarized here.
 |---|---|
 | `id` | ULID |
 | `name` | unique within `agent_group_id` scope (or globally if null) |
-| `value_encrypted` | AES-256-GCM, key from `~/.parachute/claw/master.key` |
+| `value_encrypted` | AES-256-GCM, key from `~/.parachute/agent/master.key` |
 | `kind` | `channel-token` · `api-key` · `generic` |
 | `agent_group_id` | nullable; null = global |
 | `assigned_mode` | `all` · `selective` (per-agent injection scope) |
 | `created_at`, `updated_at` | ISO-8601 |
 
-The master key lives at `~/.parachute/claw/master.key` (32 bytes, mode
+The master key lives at `~/.parachute/agent/master.key` (32 bytes, mode
 0600, generated on first start). Secrets are decrypted in-process at
 session spawn and injected into the container as environment variables —
 never as chat context, never in URL params.
 
 ### Approval
 
-A pending action that requires human consent before paraclaw will apply
+A pending action that requires human consent before parachute-agent will apply
 it. Today: `install_packages`, `add_mcp_server`, `access-new-credential`.
 The primitive is general — any host-side handler can request an approval.
 
@@ -208,7 +210,7 @@ The primitive is general — any host-side handler can request an approval.
 
 Approvals surface in the web UI's notifications panel and via channel DM
 to the agent group's owner — `pickApprover` resolves the recipient from
-`user_roles` (scoped admin → global admin → owner). Crucially, paraclaw
+`user_roles` (scoped admin → global admin → owner). Crucially, parachute-agent
 makes the policy and the delivery one decision: there is no separate
 gateway process holding requests while the host doesn't know about them.
 If approvals are configured, they are routed; if they are not configured,
@@ -216,10 +218,10 @@ nothing hangs.
 
 ## Trust zones
 
-Paraclaw inherits the **infra / core / perimeter** vocabulary from borg.
+parachute-agent inherits the **infra / core / perimeter** vocabulary from borg.
 Three named tiers, with explicit cross-zone rules:
 
-- **infra** — paraclaw itself, channel adapters, the host process, the
+- **infra** — parachute-agent itself, channel adapters, the host process, the
   router, the sweep loop. Deterministic plumbing. Non-messageable: an agent
   cannot send a chat message *to* infra; it can only request actions
   through documented MCP tools. Code in `src/` outside `src/modules/`
@@ -229,7 +231,7 @@ Three named tiers, with explicit cross-zone rules:
   isolation is the primary enforcement: each container mounts only its
   own `inbound.db` (read-only) and `outbound.db` (read-write), so
   cleartext message rows are visible only to that session's container —
-  one core actor cannot read another's queue. The central `paraclaw.db`
+  one core actor cannot read another's queue. The central `agent.db`
   is *never* mounted into a container; it is host-only state.
 - **perimeter** — exposed surfaces. The web UI's `/api/*` endpoints, the
   channel inbound webhooks, anything an external actor can reach. Every
@@ -248,7 +250,7 @@ v1 contract.
 
 ### Single-process Bun host
 
-Paraclaw is **one Bun process**. No host-Node-plus-container-Bun split,
+parachute-agent is **one Bun process**. No host-Node-plus-container-Bun split,
 no separate web server. The process owns:
 
 1. The HTTP listener on port 1944 (configurable via parachute hub
@@ -267,7 +269,7 @@ no separate web server. The process owns:
 
 The Bun-everywhere choice is deliberate. NanoClaw ran the host on Node
 and the agent-runner on Bun, which works but leaves two lockfiles and two
-test-runner conventions. Paraclaw collapses to Bun: `bun:sqlite` on both
+test-runner conventions. parachute-agent collapses to Bun: `bun:sqlite` on both
 sides, one `bun.lock`, one `bun test`. `.parachute/module.json` therefore
 sets `startCmd: ["bun", "src/index.ts"]` — the legacy
 `pnpm exec tsx web/server/src/server.ts` path is dropped once the web
@@ -275,7 +277,7 @@ server folds into the same process.
 
 ### Per-session Docker containers
 
-Each session gets a container. The image (`paraclaw-agent:latest`) is
+Each session gets a container. The image (`parachute-agent-image-<slug>:latest`) is
 built once by `./container/build.sh`; the runtime mounts the agent
 group's folder, the session's `inbound.db` (read-only) and
 `outbound.db` (read-write) at known paths under `/workspace/` — and
@@ -309,7 +311,7 @@ two per-session files under `data/sessions/<agent_group_id>/<session_id>/`:
   `messages_out` and `session_state`.
 
 The split is *load-bearing*: it gives every file exactly one writer
-across the bind mount. The central `paraclaw.db` never enters a
+across the bind mount. The central `agent.db` never enters a
 container; the host writes new inbound rows into the session's
 `inbound.db` before it spawns or wakes the container, and the host's
 sweep and active-poll loops open and close `outbound.db` to read
@@ -342,8 +344,8 @@ simplification target — but neither validated dropping the split across
 a Docker bind mount. tinyclaw is single-process (no mount in the IPC
 path); borg uses a JSONL file-queue (no SQLite at all). Their single-DB
 collapse applies to single-process state, not to container-mounted
-message queues with two writers. Paraclaw keeps NanoClaw's two-file
-per-session shape verbatim and adds the central `paraclaw.db`
+message queues with two writers. parachute-agent keeps NanoClaw's two-file
+per-session shape verbatim and adds the central `agent.db`
 extraction on top — central state is host-only, message queues stay
 split for one-writer-per-file.
 
@@ -351,7 +353,7 @@ split for one-writer-per-file.
 
 State splits across two SQLite surfaces, by *who can write to what*:
 
-- **Central** `~/.parachute/claw/paraclaw.db` — host-only writer. Never
+- **Central** `~/.parachute/agent/agent.db` — host-only writer. Never
   mounted into a container. Holds every primitive that isn't a live
   message queue.
 - **Per-session** under `data/sessions/<agent_group_id>/<session_id>/` — two files:
@@ -364,7 +366,7 @@ Migrations for all three surfaces live under `src/db/migrations/` and
 run on host start. The central migrations apply once; the per-session
 schemas are created on session spawn.
 
-### Central `paraclaw.db`
+### Central `agent.db`
 
 ```sql
 -- the unit a user creates
@@ -469,7 +471,7 @@ CREATE TABLE user_roles (
 The user/user_roles pair is intentionally minimal compared to NanoClaw's
 four-table model. tinyclaw and borg both pointed out that the
 `users → messaging_groups → agent_groups → sessions` chain was
-gold-plating — paraclaw keeps users only because approvals need a
+gold-plating — parachute-agent keeps users only because approvals need a
 recipient, and roles only because owner-vs-admin is load-bearing for
 those approvals. Membership-as-access-gate (NanoClaw's
 `agent_group_members`) is dropped; perimeter auth is JWT-on-every-route.
@@ -548,7 +550,7 @@ query family.
 ## API surface
 
 Every `/api/*` endpoint requires a hub-issued JWT — operator JWT for
-admin tooling, user OAuth bearer for the browser. Paraclaw validates
+admin tooling, user OAuth bearer for the browser. parachute-agent validates
 against the hub's JWKS. Two endpoints are unauthenticated by design:
 `/api/health` (operational probe) and `/api/discovery` (returns hub
 origin so the SPA can bootstrap OAuth without baking the origin into the
@@ -602,7 +604,7 @@ list is to make the *surface* legible.
 
 ## Parachute integration
 
-Paraclaw ships as a first-class Parachute module. The contract:
+parachute-agent ships as a first-class Parachute module. The contract:
 
 ### `.parachute/module.json`
 
@@ -610,22 +612,22 @@ The lifecycle and routing manifest the hub reads on install:
 
 ```json
 {
-  "name": "claw",
-  "manifestName": "paraclaw",
-  "displayName": "Paraclaw",
+  "name": "agent",
+  "manifestName": "parachute-agent",
+  "displayName": "Parachute Agent",
   "tagline": "Manage your Parachute agent groups + vault attachments.",
   "kind": "frontend",
   "port": 1944,
-  "paths": ["/claw"],
+  "paths": ["/agent"],
   "health": "/api/health",
   "startCmd": ["bun", "src/index.ts"],
   "scopes": {
-    "defines": ["claw:read", "claw:write", "claw:admin"]
+    "defines": ["agent:read", "agent:write", "agent:admin"]
   }
 }
 ```
 
-Mount: paraclaw lives under `/claw/` behind the hub on the user's tailnet.
+Mount: parachute-agent lives under `/agent/` behind the hub on the user's tailnet.
 The UI bundle and every server route honour the mount via
 `import.meta.env.BASE_URL` and `PARACLAW_WEB_MOUNT` (see CLAUDE.md's
 "Web UI (mount-aware)" section). The mount is not optional and not
@@ -633,24 +635,24 @@ hardcoded.
 
 ### `/.well-known/parachute.json`
 
-Paraclaw publishes its capability card at `/.well-known/parachute.json`,
+parachute-agent publishes its capability card at `/.well-known/parachute.json`,
 following the well-known shape from
 `parachute-patterns/patterns/well-known-discovery-rfc.md`. Content:
 display name, scopes defined, well-known URLs for OAuth resource
 metadata, services catalog (so peer Parachute modules can discover
-paraclaw without hardcoding).
+parachute-agent without hardcoding).
 
 ### Hub-as-issuer OAuth
 
-Paraclaw is a resource server, not an issuer. Tokens are minted by
+parachute-agent is a resource server, not an issuer. Tokens are minted by
 parachute-hub at `:1939`. The flow:
 
-1. Browser hits `/claw/`.
+1. Browser hits `/agent/`.
 2. SPA reads `/api/discovery` → hub origin.
 3. SPA redirects to `<hub>/oauth/authorize?...` with PKCE.
 4. User consents on the hub (with hub's owner-password + optional TOTP).
-5. Hub redirects back to `/claw/oauth/callback` with a code.
-6. SPA exchanges at `<hub>/oauth/token` → bearer with `claw:*` scopes.
+5. Hub redirects back to `/agent/oauth/callback` with a code.
+6. SPA exchanges at `<hub>/oauth/token` → bearer with `agent:*` scopes (legacy `claw:*` grants normalize through 0.1.x).
 7. SPA stores the bearer; every `/api/*` call carries it.
 
 Vault attachments use the same hub-as-issuer flow but for `vault:*`
@@ -662,7 +664,7 @@ design is in
 ### Lifecycle hooks
 
 `parachute install`, `parachute start`, `parachute restart`,
-`parachute stop` — the hub drives lifecycle via the manifest. Paraclaw's
+`parachute stop` — the hub drives lifecycle via the manifest. parachute-agent's
 install command runs migrations, generates the master key if absent, and
 registers in the hub's services catalog. Start runs `bun src/index.ts`.
 
@@ -670,7 +672,7 @@ registers in the hub's services catalog. Start runs `bun src/index.ts`.
 
 | Domain | Inherited from | What changed |
 |---|---|---|
-| Per-session containers | NanoClaw | Image renamed `paraclaw-agent`; runtime stays Docker/Apple-container |
+| Per-session containers | NanoClaw | Image renamed `parachute-agent-image-<slug>`; runtime stays Docker/Apple-container |
 | Channel adapter shape | NanoClaw | Telegram + Discord + CLI live in `src/channels/` permanently; rest become plugins |
 | Chat SDK bridge | NanoClaw | Kept as-is in `src/channels/chat-sdk-bridge.ts` |
 | Message-as-IO discipline | NanoClaw | Same `messages_in` / `messages_out` columns; one file per session instead of two |
@@ -690,14 +692,14 @@ registers in the hub's services catalog. Start runs `bun src/index.ts`.
 
 The morning smoke (run by team-lead before declaring the rebuild done):
 
-1. `parachute install ~/ParachuteComputer/paraclaw` → installs from night branch.
-2. `parachute start claw` → paraclaw boots; logs show Bun, central + per-session SQLite ready, Telegram adapter loaded.
-3. `curl /claw/api/setup/status` → `ready=true`.
-4. Browser load `/claw/` → control panel renders.
+1. `parachute install ~/ParachuteComputer/paraclaw` → installs from current branch (the GitHub repo slug `paraclaw` is preserved through the rename to keep existing clones + remote URLs working).
+2. `parachute start agent` → parachute-agent boots; logs show Bun, central + per-session SQLite ready, Telegram adapter loaded.
+3. `curl /agent/api/setup/status` → `ready=true`.
+4. Browser load `/agent/` → control panel renders.
 5. Create agent group via UI.
 6. Wire Telegram channel from UI.
 7. DM the bot — reply within ~10s.
-8. `curl /claw/api/secrets` → secrets list (names only, never values).
+8. `curl /agent/api/secrets` → secrets list (names only, never values).
 9. `parachute restart claw` → clean restart, no error.
 10. Tests pass: `bun test` 100%, typecheck clean, biome clean.
 
@@ -742,7 +744,7 @@ share one contract:
 | `web/ui/` | Vite + React + TS control panel |
 | `web/server/src/server.ts` | (Legacy in-tree.) HTTP surface — folds into `src/index.ts` after Bun migration |
 | `container/agent-runner/` | The in-container poll loop, formatter, MCP tools |
-| `container/build.sh` | Image build (`paraclaw-agent:latest`) |
+| `container/build.sh` | Image build (`parachute-agent-image-<slug>:latest`) |
 
 For the deep dives — agent-runner internals, MCP tool surface, build and
 runtime split, isolation model — see the per-doc files alongside this one
