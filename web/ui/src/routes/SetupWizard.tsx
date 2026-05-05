@@ -132,7 +132,7 @@ export function SetupWizard() {
         ← Skip setup, view groups
       </Link>
       <h2 style={{ marginTop: '0.5rem' }}>
-        Set up paraclaw
+        Set up parachute-agent
         {state.adapter && (
           <span className="dim" style={{ fontSize: '0.7em', marginLeft: '0.5rem' }}>
             · {ADAPTER_LABELS[state.adapter]}

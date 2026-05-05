@@ -29,7 +29,12 @@ Renamed paraclaw → **parachute-agent**, joining the Parachute ecosystem's name
    Master key migrated from legacy location   from=…/claw/master.key  to=…/agent/master.key
    ```
 4. **Verify** via the web UI at the new mount: `/agent/` (was `/claw/`).
-5. **Cleanup (optional)**: once you've verified the new install boots and decrypts secrets, delete the legacy backups: `rm ~/.parachute/claw/paraclaw.db ~/.parachute/claw/master.key && rmdir ~/.parachute/claw`.
+5. **Re-register the MCP server** in any Claude Code (or other MCP client) configs. The stdio entrypoint hasn't moved, but the server name has — old `claude mcp add paraclaw …` registrations keep pointing at the old name and tools advertise as `mcp__paraclaw__*` instead of `mcp__parachute_agent__*`:
+   ```sh
+   claude mcp remove paraclaw
+   claude mcp add parachute-agent bun /path/to/install/src/mcp/stdio.ts
+   ```
+6. **Cleanup (optional)**: once you've verified the new install boots and decrypts secrets, delete the legacy backups: `rm ~/.parachute/claw/paraclaw.db ~/.parachute/claw/master.key && rmdir ~/.parachute/claw`.
 
 `PARACLAW_*` env var names (`PARACLAW_HUB_ORIGIN`, `PARACLAW_WEB_PORT`, `PARACLAW_WEB_BIND`, `PARACLAW_WEB_MOUNT`, `PARACLAW_WEB_ORIGIN`, `PARACLAW_CENTRAL_DB_PATH`) are retained through 0.1.x for operator-config back-compat. Renaming queued for 0.2.0.
 

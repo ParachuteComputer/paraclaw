@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
- * stdio MCP transport entrypoint. Wired with `claude mcp add paraclaw bun
- * /path/to/paraclaw/src/mcp/stdio.ts`.
+ * stdio MCP transport entrypoint. Wired with `claude mcp add parachute-agent
+ * bun /path/to/parachute-agent/src/mcp/stdio.ts`.
  *
  * Stdio is a same-machine ambient-trust surface — the operator already has
  * filesystem access, so we default to `agent:admin`. No JWT, no per-call
  * auth.
  *
- * Stdout discipline: paraclaw's `log.ts` writes info-level messages to
+ * Stdout discipline: parachute-agent's `log.ts` writes info-level messages to
  * `process.stdout`, which would corrupt the JSON-RPC stream the SDK
  * speaks over stdout. We promote LOG_LEVEL to 'warn' BEFORE any module
  * that uses `log` is loaded — dynamic imports below — so the logger
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   process.stderr.write(
-    `paraclaw mcp stdio fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+    `parachute-agent mcp stdio fatal: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
   );
   process.exit(1);
 });

@@ -1,5 +1,5 @@
 /**
- * Paraclaw — main entry point.
+ * parachute-agent — main entry point.
  *
  * Thin orchestrator: init DB, run migrations, start channel adapters,
  * start delivery polls, start sweep, handle shutdown.

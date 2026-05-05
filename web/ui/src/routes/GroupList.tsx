@@ -94,8 +94,8 @@ export function GroupList() {
           Couldn't load groups: <code>{state.message}</code>
         </div>
         <p className="muted">
-          Make sure paraclaw is running:{" "}
-          <code>parachute start claw</code>, or{" "}
+          Make sure parachute-agent is running:{" "}
+          <code>parachute start agent</code>, or{" "}
           <code>bun src/index.ts</code> from the repo root for development.
           The central DB at <code>~/.parachute/agent/agent.db</code> is
           created on first start.
