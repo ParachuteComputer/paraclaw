@@ -207,6 +207,15 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
  * ⚠ Opens and closes the DB on every call. Do not refactor to reuse a
  * long-lived connection — see the "Cross-mount visibility invariants" note
  * at the top of this file.
+ *
+ * Attachment-extraction (decode base64 → write file → swap in localPath) is
+ * gated on `inserted === true`. Duplicate dispatches (sender-approval replay,
+ * Telegram getUpdates retry, chat-sdk re-emit) carry the same `message.id`,
+ * so the second INSERT silently no-ops via ON CONFLICT (paraclaw#92 / #95).
+ * Doing the file write up-front meant a mutated replay would clobber the
+ * on-disk file under the original messages_in.id while the row stayed
+ * unchanged — divergent state with no audit trail. Reordering keeps disk
+ * state strictly downstream of the DB row commit (paraclaw#96).
  */
 export function writeSessionMessage(
   agentGroupId: string,
@@ -230,12 +239,12 @@ export function writeSessionMessage(
     trigger?: 0 | 1;
   },
 ): void {
-  // Extract base64 attachment data, save to inbox, replace with file paths
-  const content = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
-
   const db = openInboundDb(agentGroupId, sessionId);
   let inserted: boolean;
   try {
+    // INSERT first with the raw content (potentially carrying inline base64
+    // attachment data). On conflict the helper returns inserted:false and
+    // we exit before any filesystem work happens.
     ({ inserted } = insertMessage(db, {
       id: message.id,
       kind: message.kind,
@@ -243,11 +252,20 @@ export function writeSessionMessage(
       platformId: message.platformId ?? null,
       channelType: message.channelType ?? null,
       threadId: message.threadId ?? null,
-      content,
+      content: message.content,
       processAfter: message.processAfter ?? null,
       recurrence: message.recurrence ?? null,
       trigger: message.trigger ?? 1,
     }));
+
+    if (inserted) {
+      // Row committed — safe to write attachment files to inbox/ and rewrite
+      // the row's content with the localPath form the container reads.
+      const extractedContent = extractAttachmentFiles(agentGroupId, sessionId, message.id, message.content);
+      if (extractedContent !== message.content) {
+        db.prepare('UPDATE messages_in SET content = ? WHERE id = ?').run(extractedContent, message.id);
+      }
+    }
   } finally {
     db.close();
   }
