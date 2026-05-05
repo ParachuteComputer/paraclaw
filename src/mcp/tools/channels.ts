@@ -30,6 +30,10 @@ type ApiEngageMode = 'mention' | 'pattern' | 'all';
 type ApiSenderScope = 'allowlist' | 'unrestricted';
 type ApiIgnoredMessagePolicy = 'drop' | 'silent';
 
+const VALID_API_ENGAGE_MODES: ApiEngageMode[] = ['mention', 'pattern', 'all'];
+const VALID_API_SENDER_SCOPES: ApiSenderScope[] = ['allowlist', 'unrestricted'];
+const VALID_API_IGNORED_POLICIES: ApiIgnoredMessagePolicy[] = ['drop', 'silent'];
+
 const ALL_PATTERN = '.';
 
 function dbToApiEngage(mode: DbEngageMode, pattern: string | null): ApiEngageMode {
@@ -172,6 +176,40 @@ export const channelTools: ToolDef[] = [
       const id = String(args.id ?? '');
       const current = getMessagingGroupAgent(id);
       if (!current) throw new Error(`channel wire not found: ${id}`);
+
+      // Validate enum-typed fields up front. The MCP SDK does NOT enforce
+      // `inputSchema` against `tools/call` args before dispatch, so a
+      // stale-schema client (e.g. one that cached the pre-rc.6 senderScope
+      // enum) can land here with values the downstream if/else chains
+      // don't recognize — and silently no-op'd patches would round-trip
+      // back as success while the column kept its previous value (the
+      // exact silent-coerce class paraclaw#94 set out to close). Mirrors
+      // validatePatchInput in src/web/routes/channels.ts.
+      if (
+        args.engageMode !== undefined &&
+        !VALID_API_ENGAGE_MODES.includes(args.engageMode as ApiEngageMode)
+      ) {
+        throw new Error(
+          `invalid engageMode: ${String(args.engageMode)} — must be one of ${JSON.stringify(VALID_API_ENGAGE_MODES)}`,
+        );
+      }
+      if (
+        args.senderScope !== undefined &&
+        !VALID_API_SENDER_SCOPES.includes(args.senderScope as ApiSenderScope)
+      ) {
+        throw new Error(
+          `invalid senderScope: ${String(args.senderScope)} — must be one of ${JSON.stringify(VALID_API_SENDER_SCOPES)}`,
+        );
+      }
+      if (
+        args.ignoredMessagePolicy !== undefined &&
+        !VALID_API_IGNORED_POLICIES.includes(args.ignoredMessagePolicy as ApiIgnoredMessagePolicy)
+      ) {
+        throw new Error(
+          `invalid ignoredMessagePolicy: ${String(args.ignoredMessagePolicy)} — must be one of ${JSON.stringify(VALID_API_IGNORED_POLICIES)}`,
+        );
+      }
+
       const patch: Partial<MessagingGroupAgent> = {};
       if (args.engageMode === 'all') {
         patch.engage_mode = 'pattern';
