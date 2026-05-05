@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.2] - 2026-05-05
+
+### Fixed
+
+- **Self-register `installDir` in `services.json`.** The agent's startup self-registration into `~/.parachute/services.json` now includes `installDir: process.cwd()` alongside the existing `name`/`port`/`paths`/`health`/`version` fields. Without it, hub's third-party-module lifecycle resolution path (parachute-hub#84) couldn't locate the start command for `parachute restart agent` — the agent has a `.parachute/module.json` with `startCmd`, but hub needed `installDir` to know which checkout to drive. parachute-hub#177 ships graceful-degradation for the missing-installDir case as a safety net; this is the proper fix on the agent side. Closes paraclaw#115.
+
 ## [0.1.2-rc.1] - 2026-05-05
 
 ### Fixed

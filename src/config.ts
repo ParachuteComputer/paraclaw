@@ -12,8 +12,13 @@ export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 
-// Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
+// Absolute paths needed for container mounts. Captured once at module load
+// (process.cwd() at boot — the right value for the install dir) so every
+// downstream consumer agrees on a single resolved root, and tests that
+// chdir() can't desync against it. Exported for surfaces that need to
+// self-register the install path (e.g. services.json `installDir`,
+// paraclaw#115).
+export const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
 // Parachute ecosystem root. Convention shared with parachute-hub, vault,
