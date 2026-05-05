@@ -193,7 +193,7 @@ export function CredentialForm(props: Props) {
           }
         />
         <p className="dim" style={{ marginTop: '0.25rem', fontSize: '0.8rem' }}>
-          Stored AES-256-GCM encrypted under <code>~/.parachute/claw/master.key</code>. Never written to your browser's storage.
+          Stored AES-256-GCM encrypted under <code>~/.parachute/agent/master.key</code>. Never written to your browser's storage.
         </p>
       </div>
 

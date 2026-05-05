@@ -8,7 +8,7 @@ import http from 'node:http';
 
 import { CENTRAL_DB_PATH } from './config.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
-import { initDb, migrateCentralDbLocation } from './db/connection.js';
+import { initDb, migrateCentralDbLocation, migrateMasterKeyLocation } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
@@ -68,10 +68,14 @@ import {
 async function main(): Promise<void> {
   log.info('Paraclaw starting');
 
-  // 1. Init central DB. One-shot relocation runs before open: legacy
-  // <PROJECT_ROOT>/data/v2.db moves to ~/.parachute/claw/paraclaw.db. After
-  // that, every host process (including the web server) opens the new path.
+  // 1. Init central DB. One-shot relocations run before open:
+  //    - legacy <PROJECT_ROOT>/data/v2.db (pre-0.0.6) → new path
+  //    - legacy <PARACHUTE_DIR>/claw/paraclaw.db (pre-0.1.0) → new path
+  //    - master.key copy from <PARACHUTE_DIR>/claw → <PARACHUTE_DIR>/agent
+  // After that, every host process (including the web server) opens the
+  // new path at <PARACHUTE_DIR>/agent/agent.db.
   migrateCentralDbLocation();
+  migrateMasterKeyLocation();
   const db = initDb(CENTRAL_DB_PATH);
   runMigrations(db);
   log.info('Central DB ready', { path: CENTRAL_DB_PATH });

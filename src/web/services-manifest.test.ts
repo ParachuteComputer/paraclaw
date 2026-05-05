@@ -88,7 +88,7 @@ describe('upsertService', () => {
             paths: ['/agent'],
             health: '/api/health',
             version: '0.0.7-rc.1',
-            installDir: '/Users/test/.parachute/claw',
+            installDir: '/Users/test/.parachute/agent',
           },
         ],
       }),
@@ -108,7 +108,7 @@ describe('upsertService', () => {
     };
     expect(raw.services).toHaveLength(1);
     expect(raw.services[0].version).toBe('0.0.8-rc.1');
-    expect(raw.services[0].installDir).toBe('/Users/test/.parachute/claw');
+    expect(raw.services[0].installDir).toBe('/Users/test/.parachute/agent');
   });
 
   it('throws on a malformed existing manifest (so we never silently overwrite)', () => {

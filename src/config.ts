@@ -32,16 +32,22 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 // Central DB lives outside the project tree so that:
 //   1. `git clean` / fresh checkouts can never wipe operator-owned state.
 //   2. Multiple project checkouts on the same host share one source of truth.
-//   3. The DB sits next to `master.key` under `<PARACHUTE_DIR>/claw/` so a
+//   3. The DB sits next to `master.key` under `<PARACHUTE_DIR>/agent/` so a
 //      single backup of that directory captures both crypto material and DB
 //      state.
 //
-// The legacy location was `<PROJECT_ROOT>/data/v2.db`. We migrate-on-startup
-// (see `migrateCentralDbLocation` in src/db/connection.ts) so existing installs
-// pick up the new path without manual intervention.
-export const CENTRAL_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
-export const CENTRAL_DB_PATH = process.env.PARACLAW_CENTRAL_DB_PATH || path.join(CENTRAL_DB_DIR, 'paraclaw.db');
+// Two legacy locations exist and are both migrated-on-startup
+// (see `migrateCentralDbLocation` in src/db/connection.ts):
+//   - `<PROJECT_ROOT>/data/v2.db` (pre-0.0.6 in-tree path)
+//   - `<PARACHUTE_DIR>/claw/paraclaw.db` (pre-0.1.0, before the
+//     paraclaw → parachute-agent rename)
+// The PARACLAW_CENTRAL_DB_PATH env var name is retained for operator-config
+// back-compat through 0.1.x; rename queued for 0.2.0.
+export const CENTRAL_DB_DIR = path.join(PARACHUTE_DIR, 'agent');
+export const CENTRAL_DB_PATH = process.env.PARACLAW_CENTRAL_DB_PATH || path.join(CENTRAL_DB_DIR, 'agent.db');
 export const LEGACY_CENTRAL_DB_PATH = path.join(DATA_DIR, 'v2.db');
+export const LEGACY_PARACLAW_DB_DIR = path.join(PARACHUTE_DIR, 'claw');
+export const LEGACY_PARACLAW_DB_PATH = path.join(LEGACY_PARACLAW_DB_DIR, 'paraclaw.db');
 
 // Per-checkout image tag so two installs on the same host don't share
 // `paraclaw-agent:latest` and clobber each other on rebuild.

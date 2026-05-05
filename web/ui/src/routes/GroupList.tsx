@@ -97,7 +97,7 @@ export function GroupList() {
           Make sure paraclaw is running:{" "}
           <code>parachute start claw</code>, or{" "}
           <code>bun src/index.ts</code> from the repo root for development.
-          The central DB at <code>~/.parachute/claw/paraclaw.db</code> is
+          The central DB at <code>~/.parachute/agent/agent.db</code> is
           created on first start.
         </p>
         <div className="actions" style={{ marginTop: "1rem" }}>
