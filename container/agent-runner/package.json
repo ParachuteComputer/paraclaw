@@ -1,8 +1,8 @@
 {
-  "name": "paraclaw-agent-runner",
+  "name": "parachute-agent-runner",
   "version": "1.0.0",
   "type": "module",
-  "description": "Container-side agent runner for Paraclaw",
+  "description": "Container-side agent runner for Parachute Agent",
   "scripts": {
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
