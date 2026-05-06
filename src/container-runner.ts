@@ -17,7 +17,8 @@ import {
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
-import { rewriteMcpUrlsForContainer } from './parachute/vault-mcp.js';
+import { localhostToContainerHost, rewriteMcpUrlsForContainer } from './parachute/vault-mcp.js';
+import { getHubOrigin } from './web/auth.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -436,6 +437,28 @@ function ensureRuntimeFields(
   }
 }
 
+/**
+ * The hub origin a container should use to reach the hub. Composes
+ * `getHubOrigin()` (the host's resolution chain) with
+ * `localhostToContainerHost()` so loopback addresses (`127.0.0.1`,
+ * `localhost`) get rewritten to `host.docker.internal` — which Docker
+ * Desktop / OrbStack expose natively, and which paraclaw maps via
+ * `--add-host=host.docker.internal:host-gateway` on Linux. Tailnet and
+ * LAN origins pass through unchanged. The host's own env var is left
+ * intact; this is purely for what we inject into the container.
+ *
+ * Without this rewrite, a skill that does
+ * `curl ${PARACHUTE_HUB_ORIGIN}/scribe/...` from inside the container
+ * hits the container's own loopback when the hub is local — no service
+ * there, silent fail. Surfaced by paraclaw#142 review (#143).
+ */
+export function getHubOriginForContainer(): string {
+  // URL.toString() normalizes loopback rewrites with a trailing slash; strip
+  // it so callers can safely concat `${PARACHUTE_HUB_ORIGIN}/scribe` etc.
+  // without doubling.
+  return localhostToContainerHost(getHubOrigin()).replace(/\/$/, '');
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -450,6 +473,13 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything host-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Hub origin (rewritten so loopback resolves to the host gateway from
+  // inside the container). Skills that reach Parachute services via the
+  // hub-aggregated mount (e.g. `${PARACHUTE_HUB_ORIGIN}/scribe`) need
+  // this. Pre-paraclaw#142, the var was never injected — every skill
+  // that depended on it silently failed.
+  args.push('-e', `PARACHUTE_HUB_ORIGIN=${getHubOriginForContainer()}`);
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
