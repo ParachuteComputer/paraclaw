@@ -2,6 +2,18 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.14] - 2026-05-05
+
+### Fixed
+
+- **SPA OAuth bootstrap — three narrowing fixes for the agent web UI (paraclaw#136, #137, #138).** Bundled audit of `web/ui/src/lib/auth.ts`:
+
+  1. **Drop `vault:read vault:write` from `REQUESTED_SCOPES` (paraclaw#136).** The agent SPA used to ask for broad vault read/write at bootstrap, but every vault interaction in the UI (VaultDetail, GroupDetail, NewGroupWizard) already runs the paraclaw#56 re-consent pattern — calling `beginLogin([\`vault:\${name}:admin\`])` with the narrow per-vault scope when the operator's existing JWT doesn't carry admin for the targeted vault. The bootstrap-time `vault:read vault:write` were dead weight: never used by any code path, but visible on the hub's consent screen as "this app wants to read/write all your vaults" — the wrong story for an SPA whose vault touches are narrowly per-vault and on-demand. Narrow `REQUESTED_SCOPES` to `agent:admin agent:write`. Refactor `beginLogin`'s URL-construction inline-block into a pure exported `buildAuthorizeUrl(opts)` helper so tests can pin the scope string and the `extraScopes` append-and-dedupe behavior without mocking `window.location.replace`. 5 new tests pin the post-narrowing surface: REQUESTED_SCOPES literal, no-vault output when extraScopes is empty (belt-and-suspenders against URL-encoded `vault:` reappearing), narrow scope appended, dedupe of scopes already in REQUESTED_SCOPES, full PKCE-S256 query-param coverage.
+
+  2. **Regression-pin OAuth `client_name` in the registerClient body (paraclaw#137).** The hub renders this string verbatim on its DCR consent screen — operator-visible UX, not an internal identifier. The 0.1.0 brand sweep (PR #112, commit 2a83e77) renamed it from `Paraclaw web UI` to `Parachute Agent web UI`; this commit adds the wire-level test that pins it. Two new tests on `ensureClient`: first-registration mocks fetch and asserts the POST body carries `client_name: "Parachute Agent web UI"` plus belt assertions on `scope` (= REQUESTED_SCOPES) and `token_endpoint_auth_method` ("none"); cached-path asserts a pre-seeded match returns without calling fetch. Production-code change is a single `export` keyword on `ensureClient` — no behavior change.
+
+  3. **Re-register OAuth client when `redirect_uri` changes (paraclaw#138).** The hub-side DCR row binds each `client_id` to the specific `redirect_uris` it registered with; if the SPA's mount path changes (e.g. an operator flips `PARACHUTE_AGENT_WEB_MOUNT` from `/claw/` to `/agent/` after the 0.1.0 rename), the cached `client_id` keeps coming through `getRedirectUri()` as the new path while the hub still has the old one — `/oauth/authorize` errors out before the consent screen and the operator is stranded. Extend `ClientRecord` to `{ client_id, redirect_uri }`, compare in the `ensureClient` cache check before returning cached, treat any mismatch (or a legacy record with no `redirect_uri` field at all) as a cache miss → re-register fresh under the current path. Records written before this commit lack the field; the legacy-shape branch self-heals on the first 0.1.x bootstrap after upgrade (one extra `/oauth/register` round-trip per operator, then steady-state). 3 new tests cover the matrix: mismatch re-registers + persists the current redirect_uri (so subsequent loads cache-hit), legacy-shape self-heal, first-registration persists both fields. The Commit-2 cached-hit test was tightened to seed both fields under the new contract. Closes paraclaw#136, #137, #138.
+
 ## [0.1.2-rc.13] - 2026-05-05
 
 ### Fixed

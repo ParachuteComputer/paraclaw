@@ -11,13 +11,18 @@
  *   5. POST <hub>/oauth/token         — authorization_code, then refresh_token
  *                                       on 401 from /api/* before re-login.
  *
- * Scopes: `agent:admin agent:write vault:read vault:write`. `agent:admin` is
- * required for /api/secrets writes + the setup wizard install-channel
- * step; `agent:write` is the bar for /api/approvals decisions and
- * /api/sessions/:id/close. The vault scopes anticipate the vault tokens-API
- * REST endpoint (paraclaw#4 companion vault issue); today the server still
- * shells out, but minting the user JWT with vault:* now means no re-consent
- * later.
+ * Bootstrap scopes: `agent:admin agent:write`. `agent:admin` is required
+ * for /api/secrets writes + the setup wizard install-channel step;
+ * `agent:write` is the bar for /api/approvals decisions and
+ * /api/sessions/:id/close. The agent SPA is self-contained — vault is one
+ * per-agent-group action, not the SPA's identity, so vault scopes are
+ * NOT requested at bootstrap. Per-vault flows extend with `extraScopes`
+ * on `beginLogin([\`vault:\${name}:admin\`])` (see line 199-200) — this is
+ * the paraclaw#56 re-consent pattern, request-on-demand. (paraclaw#136)
+ *
+ * Vault listing for pickers reads `/.well-known/parachute.json` (public,
+ * no scope needed); per-vault token-API access enforces `vault:<name>:admin`
+ * on the vault side regardless of what the bootstrap JWT carries.
  *
  * Existing users with cached tokens that lack a newly-required scope will
  * hit 403 with a body like `requires the X scope`. The api.ts wrapper
@@ -31,6 +36,17 @@ interface DiscoveryResponse {
 
 interface ClientRecord {
   client_id: string;
+  /**
+   * The redirect_uri the client_id was registered with. Hub-side, the
+   * DCR row is bound to the original redirect_uri — sending an authorize
+   * request with a different redirect_uri (e.g. after a mount-path
+   * change like `/claw/` → `/agent/`) fails the hub's redirect_uri
+   * check and the operator sees a hub error instead of the consent
+   * screen. Stash this alongside the client_id so bootstrap can detect
+   * the mismatch and re-register a fresh client_id with the new path.
+   * (paraclaw#138)
+   */
+  redirect_uri: string;
 }
 
 interface TokenSet {
@@ -46,7 +62,7 @@ interface FlowState {
   hub_origin: string;
 }
 
-const REQUESTED_SCOPES = "agent:admin agent:write vault:read vault:write";
+export const REQUESTED_SCOPES = "agent:admin agent:write";
 const DISCOVERY_KEY = "parachute-agent.discovery";
 const FLOW_KEY = "parachute-agent.flow";
 
@@ -148,10 +164,20 @@ async function getDiscovery(): Promise<DiscoveryResponse> {
   return fresh;
 }
 
-async function ensureClient(hubOrigin: string): Promise<string> {
-  const cached = readJson<ClientRecord>(localStorage, clientKey(hubOrigin));
-  if (cached?.client_id) return cached.client_id;
+export async function ensureClient(hubOrigin: string): Promise<string> {
   const redirectUri = getRedirectUri();
+  const cached = readJson<ClientRecord>(localStorage, clientKey(hubOrigin));
+  // Cache hit only if BOTH client_id is present AND the cached
+  // redirect_uri matches the current bootstrap's redirect_uri. A mismatch
+  // means the SPA's mount path changed (e.g. `/claw/` → `/agent/`) and
+  // the hub-side DCR row is bound to the old redirect_uri — re-using the
+  // stale client_id would fail the hub's redirect_uri check on
+  // /oauth/authorize. Treat as cache-miss → re-register a fresh client.
+  // Records written before this guard landed lack `redirect_uri`; treat
+  // those as miss so the migration self-heals. (paraclaw#138)
+  if (cached?.client_id && cached.redirect_uri === redirectUri) {
+    return cached.client_id;
+  }
   const res = await fetch(`${hubOrigin}/oauth/register`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
@@ -166,7 +192,10 @@ async function ensureClient(hubOrigin: string): Promise<string> {
     throw new Error(`hub /oauth/register failed: ${res.status} ${await res.text()}`);
   }
   const body = (await res.json()) as { client_id: string };
-  writeJson(localStorage, clientKey(hubOrigin), { client_id: body.client_id });
+  writeJson(localStorage, clientKey(hubOrigin), {
+    client_id: body.client_id,
+    redirect_uri: redirectUri,
+  });
   return body.client_id;
 }
 
@@ -217,23 +246,51 @@ export async function beginLogin(extraScopes: string[] = []): Promise<never> {
     hub_origin: hubOrigin,
   };
   writeJson(sessionStorage, FLOW_KEY, flow);
-  const scopes = new Set(REQUESTED_SCOPES.split(/\s+/).filter(Boolean));
-  for (const s of extraScopes) {
-    const trimmed = s.trim();
-    if (trimmed) scopes.add(trimmed);
-  }
-  const u = new URL(`${hubOrigin}/oauth/authorize`);
-  u.searchParams.set("client_id", clientId);
-  u.searchParams.set("redirect_uri", redirectUri);
-  u.searchParams.set("response_type", "code");
-  u.searchParams.set("scope", Array.from(scopes).join(" "));
-  u.searchParams.set("code_challenge", challenge);
-  u.searchParams.set("code_challenge_method", "S256");
-  u.searchParams.set("state", state);
+  const u = buildAuthorizeUrl({
+    hubOrigin,
+    clientId,
+    redirectUri,
+    challenge,
+    state,
+    extraScopes,
+  });
   window.location.replace(u.toString());
   // Block until navigation actually happens — callers expect this never
   // returns control.
   return new Promise<never>(() => {});
+}
+
+/**
+ * Build the `/oauth/authorize` URL. Pure — no side effects, no storage
+ * reads, no network. Exported so tests can pin the scope string and the
+ * extraScopes append behavior without mocking `window.location.replace`.
+ *
+ * `extraScopes` are appended after `REQUESTED_SCOPES` and de-duped, so a
+ * caller passing a scope already in REQUESTED_SCOPES doesn't double it on
+ * the consent screen.
+ */
+export function buildAuthorizeUrl(opts: {
+  hubOrigin: string;
+  clientId: string;
+  redirectUri: string;
+  challenge: string;
+  state: string;
+  extraScopes?: string[];
+}): URL {
+  const scopes = new Set(REQUESTED_SCOPES.split(/\s+/).filter(Boolean));
+  for (const s of opts.extraScopes ?? []) {
+    const trimmed = s.trim();
+    if (trimmed) scopes.add(trimmed);
+  }
+  const u = new URL(`${opts.hubOrigin}/oauth/authorize`);
+  u.searchParams.set("client_id", opts.clientId);
+  u.searchParams.set("redirect_uri", opts.redirectUri);
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("scope", Array.from(scopes).join(" "));
+  u.searchParams.set("code_challenge", opts.challenge);
+  u.searchParams.set("code_challenge_method", "S256");
+  u.searchParams.set("state", opts.state);
+  return u;
 }
 
 /**

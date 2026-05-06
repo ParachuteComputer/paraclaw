@@ -10,7 +10,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { migrateLegacyAuthKeys } from './auth.ts';
+import {
+  buildAuthorizeUrl,
+  ensureClient,
+  migrateLegacyAuthKeys,
+  REQUESTED_SCOPES,
+} from './auth.ts';
 
 // jsdom's Storage in this vitest config doesn't reliably expose the full
 // Storage prototype methods (the `--localstorage-file` warning at runtime
@@ -135,5 +140,213 @@ describe('migrateLegacyAuthKeys', () => {
 
     expect(localStorage.getItem('paraclaw.unrelated')).toBe('keep-me');
     expect(localStorage.getItem('parachute-agent.discovery')).toBe('{"hubOrigin":"http://hub"}');
+  });
+});
+
+/**
+ * Bootstrap-scope narrowing — paraclaw#136. The agent SPA used to request
+ * `vault:read vault:write` at bootstrap, but every vault flow already runs
+ * the paraclaw#56 re-consent pattern (narrow `vault:<name>:admin` via
+ * extraScopes), so the broad bootstrap scopes were dead weight on the
+ * consent screen. These tests pin the post-narrowing surface so a future
+ * edit can't silently re-add vault scopes to the bootstrap grant.
+ */
+describe('REQUESTED_SCOPES + buildAuthorizeUrl', () => {
+  const baseOpts = {
+    hubOrigin: 'http://hub.test',
+    clientId: 'client-abc',
+    redirectUri: 'http://app.test/agent/oauth/callback',
+    challenge: 'challenge-xyz',
+    state: 'state-123',
+  };
+
+  it('REQUESTED_SCOPES is exactly "agent:admin agent:write" — no vault:* at bootstrap', () => {
+    expect(REQUESTED_SCOPES).toBe('agent:admin agent:write');
+    expect(REQUESTED_SCOPES).not.toMatch(/vault:/);
+  });
+
+  it('builds an authorize URL with only agent:* scopes when extraScopes is empty', () => {
+    const u = buildAuthorizeUrl(baseOpts);
+    expect(u.searchParams.get('scope')).toBe('agent:admin agent:write');
+    // Belt-and-suspenders: the URL string itself must not carry any
+    // vault scope, even URL-encoded.
+    expect(u.toString()).not.toMatch(/vault(%3A|:)/);
+  });
+
+  it('appends a narrow vault:<name>:admin scope when passed in extraScopes', () => {
+    const u = buildAuthorizeUrl({ ...baseOpts, extraScopes: ['vault:default:admin'] });
+    const scope = u.searchParams.get('scope') ?? '';
+    expect(scope.split(' ')).toEqual(['agent:admin', 'agent:write', 'vault:default:admin']);
+  });
+
+  it('de-dupes extraScopes that are already in REQUESTED_SCOPES', () => {
+    const u = buildAuthorizeUrl({
+      ...baseOpts,
+      extraScopes: ['agent:admin', 'vault:foo:admin'],
+    });
+    const scope = u.searchParams.get('scope') ?? '';
+    // agent:admin should appear exactly once even though it was passed
+    // again — the consent screen would otherwise show the same scope twice.
+    expect(scope.split(' ').filter((s) => s === 'agent:admin')).toHaveLength(1);
+    expect(scope.split(' ')).toContain('vault:foo:admin');
+  });
+
+  it('writes the standard PKCE-S256 query params alongside the scope', () => {
+    const u = buildAuthorizeUrl(baseOpts);
+    expect(u.origin + u.pathname).toBe('http://hub.test/oauth/authorize');
+    expect(u.searchParams.get('client_id')).toBe('client-abc');
+    expect(u.searchParams.get('redirect_uri')).toBe('http://app.test/agent/oauth/callback');
+    expect(u.searchParams.get('response_type')).toBe('code');
+    expect(u.searchParams.get('code_challenge')).toBe('challenge-xyz');
+    expect(u.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(u.searchParams.get('state')).toBe('state-123');
+  });
+});
+
+/**
+ * Regression-pin the OAuth client_name in the `/oauth/register` body —
+ * paraclaw#137. The hub's consent screen renders this string verbatim, so
+ * it's operator-visible UX, not a free-form internal identifier. The
+ * 0.1.0 brand sweep renamed "Paraclaw web UI" → "Parachute Agent web UI"
+ * (commit 2a83e77 / PR #112); this test prevents a future rename or copy
+ * regression from silently shipping a stale brand on the consent screen.
+ *
+ * No production behavior change — the existing string literal at line ~166
+ * is the only thing this test asserts on.
+ */
+describe('ensureClient — /oauth/register body', () => {
+  it('sends client_name "Parachute Agent web UI" on first registration', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ client_id: 'returned-client-id' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('returned-client-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe('http://hub.test/oauth/register');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.client_name).toBe('Parachute Agent web UI');
+    // Belt: also pin scope + auth method so a future copy edit can't ship
+    // a partially-renamed body.
+    expect(body.scope).toBe(REQUESTED_SCOPES);
+    expect(body.token_endpoint_auth_method).toBe('none');
+  });
+
+  it('reuses the cached client_id when redirect_uri matches the current bootstrap', async () => {
+    // Pre-seed a record whose redirect_uri matches what getRedirectUri()
+    // computes in this test environment (same logic as the prod helper:
+    // origin + BASE_URL + 'oauth/callback'). Cache hit ⇒ no fetch.
+    const expectedRedirect = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
+    localStorage.setItem(
+      'parachute-agent.client.http://hub.test',
+      JSON.stringify({ client_id: 'cached-client-id', redirect_uri: expectedRedirect }),
+    );
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('cached-client-id');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Re-register the OAuth client when the SPA's redirect_uri changes —
+ * paraclaw#138. The hub binds each DCR client_id to the redirect_uri it
+ * was registered with; if the operator changes the SPA's mount path
+ * (e.g. `/claw/` → `/agent/` after the 0.1.0 rename, or any custom
+ * `PARACHUTE_AGENT_WEB_MOUNT` change), the cached client_id stops
+ * matching and `/oauth/authorize` errors out before the consent screen.
+ *
+ * Fix: cache the redirect_uri alongside the client_id and treat any
+ * mismatch (or a legacy record with no redirect_uri at all) as a cache
+ * miss so the SPA registers a fresh client_id under the new path.
+ */
+describe('ensureClient — redirect_uri-aware cache', () => {
+  function mockFetchOk(clientId: string) {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ client_id: clientId }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    return fetchSpy;
+  }
+
+  it('re-registers when the cached redirect_uri does not match the current one', async () => {
+    // Stale cache from before a mount-path change: redirect_uri points
+    // at the old path. Current bootstrap computes a different URI, so
+    // the cached client_id is unusable on the hub.
+    localStorage.setItem(
+      'parachute-agent.client.http://hub.test',
+      JSON.stringify({
+        client_id: 'stale-client-id',
+        redirect_uri: 'http://app.test/claw/oauth/callback',
+      }),
+    );
+    const fetchSpy = mockFetchOk('fresh-client-id');
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('fresh-client-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // The cache must now hold the freshly-registered client_id paired
+    // with the *current* redirect_uri, not the stale one — otherwise
+    // the next bootstrap would re-register on every page load.
+    const updated = JSON.parse(
+      localStorage.getItem('parachute-agent.client.http://hub.test') ?? 'null',
+    );
+    expect(updated.client_id).toBe('fresh-client-id');
+    const expectedRedirect = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
+    expect(updated.redirect_uri).toBe(expectedRedirect);
+  });
+
+  it('re-registers a legacy ClientRecord that lacks a redirect_uri field (self-heals)', async () => {
+    // Records written before paraclaw#138 had only `{ client_id }`. On
+    // the first bootstrap after upgrade we treat the missing-field case
+    // as a cache miss and re-register so subsequent loads have the full
+    // record. This means existing operators see exactly one extra
+    // registration round-trip on first 0.1.x reload.
+    localStorage.setItem(
+      'parachute-agent.client.http://hub.test',
+      JSON.stringify({ client_id: 'legacy-client-id' }),
+    );
+    const fetchSpy = mockFetchOk('healed-client-id');
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('healed-client-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const healed = JSON.parse(
+      localStorage.getItem('parachute-agent.client.http://hub.test') ?? 'null',
+    );
+    expect(healed.client_id).toBe('healed-client-id');
+    expect(typeof healed.redirect_uri).toBe('string');
+    expect(healed.redirect_uri.length).toBeGreaterThan(0);
+  });
+
+  it('persists redirect_uri alongside client_id on first registration', async () => {
+    // No prior cache. After first registration, the persisted record
+    // must include both fields — otherwise subsequent bootstraps would
+    // legacy-self-heal on every load and burn a hub /oauth/register
+    // call per page reload.
+    const fetchSpy = mockFetchOk('first-client-id');
+
+    await ensureClient('http://hub.test');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const persisted = JSON.parse(
+      localStorage.getItem('parachute-agent.client.http://hub.test') ?? 'null',
+    );
+    expect(persisted).toMatchObject({
+      client_id: 'first-client-id',
+    });
+    const expectedRedirect = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
+    expect(persisted.redirect_uri).toBe(expectedRedirect);
   });
 });
