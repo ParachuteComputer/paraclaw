@@ -497,19 +497,19 @@ function SecretsSection({ folder, secretMode }: { folder: string; secretMode?: '
     | { kind: 'error'; message: string }
   >({ kind: 'loading' });
 
-  useEffect(() => {
-    let cancelled = false;
-    listGroupInjectableSecrets(folder)
-      .then((secrets) => {
-        if (!cancelled) setState({ kind: 'ok', secrets });
-      })
-      .catch((err) => {
-        if (!cancelled) setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
+  const reload = useCallback(async () => {
+    setState({ kind: 'loading' });
+    try {
+      const secrets = await listGroupInjectableSecrets(folder);
+      setState({ kind: 'ok', secrets });
+    } catch (err) {
+      setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
   }, [folder]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   return (
     <div className="section">
@@ -530,9 +530,14 @@ function SecretsSection({ folder, secretMode }: { folder: string; secretMode?: '
       )}
 
       {state.kind === 'error' && (
-        <div className="error-banner" style={{ marginTop: '0.75rem' }}>
-          Couldn't load secrets: <code>{state.message}</code>
-        </div>
+        <>
+          <div className="error-banner" style={{ marginTop: '0.75rem' }}>
+            Couldn't load secrets: <code>{state.message}</code>
+          </div>
+          <div className="actions" style={{ marginTop: '0.75rem' }}>
+            <button onClick={reload}>Retry</button>
+          </div>
+        </>
       )}
 
       {state.kind === 'ok' && state.secrets.length === 0 && (

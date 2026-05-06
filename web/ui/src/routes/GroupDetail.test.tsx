@@ -12,7 +12,7 @@
  *
  * Tests mock the api module — no live server, no auth state needed.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -169,5 +169,38 @@ describe('GroupDetail — Secrets panel (paraclaw#104)', () => {
     });
 
     expect(screen.getByText(/Create a scoped secret/)).toBeInTheDocument();
+  });
+
+  it('error state surfaces a Retry button that re-invokes the fetch (paraclaw#128)', async () => {
+    vi.mocked(api.getGroup).mockResolvedValue({ ...baseGroup, secret_mode: 'all' });
+    vi.mocked(api.listGroupInjectableSecrets)
+      .mockRejectedValueOnce(new Error('boom: transient 500'))
+      .mockResolvedValueOnce([
+        {
+          id: 'sec-1',
+          name: 'TOKEN',
+          kind: 'generic',
+          agentGroupId: 'g1',
+          scope: 'scoped',
+          createdAt: '2026-05-01T00:00:00Z',
+          updatedAt: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+    renderAt('/groups/research');
+
+    await waitFor(() => {
+      expect(screen.getByText(/Couldn't load secrets/)).toBeInTheDocument();
+    });
+    expect(screen.getByText('boom: transient 500')).toBeInTheDocument();
+
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    fireEvent.click(retry);
+
+    await waitFor(() => {
+      expect(screen.getByText('TOKEN')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Couldn't load secrets/)).not.toBeInTheDocument();
+    expect(api.listGroupInjectableSecrets).toHaveBeenCalledTimes(2);
   });
 });

@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.11] - 2026-05-05
+
+### Added
+
+- **Retry button on GroupDetail Secrets section error state (paraclaw#128).** From paraclaw#126 review: the new SecretsSection's error banner had no recovery affordance — operators hit a transient API failure and had to navigate away to try again. Mirrors the existing AgentProviderSection pattern: extracts the fetch into a `reload` `useCallback`, the `useEffect` calls `void reload()`, and the error branch now renders the banner + an `actions` div with a Retry button bound to the same `reload` callback. New `GroupDetail.test.tsx` test mocks `listGroupInjectableSecrets` to reject once then resolve, asserts the error banner + Retry button render, clicks Retry, and asserts the success state replaces the error (and that the API was called twice). Stash-and-rerun confirmed: removing the Retry button fails the test with `Unable to find role="button" with name "Retry"`. Closes paraclaw#128. Refs paraclaw#126.
+
 ## [0.1.2-rc.10] - 2026-05-05
 
 ### Added
