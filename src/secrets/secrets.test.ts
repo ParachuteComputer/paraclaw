@@ -440,3 +440,97 @@ describe('listInjectableSecretsForGroup', () => {
     expect(rows[0]).not.toHaveProperty('value_encrypted');
   });
 });
+
+describe('resolveInjectableSecrets ↔ listInjectableSecretsForGroup lockstep (paraclaw#129)', () => {
+  /**
+   * Mechanical guard against drift between the two SQL-identical functions in
+   * src/secrets/index.ts. Both walk identical row predicates + gate clauses;
+   * any future SQL edit must touch both. Today the invariant is preserved by
+   * careful reading + a load-bearing doc-comment. This block tests it.
+   *
+   * For each fixture, calls both functions and asserts:
+   *   - same set of names (the row gate matches)
+   *   - per-name plaintext from resolveInjectableSecrets matches the value
+   *     getSecret returns when scoped to the same group (the dedup-by-name
+   *     `ORDER BY s.agent_group_id IS NULL` scoped-wins ordering matches)
+   *
+   * If a future SQL change makes one function accept a row the other rejects,
+   * the name-set assertion fails. If the ORDER BY drifts so dedup picks the
+   * wrong row on collision, the per-name plaintext assertion fails.
+   */
+  function expectLockstep(agentGroupId: string, expectedNames: string[]): void {
+    const resolved = resolveInjectableSecrets(agentGroupId);
+    const listed = listInjectableSecretsForGroup(agentGroupId);
+
+    const sortedExpected = expectedNames.slice().sort();
+    expect([...resolved.keys()].sort()).toEqual(sortedExpected);
+    expect(listed.map((r) => r.name).sort()).toEqual(sortedExpected);
+
+    for (const view of listed) {
+      expect(resolved.get(view.name)).toBe(getSecret(view.name, agentGroupId));
+    }
+  }
+
+  it('rich mix: scoped+all + global+assigned + global+mode=all + name collision', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+
+    putSecret('SCOPED_ONLY', 'sv', { agent_group_id: 'A' });
+    const assignedId = putSecret('GLOBAL_ASSIGNED', 'gv-assigned');
+    addAssignment(assignedId, 'A');
+    putSecret('GLOBAL_MODE_ALL', 'gv-mode-all');
+    putSecret('TOKEN', 'global-token');
+    putSecret('TOKEN', 'scoped-token', { agent_group_id: 'A' });
+
+    expectLockstep('A', ['SCOPED_ONLY', 'GLOBAL_ASSIGNED', 'GLOBAL_MODE_ALL', 'TOKEN']);
+
+    // Spot-check the collision picked the scoped row in BOTH views.
+    expect(resolveInjectableSecrets('A').get('TOKEN')).toBe('scoped-token');
+    expect(listInjectableSecretsForGroup('A').find((r) => r.name === 'TOKEN')?.scope).toBe('scoped');
+  });
+
+  it('mode=selective: mixed reachable + unreachable globals + scoped-with-assignment', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'B', 'selective');
+
+    putSecret('UNREACHABLE_GLOBAL', 'gv'); // mode=selective + no assignment → excluded
+    const reachableId = putSecret('REACHABLE', 'gv2');
+    addAssignment(reachableId, 'B');
+    const scopedAssignedId = putSecret('SCOPED_AND_ASSIGNED', 'sv', { agent_group_id: 'B' });
+    addAssignment(scopedAssignedId, 'B');
+
+    expectLockstep('B', ['REACHABLE', 'SCOPED_AND_ASSIGNED']);
+  });
+
+  it('orphaned-scoped (selective + scoped + no assignment): both exclude', () => {
+    // The "unreachable via UI" config the doc-comment in findStaleSessionsForSecret
+    // calls out — selective mode + scoped secret + no assignment row. The shared
+    // gate `(g.secret_mode='all' OR a.secret_id IS NOT NULL)` rejects from BOTH.
+    // If a future SQL change makes one function accept it, this catches the drift.
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'C', 'selective');
+
+    putSecret('ORPHAN', 'v', { agent_group_id: 'C' });
+
+    expectLockstep('C', []);
+  });
+
+  it('unknown agent_group_id: both return empty (selective default)', () => {
+    putSecret('GLOBAL', 'v');
+    expectLockstep('does-not-exist', []);
+  });
+
+  it('empty secret store + mode=all: both return empty', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'D', 'all');
+    expectLockstep('D', []);
+  });
+});
