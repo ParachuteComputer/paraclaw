@@ -1,15 +1,25 @@
 /**
- * MCP tools for channel-wire CRUD. Mirrors `/api/channels`. The DB still
- * stores the pre-rebuild enum names (engage_mode = mention | pattern |
- * mention-sticky; sender_scope = all | known; ignored_message_policy = drop
- * | accumulate); the API contract these tools speak — same as the web API —
- * uses the new vocabulary (engageMode = mention | pattern | all; senderScope
- * = allowlist | unrestricted; ignoredMessagePolicy = drop | silent). The
- * translator is small so we inline it here rather than carving out a shared
- * module that would need its own seam through the route handler. (paraclaw#94
- * renamed wire-side `'all'` → `'unrestricted'` to keep it literal-disjoint
- * from the DB-side `'all'`.)
+ * MCP tools for channel-wire CRUD. Mirrors `/api/channels`.
+ *
+ * The wire-shape <-> DB-shape translator + patch validator now live in
+ * `src/channels/api-translator.ts` (paraclaw#123) and are shared with the
+ * HTTP route. See that module for the enum translation contract; this
+ * file owns the MCP tool plumbing only.
+ *
+ * The MCP SDK does NOT enforce `inputSchema` against `tools/call` args
+ * before dispatch (see ToolDef.inputSchema in src/mcp/types.ts), so the
+ * shared `validatePatchInput` doubles as the defensive gate this handler
+ * relied on inline before. paraclaw#94 / PR #122 closed the same
+ * silent-coerce class on the HTTP side; #123 brings the MCP side onto
+ * the same canonical validator.
  */
+import {
+  apiToDbPatch,
+  type ChannelWireView,
+  rowToView,
+  validatePatchInput,
+  type WireJoinRow,
+} from '../../channels/api-translator.js';
 import { getAgentGroup } from '../../db/agent-groups.js';
 import { getDb } from '../../db/connection.js';
 import {
@@ -18,83 +28,12 @@ import {
   getMessagingGroupAgent,
   updateMessagingGroupAgent,
 } from '../../db/messaging-groups.js';
-import type {
-  EngageMode as DbEngageMode,
-  IgnoredMessagePolicy as DbIgnoredMessagePolicy,
-  SenderScope as DbSenderScope,
-  MessagingGroupAgent,
-} from '../../types.js';
 import type { ToolDef } from '../types.js';
-
-type ApiEngageMode = 'mention' | 'pattern' | 'all';
-type ApiSenderScope = 'allowlist' | 'unrestricted';
-type ApiIgnoredMessagePolicy = 'drop' | 'silent';
-
-const VALID_API_ENGAGE_MODES: ApiEngageMode[] = ['mention', 'pattern', 'all'];
-const VALID_API_SENDER_SCOPES: ApiSenderScope[] = ['allowlist', 'unrestricted'];
-const VALID_API_IGNORED_POLICIES: ApiIgnoredMessagePolicy[] = ['drop', 'silent'];
-
-const ALL_PATTERN = '.';
-
-function dbToApiEngage(mode: DbEngageMode, pattern: string | null): ApiEngageMode {
-  if (mode === 'pattern') return pattern === ALL_PATTERN ? 'all' : 'pattern';
-  return 'mention';
-}
-function dbToApiSenderScope(s: DbSenderScope): ApiSenderScope {
-  return s === 'known' ? 'allowlist' : 'unrestricted';
-}
-function dbToApiIgnoredPolicy(p: DbIgnoredMessagePolicy): ApiIgnoredMessagePolicy {
-  return p === 'accumulate' ? 'silent' : 'drop';
-}
-
-interface WireRow extends MessagingGroupAgent {
-  mg_channel_type: string;
-  mg_platform_id: string;
-  mg_name: string | null;
-  ag_folder: string;
-  ag_name: string;
-}
-
-interface ChannelWireView {
-  id: string;
-  channelType: string;
-  messagingGroupId: string;
-  platformId: string;
-  displayName: string | null;
-  agentGroupId: string;
-  agentGroupFolder: string;
-  agentGroupName: string;
-  engageMode: ApiEngageMode;
-  engagePattern: string | null;
-  senderScope: ApiSenderScope;
-  ignoredMessagePolicy: ApiIgnoredMessagePolicy;
-  priority: number;
-  createdAt: string;
-}
-
-function rowToView(row: WireRow): ChannelWireView {
-  return {
-    id: row.id,
-    channelType: row.mg_channel_type,
-    messagingGroupId: row.messaging_group_id,
-    platformId: row.mg_platform_id,
-    displayName: row.mg_name,
-    agentGroupId: row.agent_group_id,
-    agentGroupFolder: row.ag_folder,
-    agentGroupName: row.ag_name,
-    engageMode: dbToApiEngage(row.engage_mode, row.engage_pattern),
-    engagePattern: row.engage_mode === 'pattern' && row.engage_pattern !== ALL_PATTERN ? row.engage_pattern : null,
-    senderScope: dbToApiSenderScope(row.sender_scope),
-    ignoredMessagePolicy: dbToApiIgnoredPolicy(row.ignored_message_policy),
-    priority: row.priority,
-    createdAt: row.created_at,
-  };
-}
 
 function listAllWires(): ChannelWireView[] {
   return (
     getDb()
-      .prepare<WireRow>(
+      .prepare<WireJoinRow>(
         `SELECT mga.*,
                 mg.channel_type AS mg_channel_type,
                 mg.platform_id  AS mg_platform_id,
@@ -106,7 +45,7 @@ function listAllWires(): ChannelWireView[] {
            JOIN agent_groups ag     ON ag.id = mga.agent_group_id
           ORDER BY mga.created_at DESC`,
       )
-      .all() as WireRow[]
+      .all() as WireJoinRow[]
   ).map(rowToView);
 }
 
@@ -177,59 +116,15 @@ export const channelTools: ToolDef[] = [
       const current = getMessagingGroupAgent(id);
       if (!current) throw new Error(`channel wire not found: ${id}`);
 
-      // Validate enum-typed fields up front. The MCP SDK does NOT enforce
-      // `inputSchema` against `tools/call` args before dispatch, so a
-      // stale-schema client (e.g. one that cached the pre-rc.6 senderScope
-      // enum) can land here with values the downstream if/else chains
-      // don't recognize — and silently no-op'd patches would round-trip
-      // back as success while the column kept its previous value (the
-      // exact silent-coerce class paraclaw#94 set out to close). Mirrors
-      // validatePatchInput in src/web/routes/channels.ts.
-      if (
-        args.engageMode !== undefined &&
-        !VALID_API_ENGAGE_MODES.includes(args.engageMode as ApiEngageMode)
-      ) {
-        throw new Error(
-          `invalid engageMode: ${String(args.engageMode)} — must be one of ${JSON.stringify(VALID_API_ENGAGE_MODES)}`,
-        );
-      }
-      if (
-        args.senderScope !== undefined &&
-        !VALID_API_SENDER_SCOPES.includes(args.senderScope as ApiSenderScope)
-      ) {
-        throw new Error(
-          `invalid senderScope: ${String(args.senderScope)} — must be one of ${JSON.stringify(VALID_API_SENDER_SCOPES)}`,
-        );
-      }
-      if (
-        args.ignoredMessagePolicy !== undefined &&
-        !VALID_API_IGNORED_POLICIES.includes(args.ignoredMessagePolicy as ApiIgnoredMessagePolicy)
-      ) {
-        throw new Error(
-          `invalid ignoredMessagePolicy: ${String(args.ignoredMessagePolicy)} — must be one of ${JSON.stringify(VALID_API_IGNORED_POLICIES)}`,
-        );
-      }
+      // validatePatchInput inspects only the fields it knows; `id` and any
+      // future-compat keys are ignored. On `ok: false`, throw the reason —
+      // the HTTP route does the same translation on its end (400 + JSON
+      // error). Both surfaces now share the same rejection contract,
+      // including the engagePattern='.' sentinel guard.
+      const validated = validatePatchInput(args);
+      if (!validated.ok) throw new Error(validated.reason);
 
-      const patch: Partial<MessagingGroupAgent> = {};
-      if (args.engageMode === 'all') {
-        patch.engage_mode = 'pattern';
-        patch.engage_pattern = ALL_PATTERN;
-      } else if (args.engageMode === 'pattern') {
-        patch.engage_mode = 'pattern';
-        if (typeof args.engagePattern === 'string' && args.engagePattern !== ALL_PATTERN) {
-          patch.engage_pattern = args.engagePattern;
-        }
-      } else if (args.engageMode === 'mention') {
-        patch.engage_mode = current.engage_mode === 'mention-sticky' ? 'mention-sticky' : 'mention';
-        patch.engage_pattern = null;
-      } else if (typeof args.engagePattern === 'string' || args.engagePattern === null) {
-        patch.engage_pattern = args.engagePattern as string | null;
-      }
-      if (args.senderScope === 'allowlist') patch.sender_scope = 'known';
-      else if (args.senderScope === 'unrestricted') patch.sender_scope = 'all';
-      if (args.ignoredMessagePolicy === 'silent') patch.ignored_message_policy = 'accumulate';
-      else if (args.ignoredMessagePolicy === 'drop') patch.ignored_message_policy = 'drop';
-      if (typeof args.priority === 'number' && Number.isFinite(args.priority)) patch.priority = args.priority;
+      const patch = apiToDbPatch(validated.input, current);
       updateMessagingGroupAgent(id, patch);
       const after = getWireView(id);
       if (!after) throw new Error(`channel wire ${id} disappeared after update`);
