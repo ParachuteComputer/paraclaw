@@ -10,13 +10,23 @@
  *  - Approve path: member added, original message replayed via routeInbound,
  *    container woken
  *  - Deny path: pending row deleted, no member added
+ *  - Approve replay with attachment: row + file land cleanly at the
+ *    namespaced messages_in.id path (paraclaw#97)
+ *  - Approve replay with MUTATED original_message: on-disk attachment file
+ *    is preserved byte-for-byte; the dup-skip path absorbs the second write
+ *    so a path-normalization or any pre-replay mutation can't clobber state
+ *    that's already committed (paraclaw#97 — #96 invariant under the
+ *    sender-approval entry point)
  */
 import fs from 'fs';
+import path from 'path';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
+import { openDb } from '../../db/connection.js';
 import { initTestDb, closeDb, runMigrations } from '../../db/index.js';
 import { createAgentGroup } from '../../db/agent-groups.js';
 import { createMessagingGroup, createMessagingGroupAgent } from '../../db/messaging-groups.js';
+import { inboundDbPath, sessionDir } from '../../session-manager.js';
 import { upsertUser } from './db/users.js';
 import { grantRole } from './db/user-roles.js';
 
@@ -466,5 +476,166 @@ describe('unknown-sender request_approval flow', () => {
       .prepare('SELECT 1 AS x FROM agent_group_members WHERE user_id = ? AND agent_group_id = ?')
       .get('tg:stranger', 'ag-1');
     expect(member).toBeDefined();
+  });
+
+  // ── paraclaw#97: replay-path coverage ──────────────────────────────────
+  //
+  // The unit tests above prove the response handler's bookkeeping (member
+  // added, pending row cleared, wake fired). The two tests below assert the
+  // full chain through routeInbound → writeSessionMessage on a message
+  // carrying a real attachment, plus the #96 file-clobber invariant under
+  // this entry point.
+
+  function strangerWithAttachment(textValue: string, attachmentBytes: Buffer) {
+    return {
+      channelType: 'telegram',
+      platformId: 'chat-123',
+      threadId: null,
+      message: {
+        id: 'tg-msg-with-att',
+        kind: 'chat' as const,
+        content: JSON.stringify({
+          senderId: 'tg:stranger',
+          senderName: 'Stranger',
+          text: textValue,
+          attachments: [
+            {
+              name: 'photo.jpg',
+              type: 'image',
+              size: attachmentBytes.length,
+              data: attachmentBytes.toString('base64'),
+            },
+          ],
+        }),
+        timestamp: now(),
+      },
+    };
+  }
+
+  it('approve replay → attachment lands cleanly at the namespaced messages_in.id path (paraclaw#97)', async () => {
+    const ORIGINAL_BYTES = Buffer.from('first-pic');
+    const event = strangerWithAttachment('see photo', ORIGINAL_BYTES);
+
+    const { routeInbound } = await import('../../router.js');
+    const { getResponseHandlers } = await import('../../response-registry.js');
+
+    // First route: gate denies (request_approval), pending row created. The
+    // wired agent has ignored_message_policy='drop', so no accumulate write
+    // happens — the replay will be the first writer of this messages_in.id.
+    await routeInbound(event);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const { getDb } = await import('../../db/connection.js');
+    const pending = getDb().prepare('SELECT id FROM pending_sender_approvals').get() as { id: string };
+    expect(pending).toBeDefined();
+
+    for (const handler of getResponseHandlers()) {
+      const claimed = await handler({
+        questionId: pending.id,
+        value: 'approve',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      });
+      if (claimed) break;
+    }
+
+    // The replay's deliverToAgent created the session — find it for the
+    // wired agent group and assert the row + file landed at the right spot.
+    const sess = getDb().prepare('SELECT id FROM sessions WHERE agent_group_id = ?').get('ag-1') as { id: string };
+    expect(sess).toBeDefined();
+
+    const inboundDb = openDb(inboundDbPath('ag-1', sess.id));
+    const rows = inboundDb.prepare('SELECT id, content FROM messages_in').all() as Array<{
+      id: string;
+      content: string;
+    }>;
+    inboundDb.close();
+
+    expect(rows).toHaveLength(1);
+    // messageIdForAgent namespaces the platform id with agent_group_id so a
+    // multi-agent fan-out can't collide on messages_in.id (router.ts).
+    const namespacedId = 'tg-msg-with-att:ag-1';
+    expect(rows[0].id).toBe(namespacedId);
+
+    // Row content carries localPath after extractAttachmentFiles ran post-
+    // commit; inline base64 is gone.
+    const parsed = JSON.parse(rows[0].content);
+    expect(parsed.attachments[0].localPath).toBe(`inbox/${namespacedId}/photo.jpg`);
+    expect(parsed.attachments[0].data).toBeUndefined();
+
+    const filePath = path.join(sessionDir('ag-1', sess.id), 'inbox', namespacedId, 'photo.jpg');
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(fs.readFileSync(filePath).equals(ORIGINAL_BYTES)).toBe(true);
+  });
+
+  it('approve replay with MUTATED original_message: on-disk file preserved (paraclaw#97 — #96 invariant)', async () => {
+    // Switch the wired agent to accumulate so the gate-denied first attempt
+    // writes the row + extracts the file BEFORE the approval card is acted
+    // on. This is the racing-dispatch shape #92 caught: two writers for the
+    // same messages_in.id, one from accumulate-on-gate-deny, one from the
+    // approval replay.
+    const { getDb } = await import('../../db/connection.js');
+    getDb()
+      .prepare(`UPDATE messaging_group_agents SET ignored_message_policy = 'accumulate' WHERE id = ?`)
+      .run('mga-1');
+
+    const ORIGINAL_BYTES = Buffer.from('first-pic');
+    const MUTATED_BYTES = Buffer.from('CLOBBERED');
+    const event = strangerWithAttachment('see photo', ORIGINAL_BYTES);
+
+    const { routeInbound } = await import('../../router.js');
+    const { getResponseHandlers } = await import('../../response-registry.js');
+
+    // First route: gate denies, but accumulate writes the row + extracts the
+    // file with ORIGINAL_BYTES.
+    await routeInbound(event);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const sess = getDb().prepare('SELECT id FROM sessions WHERE agent_group_id = ?').get('ag-1') as { id: string };
+    expect(sess).toBeDefined();
+    const namespacedId = 'tg-msg-with-att:ag-1';
+    const filePath = path.join(sessionDir('ag-1', sess.id), 'inbox', namespacedId, 'photo.jpg');
+    expect(fs.readFileSync(filePath).equals(ORIGINAL_BYTES)).toBe(true);
+
+    // Mutate the pending row's original_message to carry MUTATED_BYTES. This
+    // mirrors any pre-replay normalization (path replacement, ContentRecord
+    // re-encoding, retry with re-fetched payload) that produces a JSON event
+    // whose attachment bytes don't match what's already on disk.
+    const pending = getDb().prepare('SELECT id FROM pending_sender_approvals').get() as { id: string };
+    expect(pending).toBeDefined();
+    const mutatedEvent = strangerWithAttachment('see photo', MUTATED_BYTES);
+    getDb()
+      .prepare('UPDATE pending_sender_approvals SET original_message = ? WHERE id = ?')
+      .run(JSON.stringify(mutatedEvent), pending.id);
+
+    // Approve. Replay's writeSessionMessage hits ON CONFLICT (id already
+    // present from the accumulate write), so extractAttachmentFiles never
+    // runs and the on-disk file stays put.
+    for (const handler of getResponseHandlers()) {
+      const claimed = await handler({
+        questionId: pending.id,
+        value: 'approve',
+        userId: 'owner',
+        channelType: 'telegram',
+        platformId: 'dm-owner',
+        threadId: null,
+      });
+      if (claimed) break;
+    }
+
+    // 1. File on disk is byte-for-byte the original — no mutated clobber.
+    const onDisk = fs.readFileSync(filePath);
+    expect(onDisk.equals(ORIGINAL_BYTES)).toBe(true);
+    expect(onDisk.equals(MUTATED_BYTES)).toBe(false);
+
+    // 2. Exactly one row in messages_in (the accumulate write); the replay
+    //    didn't slip a second row in.
+    const inboundDb = openDb(inboundDbPath('ag-1', sess.id));
+    const rows = inboundDb.prepare('SELECT id FROM messages_in').all() as Array<{ id: string }>;
+    inboundDb.close();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(namespacedId);
   });
 });

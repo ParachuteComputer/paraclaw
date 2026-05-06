@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.9] - 2026-05-05
+
+### Added
+
+- **Integration coverage for `writeSessionMessage` dup-skip + sender-approval replay (paraclaw#97).** The unit test added with #95 proved `insertMessage` returns `inserted=false` on a duplicate id, but the write-path side effects layered above it were never asserted at the integration level. Adds two new test surfaces. (1) `src/session-manager.dup-skip.test.ts` — four tests using real session DBs and real fs, asserting that `writeSessionMessage` does NOT bump `sessions.last_active` on a duplicate dispatch (captured timestamp before/after, equality check), emits the documented `log.debug` payload with `agentGroupId / sessionId / messageId` exactly once, absorbs N near-concurrent same-id calls (Promise.all of 6 → one row, one inbox file, no spurious siblings), and still lands distinct ids in the same burst (sanity check that dup-skip is keyed on id, not on burst). (2) Two new tests in `src/modules/permissions/sender-approval.test.ts` exercise the approval-replay chain end-to-end: an attachment-bearing message routed through the request_approval gate, persisted in `pending_sender_approvals.original_message`, then replayed via `routeInbound` after approve — first that the replay lands cleanly at the namespaced `messages_in.id` path with the file at `inbox/<id>:<agentGroupId>/photo.jpg`; second that when `original_message` has been mutated since first write (accumulate-mode wiring already wrote the row + extracted the file with original bytes, then someone path-normalizes or re-encodes the JSON), the on-disk file is preserved byte-for-byte — the #96 file-clobber invariant under the sender-approval entry point. Stash-and-rerun discipline confirmed both regression tests catch the underlying bugs: pre-#96 ordering (extract before insert) makes the mutated-replay test fail on the file-bytes assertion; moving `updateSession` outside the `inserted` gate makes the last_active test fail with a non-equal timestamp. Closes paraclaw#97. Refs paraclaw#92, #95, #96, #120.
+
 ## [0.1.2-rc.8] - 2026-05-05
 
 ### Added
