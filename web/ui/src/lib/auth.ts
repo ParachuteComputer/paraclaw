@@ -36,6 +36,17 @@ interface DiscoveryResponse {
 
 interface ClientRecord {
   client_id: string;
+  /**
+   * The redirect_uri the client_id was registered with. Hub-side, the
+   * DCR row is bound to the original redirect_uri — sending an authorize
+   * request with a different redirect_uri (e.g. after a mount-path
+   * change like `/claw/` → `/agent/`) fails the hub's redirect_uri
+   * check and the operator sees a hub error instead of the consent
+   * screen. Stash this alongside the client_id so bootstrap can detect
+   * the mismatch and re-register a fresh client_id with the new path.
+   * (paraclaw#138)
+   */
+  redirect_uri: string;
 }
 
 interface TokenSet {
@@ -154,9 +165,19 @@ async function getDiscovery(): Promise<DiscoveryResponse> {
 }
 
 export async function ensureClient(hubOrigin: string): Promise<string> {
-  const cached = readJson<ClientRecord>(localStorage, clientKey(hubOrigin));
-  if (cached?.client_id) return cached.client_id;
   const redirectUri = getRedirectUri();
+  const cached = readJson<ClientRecord>(localStorage, clientKey(hubOrigin));
+  // Cache hit only if BOTH client_id is present AND the cached
+  // redirect_uri matches the current bootstrap's redirect_uri. A mismatch
+  // means the SPA's mount path changed (e.g. `/claw/` → `/agent/`) and
+  // the hub-side DCR row is bound to the old redirect_uri — re-using the
+  // stale client_id would fail the hub's redirect_uri check on
+  // /oauth/authorize. Treat as cache-miss → re-register a fresh client.
+  // Records written before this guard landed lack `redirect_uri`; treat
+  // those as miss so the migration self-heals. (paraclaw#138)
+  if (cached?.client_id && cached.redirect_uri === redirectUri) {
+    return cached.client_id;
+  }
   const res = await fetch(`${hubOrigin}/oauth/register`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
@@ -171,7 +192,10 @@ export async function ensureClient(hubOrigin: string): Promise<string> {
     throw new Error(`hub /oauth/register failed: ${res.status} ${await res.text()}`);
   }
   const body = (await res.json()) as { client_id: string };
-  writeJson(localStorage, clientKey(hubOrigin), { client_id: body.client_id });
+  writeJson(localStorage, clientKey(hubOrigin), {
+    client_id: body.client_id,
+    redirect_uri: redirectUri,
+  });
   return body.client_id;
 }
 

@@ -237,10 +237,14 @@ describe('ensureClient — /oauth/register body', () => {
     expect(body.token_endpoint_auth_method).toBe('none');
   });
 
-  it('does not call fetch when a cached client_id is already in localStorage', async () => {
+  it('reuses the cached client_id when redirect_uri matches the current bootstrap', async () => {
+    // Pre-seed a record whose redirect_uri matches what getRedirectUri()
+    // computes in this test environment (same logic as the prod helper:
+    // origin + BASE_URL + 'oauth/callback'). Cache hit ⇒ no fetch.
+    const expectedRedirect = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
     localStorage.setItem(
       'parachute-agent.client.http://hub.test',
-      JSON.stringify({ client_id: 'cached-client-id' }),
+      JSON.stringify({ client_id: 'cached-client-id', redirect_uri: expectedRedirect }),
     );
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
@@ -249,5 +253,100 @@ describe('ensureClient — /oauth/register body', () => {
 
     expect(id).toBe('cached-client-id');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Re-register the OAuth client when the SPA's redirect_uri changes —
+ * paraclaw#138. The hub binds each DCR client_id to the redirect_uri it
+ * was registered with; if the operator changes the SPA's mount path
+ * (e.g. `/claw/` → `/agent/` after the 0.1.0 rename, or any custom
+ * `PARACHUTE_AGENT_WEB_MOUNT` change), the cached client_id stops
+ * matching and `/oauth/authorize` errors out before the consent screen.
+ *
+ * Fix: cache the redirect_uri alongside the client_id and treat any
+ * mismatch (or a legacy record with no redirect_uri at all) as a cache
+ * miss so the SPA registers a fresh client_id under the new path.
+ */
+describe('ensureClient — redirect_uri-aware cache', () => {
+  function mockFetchOk(clientId: string) {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ client_id: clientId }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    return fetchSpy;
+  }
+
+  it('re-registers when the cached redirect_uri does not match the current one', async () => {
+    // Stale cache from before a mount-path change: redirect_uri points
+    // at the old path. Current bootstrap computes a different URI, so
+    // the cached client_id is unusable on the hub.
+    localStorage.setItem(
+      'parachute-agent.client.http://hub.test',
+      JSON.stringify({
+        client_id: 'stale-client-id',
+        redirect_uri: 'http://app.test/claw/oauth/callback',
+      }),
+    );
+    const fetchSpy = mockFetchOk('fresh-client-id');
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('fresh-client-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // The cache must now hold the freshly-registered client_id paired
+    // with the *current* redirect_uri, not the stale one — otherwise
+    // the next bootstrap would re-register on every page load.
+    const updated = JSON.parse(
+      localStorage.getItem('parachute-agent.client.http://hub.test') ?? 'null',
+    );
+    expect(updated.client_id).toBe('fresh-client-id');
+    const expectedRedirect = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
+    expect(updated.redirect_uri).toBe(expectedRedirect);
+  });
+
+  it('re-registers a legacy ClientRecord that lacks a redirect_uri field (self-heals)', async () => {
+    // Records written before paraclaw#138 had only `{ client_id }`. On
+    // the first bootstrap after upgrade we treat the missing-field case
+    // as a cache miss and re-register so subsequent loads have the full
+    // record. This means existing operators see exactly one extra
+    // registration round-trip on first 0.1.x reload.
+    localStorage.setItem(
+      'parachute-agent.client.http://hub.test',
+      JSON.stringify({ client_id: 'legacy-client-id' }),
+    );
+    const fetchSpy = mockFetchOk('healed-client-id');
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('healed-client-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const healed = JSON.parse(
+      localStorage.getItem('parachute-agent.client.http://hub.test') ?? 'null',
+    );
+    expect(healed.client_id).toBe('healed-client-id');
+    expect(typeof healed.redirect_uri).toBe('string');
+    expect(healed.redirect_uri.length).toBeGreaterThan(0);
+  });
+
+  it('persists redirect_uri alongside client_id on first registration', async () => {
+    // No prior cache. After first registration, the persisted record
+    // must include both fields — otherwise subsequent bootstraps would
+    // legacy-self-heal on every load and burn a hub /oauth/register
+    // call per page reload.
+    const fetchSpy = mockFetchOk('first-client-id');
+
+    await ensureClient('http://hub.test');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const persisted = JSON.parse(
+      localStorage.getItem('parachute-agent.client.http://hub.test') ?? 'null',
+    );
+    expect(persisted).toMatchObject({
+      client_id: 'first-client-id',
+    });
+    const expectedRedirect = `${window.location.origin}${import.meta.env.BASE_URL}oauth/callback`;
+    expect(persisted.redirect_uri).toBe(expectedRedirect);
   });
 });
