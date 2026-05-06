@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.10] - 2026-05-05
+
+### Added
+
+- **Parallel-equality test for `resolveInjectableSecrets ↔ listInjectableSecretsForGroup` lockstep (paraclaw#129).** The two functions in `src/secrets/index.ts` are SQL-identical mirrors with a load-bearing doc-comment requiring lockstep edits — today the invariant is preserved by careful reading and a #126-era reviewer note. Adds a `describe('… lockstep …')` block in `src/secrets/secrets.test.ts` with an `expectLockstep(groupId, expectedNames)` helper that calls both functions, asserts name-set equality, and walks each name through `getSecret(name, groupId)` to verify the chosen row id (the `ORDER BY s.agent_group_id IS NULL` scoped-wins ordering) agrees with the plaintext returned. Five fixtures cover the configs the issue calls out: rich mix (scoped+all + global+assigned + global+mode=all + name collision), mode=selective with mixed reachable/unreachable globals, the orphaned-scoped (selective + no assignment) "unreachable via UI" corner the `findStaleSessionsForSecret` doc-comment flags, the unknown-agent-group selective-default path, and an empty store. Stash-and-rerun confirmed: flipping `listInjectableSecretsForGroup`'s `ORDER BY s.agent_group_id IS NULL` to `s.agent_group_id IS NOT NULL` (the dedup-picks-global drift mode) fails the rich-mix name-collision check, and dropping the gate clause `(g.secret_mode = 'all' OR a.secret_id IS NOT NULL)` from one function fails the orphaned-scoped check. Mechanical guard, no production code change. Closes paraclaw#129. Refs paraclaw#126.
+
 ## [0.1.2-rc.9] - 2026-05-05
 
 ### Added
