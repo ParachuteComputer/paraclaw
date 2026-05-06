@@ -131,9 +131,7 @@ describe('rowToView', () => {
   });
 
   it("collapses pattern + '.' to engageMode='all' and nulls engagePattern on the wire", () => {
-    const view = rowToView(
-      baseRow({ engage_mode: 'pattern', engage_pattern: ALL_MESSAGES_PATTERN_SENTINEL }),
-    );
+    const view = rowToView(baseRow({ engage_mode: 'pattern', engage_pattern: ALL_MESSAGES_PATTERN_SENTINEL }));
     expect(view.engageMode).toBe('all');
     expect(view.engagePattern).toBeNull();
   });
@@ -155,10 +153,7 @@ describe('apiToDbPatch — engageMode encoding', () => {
   });
 
   it('engageMode=pattern + engagePattern → both written', () => {
-    const out = apiToDbPatch(
-      { engageMode: 'pattern', engagePattern: '\\bdeploy\\b' },
-      baseCurrent(),
-    );
+    const out = apiToDbPatch({ engageMode: 'pattern', engagePattern: '\\bdeploy\\b' }, baseCurrent());
     expect(out.engage_mode).toBe('pattern');
     expect(out.engage_pattern).toBe('\\bdeploy\\b');
   });
@@ -203,15 +198,11 @@ describe('apiToDbPatch — sender scope and ignored policy', () => {
   });
 
   it("ignoredMessagePolicy 'silent' → DB 'accumulate'", () => {
-    expect(apiToDbPatch({ ignoredMessagePolicy: 'silent' }, baseCurrent()).ignored_message_policy).toBe(
-      'accumulate',
-    );
+    expect(apiToDbPatch({ ignoredMessagePolicy: 'silent' }, baseCurrent()).ignored_message_policy).toBe('accumulate');
   });
 
   it("ignoredMessagePolicy 'drop' → DB 'drop'", () => {
-    expect(apiToDbPatch({ ignoredMessagePolicy: 'drop' }, baseCurrent()).ignored_message_policy).toBe(
-      'drop',
-    );
+    expect(apiToDbPatch({ ignoredMessagePolicy: 'drop' }, baseCurrent()).ignored_message_policy).toBe('drop');
   });
 
   it('priority passes through unchanged', () => {
