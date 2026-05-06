@@ -11,6 +11,7 @@ import {
   getSecret,
   getSecretById,
   listAssignments,
+  listInjectableSecretsForGroup,
   listSecrets,
   putSecret,
   removeAssignment,
@@ -350,5 +351,92 @@ describe('getSecretById', () => {
 
   it('returns undefined for a missing id', () => {
     expect(getSecretById('does-not-exist')).toBeUndefined();
+  });
+});
+
+describe('listInjectableSecretsForGroup', () => {
+  it('tags scoped, assigned, and global rows correctly', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+
+    // Three inclusion paths:
+    //   SCOPED   — owned by group A
+    //   ASSIGNED — global, with explicit assignment row → A
+    //   GLOBAL   — global, included only because A is mode='all'
+    const scopedId = putSecret('SCOPED_TOKEN', 'v', { agent_group_id: 'A' });
+    const assignedId = putSecret('ASSIGNED_TOKEN', 'v');
+    addAssignment(assignedId, 'A');
+    const globalId = putSecret('GLOBAL_TOKEN', 'v');
+
+    const rows = listInjectableSecretsForGroup('A');
+    const byName = new Map(rows.map((r) => [r.name, r]));
+
+    expect(byName.get('SCOPED_TOKEN')?.scope).toBe('scoped');
+    expect(byName.get('SCOPED_TOKEN')?.id).toBe(scopedId);
+    expect(byName.get('ASSIGNED_TOKEN')?.scope).toBe('assigned');
+    expect(byName.get('ASSIGNED_TOKEN')?.id).toBe(assignedId);
+    expect(byName.get('GLOBAL_TOKEN')?.scope).toBe('global');
+    expect(byName.get('GLOBAL_TOKEN')?.id).toBe(globalId);
+  });
+
+  it('selective mode hides globals that have no assignment row', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    putSecret('UNREACHABLE_GLOBAL', 'v');
+    const assignedId = putSecret('ASSIGNED', 'v');
+    addAssignment(assignedId, 'A');
+
+    const rows = listInjectableSecretsForGroup('A');
+    expect(rows.map((r) => r.name).sort()).toEqual(['ASSIGNED']);
+    expect(rows[0].scope).toBe('assigned');
+  });
+
+  it('assignment row + mode=all → assigned wins (more specific wins)', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+
+    const id = putSecret('SHARED', 'v');
+    addAssignment(id, 'A');
+
+    const rows = listInjectableSecretsForGroup('A');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].scope).toBe('assigned');
+  });
+
+  it('on name collision, scoped row wins and reports scope=scoped', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+
+    putSecret('TOKEN', 'global-v');
+    putSecret('TOKEN', 'scoped-v', { agent_group_id: 'A' });
+
+    const rows = listInjectableSecretsForGroup('A');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('TOKEN');
+    expect(rows[0].scope).toBe('scoped');
+  });
+
+  it('returns an empty list for an unknown agent group', () => {
+    putSecret('GLOBAL', 'v');
+    expect(listInjectableSecretsForGroup('does-not-exist')).toEqual([]);
+  });
+
+  it('never carries the encrypted value', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'all');
+    putSecret('K', 'super-secret');
+    const rows = listInjectableSecretsForGroup('A');
+    expect(rows[0]).not.toHaveProperty('value_encrypted');
   });
 });

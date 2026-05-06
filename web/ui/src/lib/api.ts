@@ -57,6 +57,12 @@ export interface AgentGroupView {
   name: string;
   folder: string;
   agent_provider: string | null;
+  /**
+   * Per-group secret injection policy. `all` = every in-scope secret lands in
+   * the container; `selective` = only those with an explicit assignment row.
+   * Surfaced for the GroupDetail "Secrets" panel context (paraclaw#104).
+   */
+  secret_mode: 'all' | 'selective';
   created_at: string;
   vault: VaultAttachment | null;
   status: GroupStatus | null;
@@ -775,6 +781,36 @@ export async function listStaleSessionsForSecret(secretId: string): Promise<Stal
     staleSessions: StaleSession[];
   }>(`/secrets/${encodeURIComponent(secretId)}/stale-sessions`);
   return r.staleSessions;
+}
+
+/**
+ * What the agent group will receive at the next session spawn — the wire
+ * mirror of `resolveInjectableSecrets()` on the host. Powers the GroupDetail
+ * "Secrets" panel (paraclaw#104). Metadata only; values never traverse this
+ * surface.
+ *
+ * `scope` explains *why* the row is included:
+ *   - `scoped`   — owned by this group
+ *   - `assigned` — global, with an explicit assignment row → this group
+ *   - `global`   — global, included only because the group is `mode='all'`
+ */
+export type SecretInclusionScope = 'global' | 'scoped' | 'assigned';
+
+export interface InjectableSecretView {
+  id: string;
+  name: string;
+  kind: SecretKind;
+  agentGroupId: string | null;
+  scope: SecretInclusionScope;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listGroupInjectableSecrets(folder: string): Promise<InjectableSecretView[]> {
+  const r = await request<{ secrets: InjectableSecretView[] }>(
+    `/groups/${encodeURIComponent(folder)}/secrets`,
+  );
+  return r.secrets;
 }
 
 // --- Approvals ---

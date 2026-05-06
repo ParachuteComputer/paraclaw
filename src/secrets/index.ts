@@ -353,3 +353,87 @@ export function getSecretById(id: string): SecretRow | undefined {
     .prepare<SecretRow>(`SELECT id, name, kind, agent_group_id, created_at, updated_at FROM secrets WHERE id = ?`)
     .get(id);
 }
+
+/**
+ * Why a secret lands in a particular agent group's injectable set:
+ *   - `scoped`   — secret is owned by this group (`s.agent_group_id = g.id`).
+ *   - `assigned` — global secret with an explicit `secret_assignments` row
+ *                  pointing at this group.
+ *   - `global`   — global secret with no assignment row, included only because
+ *                  the recipient group is in `secret_mode='all'`.
+ *
+ * When a global has BOTH an assignment row AND `secret_mode='all'`, we report
+ * `assigned` — the explicit row reflects deliberate operator intent, while
+ * mode='all' is a blanket setting; surfacing the more-specific reason makes
+ * the GroupDetail page actionable ("revoke this assignment" vs "flip to
+ * selective"). See paraclaw#104.
+ */
+export type SecretInclusionScope = 'global' | 'scoped' | 'assigned';
+
+export interface InjectableSecretView extends SecretRow {
+  scope: SecretInclusionScope;
+}
+
+/**
+ * Metadata-only mirror of `resolveInjectableSecrets` for the GroupDetail
+ * "Secrets" panel. Returns the same row set (subject to the same SQL gate)
+ * tagged with the inclusion reason — never decrypts. Caller is the read-only
+ * `GET /api/groups/:folder/secrets` route.
+ *
+ * The SQL mirrors `resolveInjectableSecrets` (the `(s.agent_group_id = g.id
+ * OR s.agent_group_id IS NULL)` row predicate gated by `(secret_mode='all'
+ * OR assignment exists)`) so the panel cannot disagree with what the
+ * container will actually receive at spawn time. Drift here would defeat
+ * the entire point of #104 — keep them in lockstep. If you change either,
+ * change both.
+ *
+ * `ORDER BY s.agent_group_id IS NULL` puts scoped rows first so the
+ * dedupe-by-name loop honors the "scoped wins on collision" rule
+ * `resolveInjectableSecrets` enforces.
+ */
+export function listInjectableSecretsForGroup(agentGroupId: string): InjectableSecretView[] {
+  const rows = db()
+    .prepare<{
+      id: string;
+      name: string;
+      kind: SecretKind;
+      agent_group_id: string | null;
+      created_at: string;
+      updated_at: string;
+      assignment_present: number;
+    }>(
+      `SELECT s.id, s.name, s.kind, s.agent_group_id, s.created_at, s.updated_at,
+              CASE WHEN a.secret_id IS NULL THEN 0 ELSE 1 END AS assignment_present
+         FROM secrets s
+         LEFT JOIN secret_assignments a
+           ON a.secret_id = s.id
+          AND a.agent_group_id = @agent_group_id
+         LEFT JOIN agent_groups g
+           ON g.id = @agent_group_id
+        WHERE (s.agent_group_id = @agent_group_id OR s.agent_group_id IS NULL)
+          AND (g.secret_mode = 'all' OR a.secret_id IS NOT NULL)
+        ORDER BY s.agent_group_id IS NULL, s.name`,
+    )
+    .all({ agent_group_id: agentGroupId });
+
+  const out: InjectableSecretView[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.name)) continue;
+    seen.add(row.name);
+    let scope: SecretInclusionScope;
+    if (row.agent_group_id === agentGroupId) scope = 'scoped';
+    else if (row.assignment_present === 1) scope = 'assigned';
+    else scope = 'global';
+    out.push({
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      agent_group_id: row.agent_group_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      scope,
+    });
+  }
+  return out;
+}

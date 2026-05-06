@@ -63,7 +63,7 @@ import { handleApprovalsRoute } from './routes/approvals.js';
 import { handleChannelsRoute } from './routes/channels.js';
 import { handleActivityRoute } from './routes/activity.js';
 import { handleOauthProvidersRoute } from './routes/oauth-providers.js';
-import { handleSecretsRoute } from './routes/secrets.js';
+import { handleSecretsRoute, listInjectableSecretsForGroupView } from './routes/secrets.js';
 import { handleSessionsRoute } from './routes/sessions.js';
 import { handleSettingsRoute } from './routes/settings.js';
 import { handleAgentProviderRoute, handleGroupAgentProviderRoute } from './routes/agent-provider.js';
@@ -104,6 +104,11 @@ interface AgentGroupRow {
   name: string;
   folder: string;
   agent_provider: string | null;
+  // Per-group injection policy for secrets — the GroupDetail "Secrets" panel
+  // (paraclaw#104) renders this so an empty list under `selective` reads as
+  // "by design" rather than "broken". Already a column on agent_groups
+  // (migration 023); just surface it on the wire.
+  secret_mode: 'all' | 'selective';
   created_at: string;
 }
 
@@ -125,7 +130,9 @@ function listAgentGroups(): AgentGroupView[] {
   const db = getReadonlyDb();
   try {
     const rows = db
-      .prepare('SELECT id, name, folder, agent_provider, created_at FROM agent_groups ORDER BY created_at DESC')
+      .prepare(
+        'SELECT id, name, folder, agent_provider, secret_mode, created_at FROM agent_groups ORDER BY created_at DESC',
+      )
       .all() as AgentGroupRow[];
     return rows.map((r) => ({
       ...r,
@@ -141,7 +148,7 @@ function getAgentGroup(folder: string): AgentGroupView | null {
   const db = getReadonlyDb();
   try {
     const row = db
-      .prepare('SELECT id, name, folder, agent_provider, created_at FROM agent_groups WHERE folder = ?')
+      .prepare('SELECT id, name, folder, agent_provider, secret_mode, created_at FROM agent_groups WHERE folder = ?')
       .get(folder) as AgentGroupRow | undefined;
     if (!row) return null;
     return {
@@ -607,16 +614,14 @@ async function handleApi(
     const folder = decodeURIComponent(groupRoute[1]);
     const sub = groupRoute[2] ?? '';
 
-    // Reads at the group root + the agent-provider subroute go through
-    // agent:read; writes default to agent:write; agent-provider writes
-    // (paraclaw#86) bump to agent:admin since they store API keys.
+    // Reads at the group root + the agent-provider subroute + the
+    // injectable-secrets panel (paraclaw#104) go through agent:read; writes
+    // default to agent:write; agent-provider writes (paraclaw#86) bump to
+    // agent:admin since they store API keys.
     const isAgentProviderSub = sub === '/agent-provider';
+    const isReadSub = sub === '' || isAgentProviderSub || sub === '/secrets';
     const requiredScope: AgentScope =
-      method === 'GET' && (sub === '' || isAgentProviderSub)
-        ? SCOPE_AGENT_READ
-        : isAgentProviderSub
-          ? SCOPE_AGENT_ADMIN
-          : SCOPE_AGENT_WRITE;
+      method === 'GET' && isReadSub ? SCOPE_AGENT_READ : isAgentProviderSub ? SCOPE_AGENT_ADMIN : SCOPE_AGENT_WRITE;
     // Authenticate once; capture sub so the agent-provider sub-route's
     // audit log doesn't have to re-decode the JWT.
     const auth = await authenticate(req.headers.authorization, requiredScope);
@@ -883,6 +888,19 @@ async function handleApi(
           agentGroupId: group.id,
           actorSubject,
         });
+      } catch (err) {
+        error(res, 500, err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
+    // Read-only mirror of resolveInjectableSecrets() for the GroupDetail
+    // "Secrets" panel — what env vars this group will see at next session
+    // spawn, with scope badges (paraclaw#104). Metadata only; values stay
+    // encrypted at rest and only decrypt at container spawn time.
+    if (sub === '/secrets' && method === 'GET') {
+      try {
+        json(res, 200, { secrets: listInjectableSecretsForGroupView(group.id) });
       } catch (err) {
         error(res, 500, err instanceof Error ? err.message : String(err));
       }
