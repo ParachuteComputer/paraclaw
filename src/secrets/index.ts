@@ -94,22 +94,43 @@ export function putSecret(name: string, value: string, opts: PutSecretOpts = {})
   }
 
   const id = crypto.randomUUID();
-  db()
-    .prepare(
-      `INSERT INTO secrets
-         (id, name, value_encrypted, kind, agent_group_id, created_at, updated_at)
-       VALUES
-         (@id, @name, @value_encrypted, @kind, @agent_group_id, @created_at, @updated_at)`,
-    )
-    .run({
-      id,
-      name,
-      value_encrypted: ct,
-      kind,
-      agent_group_id: agentGroupId,
-      created_at: now,
-      updated_at: now,
-    });
+  // Auto-seed the matching `secret_assignments` row when the secret is
+  // scoped to a group (paraclaw#127). For a scoped secret the only valid
+  // assignment-row pair is (id, owning_group); the resolver only injects
+  // when `s.agent_group_id = g.id OR s.agent_group_id IS NULL`, so an
+  // assignment elsewhere is meaningless. Without this seed, scoped
+  // creates land orphaned under the default `selective` group mode and
+  // are silently invisible to `resolveInjectableSecrets`. INSERT path
+  // only — UPDATE/rotate leaves the existing assignment set alone.
+  // ON CONFLICT DO NOTHING for idempotency-on-replay (the constraint
+  // already exists in `replaceAssignments` for the same reason).
+  db().transaction(() => {
+    db()
+      .prepare(
+        `INSERT INTO secrets
+           (id, name, value_encrypted, kind, agent_group_id, created_at, updated_at)
+         VALUES
+           (@id, @name, @value_encrypted, @kind, @agent_group_id, @created_at, @updated_at)`,
+      )
+      .run({
+        id,
+        name,
+        value_encrypted: ct,
+        kind,
+        agent_group_id: agentGroupId,
+        created_at: now,
+        updated_at: now,
+      });
+    if (agentGroupId !== null) {
+      db()
+        .prepare(
+          `INSERT INTO secret_assignments (secret_id, agent_group_id, created_at)
+             VALUES (@secret_id, @agent_group_id, @created_at)
+             ON CONFLICT (secret_id, agent_group_id) DO NOTHING`,
+        )
+        .run({ secret_id: id, agent_group_id: agentGroupId, created_at: now });
+    }
+  })();
   return id;
 }
 
@@ -289,11 +310,12 @@ export interface StaleSession {
  * Note on a subtle asymmetry: `resolveInjectableSecrets` additionally gates
  * scoped secrets through `(secret_mode='all' OR assignment row exists)` on
  * the recipient group. The SQL here accepts the scoped match unconditionally.
- * The asymmetry is benign — the only configs where it would diverge (a
- * scoped secret paired with its parent group in `selective` mode and no
- * assignment row) are unreachable via the UI, which always seeds an
- * assignment row when scoping. If a future code path makes that config
- * reachable, tighten the SQL to add the same gate.
+ * The asymmetry is benign — the only config where it would diverge (a scoped
+ * secret in a `selective`-mode group with no assignment row) is structurally
+ * unreachable from `putSecret`: paraclaw#127 made the INSERT path auto-seed
+ * the (id, owning_group) assignment row in the same transaction. If a future
+ * code path bypasses `putSecret` and writes the orphan state directly, tighten
+ * the SQL to add the same gate.
  *
  * The host injects env vars at spawn time only — there is no in-process
  * update path. This helper powers the post-save banner that prompts the
