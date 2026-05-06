@@ -109,22 +109,132 @@ describe('secrets store', () => {
     expect(env.get('B')).toBe('scoped-B');
   });
 
-  it('mode=selective injects nothing without explicit assignments', () => {
+  it('mode=selective hides unassigned globals, but scoped secrets are auto-seeded into the owner', () => {
     const db = initTestDb();
     runMigrations(db);
     _setMasterKeyForTest(crypto.randomBytes(32));
     seedAgentGroup(db, 'g1', 'selective');
 
-    putSecret('GLOBAL', 'value');
-    putSecret('SCOPED', 'value', { agent_group_id: 'g1' });
+    // Unassigned global → invisible under selective mode.
+    putSecret('GLOBAL', 'global-v');
+    // Scoped secret → putSecret auto-seeds the (id, g1) assignment row, so
+    // the resolver injects it even under selective mode (paraclaw#127).
+    putSecret('SCOPED', 'scoped-v', { agent_group_id: 'g1' });
 
     const env = resolveInjectableSecrets('g1');
-    expect(env.size).toBe(0);
+    expect([...env.keys()]).toEqual(['SCOPED']);
+    expect(env.get('SCOPED')).toBe('scoped-v');
   });
 
   it('unknown agent_group_id resolves as no-secrets (selective default)', () => {
     putSecret('GLOBAL', 'v');
     expect(resolveInjectableSecrets('does-not-exist').size).toBe(0);
+  });
+});
+
+describe('putSecret auto-seeds the owner assignment for scoped creates (paraclaw#127)', () => {
+  /**
+   * The default `agent_groups.secret_mode` is `selective` (migration 023).
+   * Before the auto-seed, calling `putSecret(name, value, { agent_group_id })`
+   * inserted a `secrets` row but never the matching `secret_assignments` row,
+   * leaving the secret silently invisible to `resolveInjectableSecrets` —
+   * the row predicate `(s.agent_group_id = g.id OR s.agent_group_id IS NULL)`
+   * matches but the gate `(g.secret_mode='all' OR a.secret_id IS NOT NULL)`
+   * rejects. UI layers had a follow-up `setSecretAssignments` that papered
+   * over this on edits, but the create-side `CredentialForm` "free" mode
+   * called only `putSecret` — so the standard "+ New secret" flow produced
+   * orphan rows.
+   *
+   * Fix: `putSecret` writes the (id, owning_group) assignment row in the
+   * same transaction on INSERT. UPDATE/rotate leaves the assignment set
+   * alone (operator may have deliberately revoked).
+   */
+
+  it('scoped create writes a matching secret_assignments row', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    const id = putSecret('TOKEN', 'v', { agent_group_id: 'A' });
+
+    expect(listAssignments(id)).toEqual(['A']);
+  });
+
+  it('scoped create in selective mode is visible via resolveInjectableSecrets without an explicit assign call', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    putSecret('TOKEN', 'scoped-v', { agent_group_id: 'A' });
+
+    expect(resolveInjectableSecrets('A').get('TOKEN')).toBe('scoped-v');
+  });
+
+  it('scoped create in selective mode is visible via listInjectableSecretsForGroup, tagged scope=scoped', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    putSecret('TOKEN', 'scoped-v', { agent_group_id: 'A' });
+
+    const rows = listInjectableSecretsForGroup('A');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('TOKEN');
+    expect(rows[0].scope).toBe('scoped');
+  });
+
+  it('global create does NOT write any secret_assignments row', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+
+    const id = putSecret('GLOBAL_TOKEN', 'v');
+
+    expect(listAssignments(id)).toEqual([]);
+    const total = db.prepare<{ n: number }>(`SELECT COUNT(*) AS n FROM secret_assignments`).get();
+    expect(total?.n).toBe(0);
+  });
+
+  it('rotate (UPDATE path) does NOT touch the assignment set', () => {
+    // Operator may have deliberately revoked the auto-seeded assignment —
+    // a rotate must not re-seed it. The auto-seed is INSERT-only.
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+
+    const id = putSecret('TOKEN', 'v1', { agent_group_id: 'A' });
+    expect(listAssignments(id)).toEqual(['A']);
+
+    // Operator revokes.
+    removeAssignment(id, 'A');
+    expect(listAssignments(id)).toEqual([]);
+
+    // Rotate plaintext — assignment set stays empty.
+    const id2 = putSecret('TOKEN', 'v2', { agent_group_id: 'A' });
+    expect(id2).toBe(id);
+    expect(listAssignments(id)).toEqual([]);
+  });
+
+  it('two scoped creates with different owners each seed their own row', () => {
+    const db = initTestDb();
+    runMigrations(db);
+    _setMasterKeyForTest(crypto.randomBytes(32));
+    seedAgentGroup(db, 'A', 'selective');
+    seedAgentGroup(db, 'B', 'selective');
+
+    const aId = putSecret('TOKEN', 'va', { agent_group_id: 'A' });
+    const bId = putSecret('TOKEN', 'vb', { agent_group_id: 'B' });
+
+    expect(aId).not.toBe(bId);
+    expect(listAssignments(aId)).toEqual(['A']);
+    expect(listAssignments(bId)).toEqual(['B']);
+    // Each scoped create is visible only in its own group, never across.
+    expect(resolveInjectableSecrets('A').get('TOKEN')).toBe('va');
+    expect(resolveInjectableSecrets('B').get('TOKEN')).toBe('vb');
   });
 });
 
@@ -507,16 +617,21 @@ describe('resolveInjectableSecrets ↔ listInjectableSecretsForGroup lockstep (p
   });
 
   it('orphaned-scoped (selective + scoped + no assignment): both exclude', () => {
-    // The "unreachable via UI" config the doc-comment in findStaleSessionsForSecret
-    // calls out — selective mode + scoped secret + no assignment row. The shared
-    // gate `(g.secret_mode='all' OR a.secret_id IS NOT NULL)` rejects from BOTH.
-    // If a future SQL change makes one function accept it, this catches the drift.
+    // The "structurally unreachable via putSecret" config — selective mode +
+    // scoped secret + no assignment row. paraclaw#127 closed the create path
+    // (putSecret auto-seeds the matching assignment), so to exercise the
+    // shared gate `(g.secret_mode='all' OR a.secret_id IS NOT NULL)` we
+    // construct the orphan directly. If a future SQL change makes one of the
+    // two functions accept it, this catches the drift.
     const db = initTestDb();
     runMigrations(db);
     _setMasterKeyForTest(crypto.randomBytes(32));
     seedAgentGroup(db, 'C', 'selective');
 
-    putSecret('ORPHAN', 'v', { agent_group_id: 'C' });
+    db.prepare(
+      `INSERT INTO secrets (id, name, value_encrypted, kind, agent_group_id, created_at, updated_at)
+         VALUES ('orphan-id', 'ORPHAN', 'ct', 'generic', 'C', datetime('now'), datetime('now'))`,
+    ).run();
 
     expectLockstep('C', []);
   });
