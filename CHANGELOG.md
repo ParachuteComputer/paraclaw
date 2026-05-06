@@ -2,6 +2,14 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.12] - 2026-05-05
+
+### Changed
+
+- **Channel-wire translator extracted into a single shared module (paraclaw#123).** `src/web/routes/channels.ts` and `src/mcp/tools/channels.ts` each maintained their own copy of the `Api*` types, the `VALID_API_*` enum arrays, the `dbToApi*` translator pair, the `ChannelWireView` shape, the `WireRow → view` projection, and (in HTTP) the `validatePatchInput` / `apiToDbPatch` validator+encoder. That duplication was the structural drift hazard paraclaw#94 / PR #122 surfaced concretely — the rename of wire-side `'all'` → `'unrestricted'` initially landed only in the HTTP validator, leaving the MCP-side handler with a silent-coerce hole that #122 had to close inline. Lifted everything into `src/channels/api-translator.ts`. The HTTP route file now owns only the transport layer (json/error helpers, route dispatcher, the messaging-group `mg/:id` detail block, the unknown-sender-policy validator); the MCP file owns only the tool-def plumbing. Both surfaces share `validatePatchInput` and `apiToDbPatch`, so a future enum change touches one file and both surfaces pick it up automatically. 35 new tests in `src/channels/api-translator.test.ts` cover every Db ↔ Api literal pair, the `mention-sticky` PATCH-preservation contract, and the legacy-literal rejections (`senderScope='all'`, `ignoredMessagePolicy='accumulate'`, `engageMode='mention-sticky'`).
+
+  Behavioural change worth flagging: the inline MCP handler used to silently *drop* `engagePattern='.'` when supplied alongside `engageMode='pattern'` or by itself (the DB sentinel for `engageMode='all'` would silently round-trip back as `'all'` on the next read, losing the user's intended literal-dot match). The shared validator hard-rejects that input with the sentinel-reservation error the HTTP route already used since #122 — now both surfaces reject it identically. The escaped form `'\\.'` is the documented way to match a literal dot. Closes paraclaw#123. Refs paraclaw#94, #122.
+
 ## [0.1.2-rc.11] - 2026-05-05
 
 ### Added
