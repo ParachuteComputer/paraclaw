@@ -354,7 +354,6 @@ describe('getSecretById', () => {
   });
 });
 
-
 describe('listInjectableSecretsForGroup', () => {
   it('tags scoped, assigned, and global rows correctly', () => {
     const db = initTestDb();

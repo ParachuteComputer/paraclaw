@@ -148,9 +148,7 @@ function getAgentGroup(folder: string): AgentGroupView | null {
   const db = getReadonlyDb();
   try {
     const row = db
-      .prepare(
-        'SELECT id, name, folder, agent_provider, secret_mode, created_at FROM agent_groups WHERE folder = ?',
-      )
+      .prepare('SELECT id, name, folder, agent_provider, secret_mode, created_at FROM agent_groups WHERE folder = ?')
       .get(folder) as AgentGroupRow | undefined;
     if (!row) return null;
     return {
@@ -623,11 +621,7 @@ async function handleApi(
     const isAgentProviderSub = sub === '/agent-provider';
     const isReadSub = sub === '' || isAgentProviderSub || sub === '/secrets';
     const requiredScope: AgentScope =
-      method === 'GET' && isReadSub
-        ? SCOPE_AGENT_READ
-        : isAgentProviderSub
-          ? SCOPE_AGENT_ADMIN
-          : SCOPE_AGENT_WRITE;
+      method === 'GET' && isReadSub ? SCOPE_AGENT_READ : isAgentProviderSub ? SCOPE_AGENT_ADMIN : SCOPE_AGENT_WRITE;
     // Authenticate once; capture sub so the agent-provider sub-route's
     // audit log doesn't have to re-decode the JWT.
     const auth = await authenticate(req.headers.authorization, requiredScope);
