@@ -2,6 +2,16 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.3-rc.1] - 2026-05-06
+
+### Added
+
+- **Container skill: `scribe` (paraclaw#142).** Doc-only skill at `container/skills/scribe/SKILL.md` that teaches the in-container agent how to call parachute-scribe over its REST API using `curl` and a pre-injected `SCRIBE_TOKEN`. Operator mints a hub-issued JWT (or shared-secret token) carrying `scribe:transcribe`, drops it into `/agent/secrets`, and the secret store injects it as an env var at session spawn. Documents the real scribe API surface — `POST /v1/audio/transcriptions` (multipart `file` + optional `cleanup` / `context`), `GET /v1/models`, `GET /health`, `GET /.parachute/info` — verified against `parachute-scribe/src/`. No async-job polling (scribe is synchronous), no `language` form field, no URL ingest. Skills auto-mount via `container-runner.ts:syncSkillSymlinks` when `skills === 'all'` (the default), so adding the directory is the entire ship on the skill side. Architectural reframe parking paraclaw#100 (per-agent-group scribe-MCP attach): for 3–4 leaf operations over HTTP with a Whisper-shape response, skill+secret+REST is lighter than building an MCP server. Pairs with parachute-hub's parallel `parachute auth mint-token` work — operators get a CLI path to mint the JWT.
+
+### Fixed
+
+- **Inject `PARACHUTE_HUB_ORIGIN` into every spawned container with loopback rewritten to `host.docker.internal` (paraclaw#142 review fold).** Pre-fix, `PARACHUTE_HUB_ORIGIN` was read on the host but never pushed into containers via `buildContainerArgs`, so any skill (or future module) that tried `curl ${PARACHUTE_HUB_ORIGIN}/...` from inside the container hit `undefined` or — worse — silently used a hardcoded `http://127.0.0.1:1939` fallback that resolves to the container's own loopback, not the host. New helper `getHubOriginForContainer()` composes `getHubOrigin()` (the host's resolution chain) with `localhostToContainerHost()` (already shipped for MCP URLs in `vault-mcp.ts`) so loopback origins get rewritten to `host.docker.internal`, and tailnet/LAN origins pass through unchanged. The rewrite mirrors the path already in place for HTTP-MCP URLs in `container.json` — same loopback-to-host-gateway problem, same solution. Without this, the new scribe skill (and any future skill that reaches a Parachute service via the hub-aggregated mount) would fail silently on every install that doesn't set `SCRIBE_URL` explicitly. 5 new tests in `src/container-runner.test.ts` cover loopback rewrite, localhost rewrite, tailnet pass-through, default fallback (no env set), override-via-`PARACHUTE_AGENT_HUB_ORIGIN`, and trailing-slash hygiene.
+
 ## [0.1.2] - 2026-05-05
 
 The first patch series after the 0.1.0 paraclaw → parachute-agent rename. Fourteen iterative cuts (rc.1 through rc.14) collapsed into one stable. No operator action required: every change is either a transparent fix, an additive UI affordance, or a behind-the-scenes test addition.
