@@ -2,6 +2,14 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.8] - 2026-05-05
+
+### Added
+
+- **GroupDetail: "Secrets" panel — what the agent will receive at next session spawn (paraclaw#104).** `/agent/groups/:folder` now surfaces a read-only Secrets section showing the same set `resolveInjectableSecrets()` would inject into a new container, with three scope badges that explain *why* each row is included: `scoped` (owned by this group), `assigned` (global with explicit assignment row), `global` (global reaching the group only because `secret_mode='all'`). On a name collision the scoped row wins and reports `scoped`, mirroring the host's resolution rule; on assignment-row + mode='all' double-cover, `assigned` wins (the explicit row is more specific operator intent). Click-through routes to `/secrets?edit=<id>` and the SecretsList page now consumes that deep-link param to auto-open SecretEditor on mount. Empty state distinguishes between mode='selective' (reads as "by design") and mode='all' (suggests creating a secret).
+
+  Wire surface: new `GET /api/groups/:folder/secrets` endpoint (scope `agent:read`) — metadata only, never decrypts. New host helper `listInjectableSecretsForGroup` mirrors `resolveInjectableSecrets`'s SQL gate exactly so the panel cannot disagree with what the container actually receives — the two are pinned together by tests and a doc-comment instructing future maintainers to keep them in lockstep. AgentGroupView additively gains `secret_mode` so the panel header can render the group's mode in context. Test coverage: 6 new tests in `src/secrets/secrets.test.ts` (each scope path, mode-selective hides bare globals, assignment+mode=all → assigned wins, scoped wins on collision, unknown group, no value leak), 2 new tests in `src/web/routes/secrets.test.ts` (wire-shape projection + empty-state under selective), 4 new SPA tests in `web/ui/src/routes/GroupDetail.test.tsx` (three-badge render, click-through href, both empty-state copies). Closes paraclaw#104. Refs paraclaw#103 (sibling secret-flow fixes).
+
 ## [0.1.2-rc.7] - 2026-05-05
 
 ### Changed

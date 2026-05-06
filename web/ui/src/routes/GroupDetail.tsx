@@ -12,12 +12,15 @@ import {
   detachVault,
   getGroup,
   getGroupAgentProvider,
+  listGroupInjectableSecrets,
   setGroupAgentProvider,
   spawnSession,
   type AgentGroupView,
   type AgentProviderSource,
   type GroupAgentProviderView,
   type GroupStatus,
+  type InjectableSecretView,
+  type SecretInclusionScope,
   type VaultScope,
 } from '../lib/api.ts';
 
@@ -437,6 +440,8 @@ export function GroupDetail() {
             </div>
           )}
 
+          {folder && <SecretsSection folder={folder} secretMode={group.secret_mode} />}
+
           <div className="section">
             <h3>What the agent gets</h3>
             <p className="muted">
@@ -458,6 +463,121 @@ export function GroupDetail() {
             </p>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+const SCOPE_LABEL: Record<SecretInclusionScope, string> = {
+  scoped: 'scoped',
+  assigned: 'assigned',
+  global: 'global',
+};
+
+const SCOPE_HINT: Record<SecretInclusionScope, string> = {
+  scoped: 'Owned by this agent group — never injected into peers.',
+  assigned: 'Global secret routed here via an explicit assignment row.',
+  global: "Global secret reaching this group only because secret_mode='all'.",
+};
+
+/**
+ * "Secrets" panel — the env vars this group will receive at the next session
+ * spawn. Read-only; mirrors `resolveInjectableSecrets()` on the host. Click a
+ * row to jump to the SecretEditor (paraclaw#104).
+ *
+ * The list is fetched once per mount and on remount-driven reloads — there's
+ * no live poll because mid-life secret changes don't reach a running
+ * container anyway (env vars are spawn-time-only). Operators who want a
+ * fresher view can navigate away and back.
+ */
+function SecretsSection({ folder, secretMode }: { folder: string; secretMode?: 'all' | 'selective' | null }) {
+  const [state, setState] = useState<
+    | { kind: 'loading' }
+    | { kind: 'ok'; secrets: InjectableSecretView[] }
+    | { kind: 'error'; message: string }
+  >({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    listGroupInjectableSecrets(folder)
+      .then((secrets) => {
+        if (!cancelled) setState({ kind: 'ok', secrets });
+      })
+      .catch((err) => {
+        if (!cancelled) setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [folder]);
+
+  return (
+    <div className="section">
+      <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+        Secrets
+        {secretMode && <span className="tag muted">mode: {secretMode}</span>}
+      </h3>
+      <p className="muted" style={{ marginTop: '0.5rem' }}>
+        Env vars injected into this group's containers at the next session spawn — same set the agent-runner sees.
+        Values never leave the encrypted DB; this list is metadata only.
+      </p>
+
+      {state.kind === 'loading' && (
+        <ul className="skeleton-list" aria-busy="true" style={{ marginTop: '0.75rem' }}>
+          <li className="skeleton skeleton-row" />
+          <li className="skeleton skeleton-row" />
+        </ul>
+      )}
+
+      {state.kind === 'error' && (
+        <div className="error-banner" style={{ marginTop: '0.75rem' }}>
+          Couldn't load secrets: <code>{state.message}</code>
+        </div>
+      )}
+
+      {state.kind === 'ok' && state.secrets.length === 0 && (
+        <div className="empty" style={{ marginTop: '0.75rem' }}>
+          No secrets reach this group.{' '}
+          {secretMode === 'selective' ? (
+            <>Mode is <code>selective</code> — only globals with an explicit assignment row will land here.</>
+          ) : (
+            <>Create a scoped secret or a global one with mode <code>all</code> to populate this list.</>
+          )}{' '}
+          <Link to="/secrets">Manage secrets →</Link>
+        </div>
+      )}
+
+      {state.kind === 'ok' && state.secrets.length > 0 && (
+        <div style={{ marginTop: '0.75rem' }}>
+          {state.secrets.map((s) => (
+            <Link
+              key={s.id}
+              to={`/secrets?edit=${encodeURIComponent(s.id)}`}
+              className="row clickable"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.4rem 0',
+                borderBottom: '1px solid var(--border-dim)',
+                textDecoration: 'none',
+                color: 'inherit',
+              }}
+            >
+              <code style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {s.name}
+              </code>
+              <span className="tag muted" title={`Kind: ${s.kind}`}>{s.kind}</span>
+              <span className="tag" title={SCOPE_HINT[s.scope]}>{SCOPE_LABEL[s.scope]}</span>
+              <span className="dim" style={{ fontSize: '0.78rem' }} title={new Date(s.updatedAt).toLocaleString()}>
+                {formatRelative(s.updatedAt)}
+              </span>
+            </Link>
+          ))}
+          <p className="dim" style={{ marginTop: '0.5rem' }}>
+            <Link to="/secrets">Manage all secrets →</Link>
+          </p>
+        </div>
       )}
     </div>
   );

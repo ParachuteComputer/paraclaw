@@ -19,7 +19,7 @@ import { getDb } from '../../db/connection.js';
 import { closeDb, initTestDb, runMigrations } from '../../db/index.js';
 import { _setMasterKeyForTest } from '../../secrets/master-key.js';
 import { addAssignment, putSecret } from '../../secrets/index.js';
-import { handleSecretsRoute } from './secrets.js';
+import { handleSecretsRoute, listInjectableSecretsForGroupView } from './secrets.js';
 
 beforeEach(() => {
   const db = initTestDb();
@@ -171,5 +171,50 @@ describe('GET /api/secrets/:id/stale-sessions', () => {
       res: cap.res,
     });
     expect(handled).toBe(false);
+  });
+});
+
+describe('listInjectableSecretsForGroupView (paraclaw#104)', () => {
+  it('projects scoped/assigned/global rows into the wire shape', () => {
+    seedAgentGroup('group-x', 'all');
+    const scopedId = putSecret('SCOPED', 'v', { agent_group_id: 'group-x' });
+    const assignedId = putSecret('ASSIGNED', 'v');
+    addAssignment(assignedId, 'group-x');
+    const globalId = putSecret('GLOBAL', 'v');
+
+    const view = listInjectableSecretsForGroupView('group-x');
+    const byName = new Map(view.map((r) => [r.name, r]));
+
+    expect(byName.get('SCOPED')).toMatchObject({
+      id: scopedId,
+      name: 'SCOPED',
+      kind: 'generic',
+      agentGroupId: 'group-x',
+      scope: 'scoped',
+    });
+    expect(byName.get('ASSIGNED')).toMatchObject({
+      id: assignedId,
+      agentGroupId: null,
+      scope: 'assigned',
+    });
+    expect(byName.get('GLOBAL')).toMatchObject({
+      id: globalId,
+      agentGroupId: null,
+      scope: 'global',
+    });
+
+    // Wire shape is camelCase, never the snake_case DB row.
+    for (const row of view) {
+      expect(row).not.toHaveProperty('agent_group_id');
+      expect(row).not.toHaveProperty('value_encrypted');
+      expect(row).toHaveProperty('createdAt');
+      expect(row).toHaveProperty('updatedAt');
+    }
+  });
+
+  it('returns [] for a group whose secret_mode is selective with no assignments', () => {
+    seedAgentGroup('empty', 'selective');
+    putSecret('GLOBAL', 'v');
+    expect(listInjectableSecretsForGroupView('empty')).toEqual([]);
   });
 });

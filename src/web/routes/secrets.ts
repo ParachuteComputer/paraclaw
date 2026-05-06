@@ -14,6 +14,7 @@ import http from 'node:http';
 import { getAgentGroupSecretMode, getAgentGroupSecretModes, setAgentGroupSecretMode } from '../../db/agent-groups.js';
 import {
   type AssignedMode,
+  type InjectableSecretView,
   type SecretKind,
   type SecretRow,
   addAssignment,
@@ -21,6 +22,7 @@ import {
   findStaleSessionsForSecret,
   getSecretById,
   listAssignments,
+  listInjectableSecretsForGroup,
   listSecrets,
   putSecret,
   removeAssignment,
@@ -279,4 +281,37 @@ export async function handleSecretsRoute(ctx: SecretsRouteContext): Promise<bool
   }
 
   return false;
+}
+
+/**
+ * Per-group projection of `resolveInjectableSecrets` — metadata only, never
+ * decrypts. Powers the "Secrets" panel on GroupDetail (paraclaw#104). The
+ * caller (server.ts group-route dispatch) has already authenticated the
+ * request as `agent:read` and resolved `folder` → group; we just receive the
+ * group id.
+ */
+export interface InjectableSecretViewWire {
+  id: string;
+  name: string;
+  kind: SecretKind;
+  agentGroupId: string | null;
+  scope: 'global' | 'scoped' | 'assigned';
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toInjectableView(r: InjectableSecretView): InjectableSecretViewWire {
+  return {
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+    agentGroupId: r.agent_group_id,
+    scope: r.scope,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function listInjectableSecretsForGroupView(agentGroupId: string): InjectableSecretViewWire[] {
+  return listInjectableSecretsForGroup(agentGroupId).map(toInjectableView);
 }

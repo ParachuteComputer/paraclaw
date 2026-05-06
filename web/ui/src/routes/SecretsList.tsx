@@ -21,7 +21,7 @@
  * the value because the server's POST upsert wire requires `value`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { CredentialForm } from '../components/CredentialForm.tsx';
 import { formatRelative } from '../components/StatusDot.tsx';
 import {
@@ -76,6 +76,7 @@ export function SecretsList() {
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<SecretKind>>(new Set());
   const [editing, setEditing] = useState<SecretView | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -94,6 +95,26 @@ export function SecretsList() {
       cancelled = true;
     };
   }, [reloadKey]);
+
+  // Deep-link: `/secrets?edit=<id>` opens the editor for a specific secret
+  // on mount. Used by GroupDetail's "Secrets" panel to jump straight from a
+  // row to its editor (paraclaw#104). Strip the param after consuming it so
+  // a manual reload doesn't keep popping the same dialog open.
+  useEffect(() => {
+    if (state.kind !== 'ok') return;
+    const editId = searchParams.get('edit');
+    if (!editId) return;
+    const target = state.secrets.find((s) => s.id === editId);
+    if (target) setEditing(target);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('edit');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [state, searchParams, setSearchParams]);
 
   const onDelete = async (s: SecretView) => {
     if (!confirm(`Delete secret "${s.name}"? Containers using it will start failing on next session spawn.`)) return;
