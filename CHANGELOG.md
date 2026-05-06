@@ -2,6 +2,14 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.2-rc.7] - 2026-05-05
+
+### Changed
+
+- **Mount-security: import `HOME_DIR` from `src/config.ts` instead of redrawing `os.homedir()` in-place (paraclaw#99).** `expandPath` in `src/modules/mount-security/index.ts` resolves operator-supplied `~/projects` etc. paths inside the mount-allowlist; before this change it called `process.env.HOME || os.homedir()` directly, the only remaining offender after #98 routed the rest of the host's HOME-derived paths through `config.ts`. Now `HOME_DIR` is exported from `config.ts` and imported here, so a future precedence-rule refactor (e.g. add a `PARACHUTE_AGENT_HOME` override) is one edit upstream. Default behavior unchanged.
+
+  Deliberate non-change: mount-allowlist's on-disk location stays at `<HOME>/.config/parachute-agent/mount-allowlist.json`; it does NOT route through `PARACHUTE_DIR`. Mount-allowlist is **operator-host policy** ("which paths can the agent ever mount on this host"), not per-install runtime state — two installs sharing a host should agree on the same allowlist, and a sandbox at `PARACHUTE_HOME=/tmp/sandbox` deliberately reads the same file the live install does. Runtime state (central DB + master.key) routes through `PARACHUTE_DIR` per #98; this PR pins the split with a regression test that fails if a future refactor accidentally collapses the two. Test coverage added in `src/modules/mount-security/expand-path.test.ts` (5 cases — default expansion, bare `~`, absolute passthrough, HOME-override, PARACHUTE_HOME-collapse-check). Closes #99.
+
 ## [0.1.2-rc.6] - 2026-05-05
 
 ### Changed

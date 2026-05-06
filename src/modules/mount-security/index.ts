@@ -4,14 +4,22 @@
  * Validates additional mounts against an allowlist stored OUTSIDE the project root.
  * This prevents container agents from modifying security configuration.
  *
- * Allowlist location: ~/.config/parachute-agent/mount-allowlist.json
- * (pre-0.1.0 installs auto-migrate from ~/.config/paraclaw/ on startup —
- * see migrateLegacyAllowlistDir below).
+ * Allowlist location: `<HOME>/.config/parachute-agent/mount-allowlist.json`
+ * (pre-0.1.0 installs auto-migrate from `<HOME>/.config/paraclaw/` on startup —
+ * see migrateLegacyAllowlistDir below). Path stays under `<HOME>/.config/`,
+ * NOT under `PARACHUTE_DIR`, because mount-allowlist is operator-host policy
+ * rather than per-install runtime state — see the doc-block on `ALLOWLIST_DIR`
+ * in src/config.ts (paraclaw#99).
+ *
+ * `HOME_DIR` is imported from src/config.ts so the precedence rule
+ * (`process.env.HOME` → `os.homedir()`) lives in one place. expandPath uses
+ * the same HOME_DIR for `~`-expansion in operator-supplied paths inside the
+ * allowlist (`~/projects` etc.), ensuring expansion agrees with the rest of
+ * the host process.
  */
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
-import { ALLOWLIST_DIR, LEGACY_ALLOWLIST_DIR, MOUNT_ALLOWLIST_PATH } from '../../config.js';
+import { ALLOWLIST_DIR, HOME_DIR, LEGACY_ALLOWLIST_DIR, MOUNT_ALLOWLIST_PATH } from '../../config.js';
 import { log } from '../../log.js';
 
 export interface AdditionalMount {
@@ -119,15 +127,18 @@ export function loadMountAllowlist(): MountAllowlist | null {
 }
 
 /**
- * Expand ~ to home directory and resolve to absolute path
+ * Expand ~ to home directory and resolve to absolute path. `HOME_DIR` comes
+ * from src/config.ts so a future change to the precedence rule
+ * (`HOME` → `os.homedir()`) is one edit upstream rather than redrawn here.
+ * Exported for direct test coverage of the expansion (paraclaw#99); not
+ * intended for use outside this module.
  */
-function expandPath(p: string): string {
-  const homeDir = process.env.HOME || os.homedir();
+export function expandPath(p: string): string {
   if (p.startsWith('~/')) {
-    return path.join(homeDir, p.slice(2));
+    return path.join(HOME_DIR, p.slice(2));
   }
   if (p === '~') {
-    return homeDir;
+    return HOME_DIR;
   }
   return path.resolve(p);
 }

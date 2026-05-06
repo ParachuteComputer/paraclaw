@@ -19,7 +19,13 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 // self-register the install path (e.g. services.json `installDir`,
 // paraclaw#115).
 export const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || os.homedir();
+// Operator's home dir. Resolved once at module load — every downstream
+// consumer that needs to expand `~` or derive a HOME-relative path imports
+// this rather than calling `os.homedir()` itself, so a future precedence
+// change (e.g. add a `PARACHUTE_AGENT_HOME` override) is one edit. Honors
+// `HOME` env var first (sandbox-friendly, matches POSIX convention) before
+// falling back to the real home dir.
+export const HOME_DIR = process.env.HOME || os.homedir();
 
 // Parachute ecosystem root. Convention shared with parachute-hub, vault,
 // scribe — every module's persistent state lands under this directory
@@ -33,6 +39,15 @@ export const PARACHUTE_DIR = process.env.PARACHUTE_HOME || path.join(HOME_DIR, '
 // pre-existing files from the legacy dir on first 0.1.0 boot. The legacy
 // constants are exported for the migration to consult; nothing else should
 // read them. Drop in 0.2.0.
+//
+// Note (paraclaw#99): the allowlist sits at `<HOME>/.config/parachute-agent/`,
+// NOT under `PARACHUTE_DIR`. This is intentional — the file is operator-host
+// policy ("which paths can the agent ever mount on this host"), not runtime
+// state of any one install. Two installs sharing a host should agree on the
+// allowlist; a sandbox at `PARACHUTE_HOME=/tmp/sandbox` deliberately reads
+// the same file the live install does. Runtime state (central DB +
+// master.key) routes through `PARACHUTE_DIR` instead — see CENTRAL_DB_DIR
+// below and the sandbox-isolation block in CLAUDE.md.
 export const ALLOWLIST_DIR = path.join(HOME_DIR, '.config', 'parachute-agent');
 export const LEGACY_ALLOWLIST_DIR = path.join(HOME_DIR, '.config', 'paraclaw');
 export const MOUNT_ALLOWLIST_PATH = path.join(ALLOWLIST_DIR, 'mount-allowlist.json');
