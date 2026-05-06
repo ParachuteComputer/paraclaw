@@ -10,7 +10,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { migrateLegacyAuthKeys } from './auth.ts';
+import { buildAuthorizeUrl, migrateLegacyAuthKeys, REQUESTED_SCOPES } from './auth.ts';
 
 // jsdom's Storage in this vitest config doesn't reliably expose the full
 // Storage prototype methods (the `--localstorage-file` warning at runtime
@@ -135,5 +135,65 @@ describe('migrateLegacyAuthKeys', () => {
 
     expect(localStorage.getItem('paraclaw.unrelated')).toBe('keep-me');
     expect(localStorage.getItem('parachute-agent.discovery')).toBe('{"hubOrigin":"http://hub"}');
+  });
+});
+
+/**
+ * Bootstrap-scope narrowing — paraclaw#136. The agent SPA used to request
+ * `vault:read vault:write` at bootstrap, but every vault flow already runs
+ * the paraclaw#56 re-consent pattern (narrow `vault:<name>:admin` via
+ * extraScopes), so the broad bootstrap scopes were dead weight on the
+ * consent screen. These tests pin the post-narrowing surface so a future
+ * edit can't silently re-add vault scopes to the bootstrap grant.
+ */
+describe('REQUESTED_SCOPES + buildAuthorizeUrl', () => {
+  const baseOpts = {
+    hubOrigin: 'http://hub.test',
+    clientId: 'client-abc',
+    redirectUri: 'http://app.test/agent/oauth/callback',
+    challenge: 'challenge-xyz',
+    state: 'state-123',
+  };
+
+  it('REQUESTED_SCOPES is exactly "agent:admin agent:write" — no vault:* at bootstrap', () => {
+    expect(REQUESTED_SCOPES).toBe('agent:admin agent:write');
+    expect(REQUESTED_SCOPES).not.toMatch(/vault:/);
+  });
+
+  it('builds an authorize URL with only agent:* scopes when extraScopes is empty', () => {
+    const u = buildAuthorizeUrl(baseOpts);
+    expect(u.searchParams.get('scope')).toBe('agent:admin agent:write');
+    // Belt-and-suspenders: the URL string itself must not carry any
+    // vault scope, even URL-encoded.
+    expect(u.toString()).not.toMatch(/vault(%3A|:)/);
+  });
+
+  it('appends a narrow vault:<name>:admin scope when passed in extraScopes', () => {
+    const u = buildAuthorizeUrl({ ...baseOpts, extraScopes: ['vault:default:admin'] });
+    const scope = u.searchParams.get('scope') ?? '';
+    expect(scope.split(' ')).toEqual(['agent:admin', 'agent:write', 'vault:default:admin']);
+  });
+
+  it('de-dupes extraScopes that are already in REQUESTED_SCOPES', () => {
+    const u = buildAuthorizeUrl({
+      ...baseOpts,
+      extraScopes: ['agent:admin', 'vault:foo:admin'],
+    });
+    const scope = u.searchParams.get('scope') ?? '';
+    // agent:admin should appear exactly once even though it was passed
+    // again — the consent screen would otherwise show the same scope twice.
+    expect(scope.split(' ').filter((s) => s === 'agent:admin')).toHaveLength(1);
+    expect(scope.split(' ')).toContain('vault:foo:admin');
+  });
+
+  it('writes the standard PKCE-S256 query params alongside the scope', () => {
+    const u = buildAuthorizeUrl(baseOpts);
+    expect(u.origin + u.pathname).toBe('http://hub.test/oauth/authorize');
+    expect(u.searchParams.get('client_id')).toBe('client-abc');
+    expect(u.searchParams.get('redirect_uri')).toBe('http://app.test/agent/oauth/callback');
+    expect(u.searchParams.get('response_type')).toBe('code');
+    expect(u.searchParams.get('code_challenge')).toBe('challenge-xyz');
+    expect(u.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(u.searchParams.get('state')).toBe('state-123');
   });
 });
