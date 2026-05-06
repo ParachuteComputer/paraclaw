@@ -10,7 +10,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { buildAuthorizeUrl, migrateLegacyAuthKeys, REQUESTED_SCOPES } from './auth.ts';
+import {
+  buildAuthorizeUrl,
+  ensureClient,
+  migrateLegacyAuthKeys,
+  REQUESTED_SCOPES,
+} from './auth.ts';
 
 // jsdom's Storage in this vitest config doesn't reliably expose the full
 // Storage prototype methods (the `--localstorage-file` warning at runtime
@@ -195,5 +200,54 @@ describe('REQUESTED_SCOPES + buildAuthorizeUrl', () => {
     expect(u.searchParams.get('code_challenge')).toBe('challenge-xyz');
     expect(u.searchParams.get('code_challenge_method')).toBe('S256');
     expect(u.searchParams.get('state')).toBe('state-123');
+  });
+});
+
+/**
+ * Regression-pin the OAuth client_name in the `/oauth/register` body —
+ * paraclaw#137. The hub's consent screen renders this string verbatim, so
+ * it's operator-visible UX, not a free-form internal identifier. The
+ * 0.1.0 brand sweep renamed "Paraclaw web UI" → "Parachute Agent web UI"
+ * (commit 2a83e77 / PR #112); this test prevents a future rename or copy
+ * regression from silently shipping a stale brand on the consent screen.
+ *
+ * No production behavior change — the existing string literal at line ~166
+ * is the only thing this test asserts on.
+ */
+describe('ensureClient — /oauth/register body', () => {
+  it('sends client_name "Parachute Agent web UI" on first registration', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ client_id: 'returned-client-id' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('returned-client-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe('http://hub.test/oauth/register');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.client_name).toBe('Parachute Agent web UI');
+    // Belt: also pin scope + auth method so a future copy edit can't ship
+    // a partially-renamed body.
+    expect(body.scope).toBe(REQUESTED_SCOPES);
+    expect(body.token_endpoint_auth_method).toBe('none');
+  });
+
+  it('does not call fetch when a cached client_id is already in localStorage', async () => {
+    localStorage.setItem(
+      'parachute-agent.client.http://hub.test',
+      JSON.stringify({ client_id: 'cached-client-id' }),
+    );
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const id = await ensureClient('http://hub.test');
+
+    expect(id).toBe('cached-client-id');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

@@ -153,7 +153,7 @@ async function getDiscovery(): Promise<DiscoveryResponse> {
   return fresh;
 }
 
-async function ensureClient(hubOrigin: string): Promise<string> {
+export async function ensureClient(hubOrigin: string): Promise<string> {
   const cached = readJson<ClientRecord>(localStorage, clientKey(hubOrigin));
   if (cached?.client_id) return cached.client_id;
   const redirectUri = getRedirectUri();
