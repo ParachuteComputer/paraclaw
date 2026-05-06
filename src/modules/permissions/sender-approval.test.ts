@@ -499,7 +499,12 @@ describe('unknown-sender request_approval flow', () => {
           senderName: 'Stranger',
           text: textValue,
           attachments: [
-            { name: 'photo.jpg', type: 'image', size: attachmentBytes.length, data: attachmentBytes.toString('base64') },
+            {
+              name: 'photo.jpg',
+              type: 'image',
+              size: attachmentBytes.length,
+              data: attachmentBytes.toString('base64'),
+            },
           ],
         }),
         timestamp: now(),
@@ -572,7 +577,9 @@ describe('unknown-sender request_approval flow', () => {
     // same messages_in.id, one from accumulate-on-gate-deny, one from the
     // approval replay.
     const { getDb } = await import('../../db/connection.js');
-    getDb().prepare(`UPDATE messaging_group_agents SET ignored_message_policy = 'accumulate' WHERE id = ?`).run('mga-1');
+    getDb()
+      .prepare(`UPDATE messaging_group_agents SET ignored_message_policy = 'accumulate' WHERE id = ?`)
+      .run('mga-1');
 
     const ORIGINAL_BYTES = Buffer.from('first-pic');
     const MUTATED_BYTES = Buffer.from('CLOBBERED');

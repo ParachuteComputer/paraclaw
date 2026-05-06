@@ -125,8 +125,8 @@ describe('writeSessionMessage — dup-skip side effects (paraclaw#97)', () => {
     writeSessionMessage(AG, SESS, makeMessage('msg-2'));
     writeSessionMessage(AG, SESS, makeMessage('msg-2'));
 
-    const dupCalls = debugSpy.mock.calls.filter(([msg]) =>
-      typeof msg === 'string' && msg.includes('messages_in id already present'),
+    const dupCalls = debugSpy.mock.calls.filter(
+      ([msg]) => typeof msg === 'string' && msg.includes('messages_in id already present'),
     );
     expect(dupCalls).toHaveLength(1);
 
