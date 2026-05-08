@@ -85,16 +85,27 @@ const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
 // Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
 // (1944, claimed for parachute-agent 2026-04-27 via parachute-hub#…). The port
 // the server actually binds is resolved at boot (see `resolvePort` below) —
-// env override > services.json existing entry > this default. Legacy
+// services.json existing entry > env override > this default. Legacy
 // `PARACLAW_WEB_PORT` is accepted through 0.1.x with a one-shot warning.
 const DEFAULT_PORT = 1944;
 const HOST = readEnvWithLegacy('PARACHUTE_AGENT_WEB_BIND', 'PARACLAW_WEB_BIND') ?? '127.0.0.1';
 
 /**
  * Boot-time port resolution. Reads (in order):
- *   1. `PARACHUTE_AGENT_WEB_PORT` env var (or legacy `PARACLAW_WEB_PORT`).
- *   2. The agent entry in `~/.parachute/services.json`, if it has a port.
+ *   1. The agent entry in `~/.parachute/services.json`, if it has a port.
+ *   2. `PARACHUTE_AGENT_WEB_PORT` env var (or legacy `PARACLAW_WEB_PORT`).
  *   3. The default canonical slot (1944).
+ *
+ * Why services.json wins over env (mirrors parachute-scribe#41): hub's
+ * port-assigner walked the canonical slot once and stamped `PORT=1944`
+ * (or `PARACHUTE_AGENT_PORT=1944`) into a service-managed env file. With
+ * env winning over services.json, that stale stamp would silently revert
+ * an operator-set manifest value on every boot — exactly the bug class
+ * paraclaw#145 was opened against. With services.json winning over env,
+ * an operator can correct the port via manifest edit and have it persist
+ * across restarts even when the hub-stamped env var is still present.
+ * Symmetric with scribe so operators who learn the pattern from one
+ * service don't get surprised by the other.
  *
  * Whichever wins, we *do not* stamp it back into services.json on every
  * boot — `upsertService` below only writes the port on first-run (when no
@@ -124,6 +135,14 @@ export function resolvePort(manifestPath?: string): {
     });
   }
 
+  // 1. services.json — operator-set / persisted state wins (see preamble
+  //    above + scribe#41 for the rationale).
+  if (existingEntry && typeof existingEntry.port === 'number' && existingEntry.port > 0) {
+    return { port: existingEntry.port, source: 'manifest', existingEntry };
+  }
+
+  // 2. PARACHUTE_AGENT_WEB_PORT (or legacy PARACLAW_WEB_PORT) — env
+  //    override only takes effect when the manifest does not pin a port.
   const envRaw = readEnvWithLegacy('PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT');
   if (envRaw !== undefined && envRaw !== '') {
     const n = Number(envRaw);
@@ -132,9 +151,8 @@ export function resolvePort(manifestPath?: string): {
     }
     return { port: n, source: 'env', existingEntry };
   }
-  if (existingEntry && typeof existingEntry.port === 'number' && existingEntry.port > 0) {
-    return { port: existingEntry.port, source: 'manifest', existingEntry };
-  }
+
+  // 3. Canonical default.
   return { port: DEFAULT_PORT, source: 'default', existingEntry };
 }
 // When fronted by `parachute expose tailnet` at a path prefix, set

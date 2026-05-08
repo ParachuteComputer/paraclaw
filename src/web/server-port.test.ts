@@ -6,8 +6,12 @@
  * every boot — operator-edited services.json values were silently
  * reverted, and a port collision with scribe (also racing for 1944) made
  * the second-to-bind crash with EADDRINUSE that hub-side `parachute
- * start` didn't surface. Fix: env > services.json > default 1944, plus
- * a loud bind-error path.
+ * start` didn't surface. Fix: services.json > env > default 1944, plus
+ * a loud bind-error path. Precedence is symmetric with parachute-scribe#41
+ * (services.json > SCRIBE_PORT > PORT > default 1943) so operators who
+ * learn the rule from one service don't get surprised by the other —
+ * the bug class both PRs address is "stale env clobbers operator-set
+ * manifest values," and services.json-wins is what fixes it.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -62,21 +66,41 @@ describe('resolvePort — paraclaw#145 services.json port respect', () => {
     expect(r.existingEntry?.port).toBe(1947);
   });
 
-  it('env var wins over both services.json and default', () => {
+  it('services.json wins over env (the stale-env-vs-services.json case)', () => {
+    // Critical regression test mirroring scribe#41: hub's port-assigner
+    // walked the canonical slot to 1944 once and stamped that value into
+    // a service-managed env file. Pre-fix (env > services.json), the
+    // stale env stamp silently clobbered an operator's manifest edit on
+    // every boot. Post-fix (services.json > env), the operator's pin
+    // wins and the stale env is ignored. Symmetric with scribe so the
+    // pattern is consistent across both modules.
     upsertService(
-      { name: 'agent', port: 1947, paths: ['/agent'], health: '/api/health', version: '0.1.3-rc.1' },
+      { name: 'agent', port: 1947, paths: ['/agent'], health: '/api/health', version: '0.1.3-rc.2' },
       manifestPath,
     );
-    process.env.PARACHUTE_AGENT_WEB_PORT = '1955';
+    process.env.PARACHUTE_AGENT_WEB_PORT = '1944';
     const r = resolvePort(manifestPath);
-    expect(r.port).toBe(1955);
-    expect(r.source).toBe('env');
-    // existingEntry still surfaces the manifest row so the caller knows
-    // whether to stamp port on the next write — first-run-vs-not gate.
+    expect(r.port).toBe(1947);
+    expect(r.source).toBe('manifest');
     expect(r.existingEntry?.port).toBe(1947);
   });
 
-  it('legacy PARACLAW_WEB_PORT is honored when fresh name is unset', () => {
+  it('env var binds when there is no services.json entry', () => {
+    // No manifest entry means env is the next tier — first-run /
+    // fresh-install path where hub's port-assigner has stamped a value
+    // into the agent's .env but the services manifest does not yet
+    // carry an `agent` row. The port value here matches the canonical
+    // default deliberately to confirm `source` reports the env tier
+    // (not 'default') even when env happens to carry the canonical
+    // number.
+    process.env.PARACHUTE_AGENT_WEB_PORT = '1944';
+    const r = resolvePort(manifestPath);
+    expect(r.port).toBe(1944);
+    expect(r.source).toBe('env');
+    expect(r.existingEntry).toBeNull();
+  });
+
+  it('legacy PARACLAW_WEB_PORT is honored when fresh name is unset and manifest has no entry', () => {
     process.env.PARACLAW_WEB_PORT = '1958';
     const r = resolvePort(manifestPath);
     expect(r.port).toBe(1958);
