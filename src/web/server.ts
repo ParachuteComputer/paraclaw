@@ -94,7 +94,8 @@ const HOST = readEnvWithLegacy('PARACHUTE_AGENT_WEB_BIND', 'PARACLAW_WEB_BIND') 
  * Boot-time port resolution. Reads (in order):
  *   1. The agent entry in `~/.parachute/services.json`, if it has a port.
  *   2. `PARACHUTE_AGENT_WEB_PORT` env var (or legacy `PARACLAW_WEB_PORT`).
- *   3. The default canonical slot (1944).
+ *   3. `PORT` env var (PaaS back-compat / hub's port-assigner).
+ *   4. The default canonical slot (1944).
  *
  * Why services.json wins over env (mirrors parachute-scribe#41): hub's
  * port-assigner walked the canonical slot once and stamped `PORT=1944`
@@ -106,6 +107,15 @@ const HOST = readEnvWithLegacy('PARACHUTE_AGENT_WEB_BIND', 'PARACLAW_WEB_BIND') 
  * across restarts even when the hub-stamped env var is still present.
  * Symmetric with scribe so operators who learn the pattern from one
  * service don't get surprised by the other.
+ *
+ * Why a specific env tier above bare `PORT`: `PARACHUTE_AGENT_WEB_PORT`
+ * is the precise, agent-targeted override; bare `PORT` is the generic
+ * PaaS / hub-injection path written into the service-managed `.env` by
+ * `parachute install parachute-agent`. The specific name wins so an
+ * operator who sets `PARACHUTE_AGENT_WEB_PORT` in their shell isn't
+ * silently overridden by a stale `PORT=…` line in `.env`. Same shape as
+ * scribe (`SCRIBE_PORT > PORT`). The 4-tier ladder is documented in
+ * `parachute-patterns/patterns/cli-as-port-authority.md` (patterns#45).
  *
  * Whichever wins, we *do not* stamp it back into services.json on every
  * boot — `upsertService` below only writes the port on first-run (when no
@@ -120,7 +130,7 @@ const HOST = readEnvWithLegacy('PARACHUTE_AGENT_WEB_BIND', 'PARACLAW_WEB_BIND') 
  */
 export function resolvePort(manifestPath?: string): {
   port: number;
-  source: 'env' | 'manifest' | 'default';
+  source: 'env' | 'port' | 'manifest' | 'default';
   existingEntry: ReturnType<typeof readService>;
 } {
   // readService is best-effort — log + fall through to the env / default
@@ -141,18 +151,39 @@ export function resolvePort(manifestPath?: string): {
     return { port: existingEntry.port, source: 'manifest', existingEntry };
   }
 
-  // 2. PARACHUTE_AGENT_WEB_PORT (or legacy PARACLAW_WEB_PORT) — env
-  //    override only takes effect when the manifest does not pin a port.
+  // 2. PARACHUTE_AGENT_WEB_PORT (or legacy PARACLAW_WEB_PORT) — explicit
+  //    process-scope override, beats bare PORT. `Number.isInteger` here
+  //    (not just `Number.isFinite`) so fractional strings like `1.5` are
+  //    rejected — matches scribe's `parsePort` strictness
+  //    (`parachute-scribe/src/port-resolve.ts`), which uses an integer
+  //    regex `/^[1-9]\d{0,4}$/` for string input. Reviewer fold on
+  //    paraclaw#148: the original `isFinite`-only guard let `1.5`
+  //    coerce to a non-integer that would then crash later in the
+  //    `server.listen()` path, where the error wouldn't name the env var.
   const envRaw = readEnvWithLegacy('PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT');
   if (envRaw !== undefined && envRaw !== '') {
     const n = Number(envRaw);
-    if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+    if (!Number.isInteger(n) || n <= 0 || n > 65535) {
       throw new Error(`PARACHUTE_AGENT_WEB_PORT is not a valid port number: ${envRaw}`);
     }
     return { port: n, source: 'env', existingEntry };
   }
 
-  // 3. Canonical default.
+  // 3. PORT — PaaS back-compat / what hub's port-assigner writes into the
+  //    service-managed `.env`. Same parsing strictness as the specific
+  //    env tier (integer-only, see comment above) so a bad value
+  //    surfaces loudly instead of degrading to the canonical default
+  //    and masking the misconfig.
+  const portRaw = process.env.PORT;
+  if (portRaw !== undefined && portRaw !== '') {
+    const n = Number(portRaw);
+    if (!Number.isInteger(n) || n <= 0 || n > 65535) {
+      throw new Error(`PORT is not a valid port number: ${portRaw}`);
+    }
+    return { port: n, source: 'port', existingEntry };
+  }
+
+  // 4. Canonical default.
   return { port: DEFAULT_PORT, source: 'default', existingEntry };
 }
 // When fronted by `parachute expose tailnet` at a path prefix, set
@@ -1077,7 +1108,9 @@ export function startWebServer(): http.Server {
             ? `another service holds ${HOST}:${PORT}; check ~/.parachute/services.json or run \`lsof -i :${PORT}\``
             : portSource === 'env'
               ? `PARACHUTE_AGENT_WEB_PORT=${PORT} but ${HOST}:${PORT} is already taken`
-              : `default canonical slot ${PORT} is held by another process; set PARACHUTE_AGENT_WEB_PORT or edit ~/.parachute/services.json`,
+              : portSource === 'port'
+                ? `PORT=${PORT} (likely from \`parachute install\`-managed .env) but ${HOST}:${PORT} is already taken; set PARACHUTE_AGENT_WEB_PORT or edit ~/.parachute/services.json to override`
+                : `default canonical slot ${PORT} is held by another process; set PARACHUTE_AGENT_WEB_PORT or edit ~/.parachute/services.json`,
       });
     } else {
       log.error('Web server error', { err: err.message, code: err.code });
