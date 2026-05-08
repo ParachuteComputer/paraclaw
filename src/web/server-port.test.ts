@@ -132,6 +132,18 @@ describe('resolvePort — paraclaw#145 services.json port respect', () => {
     expect(() => resolvePort(manifestPath)).toThrow(/not a valid port/);
   });
 
+  it('rejects a non-integer (fractional) env override', () => {
+    // paraclaw#148 review fold: pre-fix the guard used Number.isFinite
+    // alone, so `1.5` coerced to a finite-but-non-integer that slipped
+    // past resolution and crashed deeper in `server.listen()` with an
+    // error that didn't name the env var. Scribe's `parsePort` uses an
+    // integer regex `/^[1-9]\d{0,4}$/` and never lets a fractional past
+    // — agent now uses `Number.isInteger` for parity. Reject loudly here
+    // so the misconfig surfaces with the env name attached.
+    process.env.PARACHUTE_AGENT_WEB_PORT = '1.5';
+    expect(() => resolvePort(manifestPath)).toThrow(/PARACHUTE_AGENT_WEB_PORT is not a valid port/);
+  });
+
   it('treats an empty env value as unset (falls through to manifest / default)', () => {
     // Some shells (and the older paraclaw .env loader) export blank lines
     // as empty strings; treating '' as a valid port would break those.
@@ -229,6 +241,17 @@ describe('resolvePort — paraclaw#147 bare PORT env tier', () => {
     process.env.PORT = '0';
     expect(() => resolvePort(manifestPath)).toThrow(/PORT is not a valid port/);
     process.env.PORT = '70000';
+    expect(() => resolvePort(manifestPath)).toThrow(/PORT is not a valid port/);
+  });
+
+  it('rejects a non-integer (fractional) PORT', () => {
+    // Symmetric with the PARACHUTE_AGENT_WEB_PORT fractional-reject
+    // case — both env tiers must share scribe's `parsePort` strictness
+    // so a `PORT=1.5` line in a service-managed `.env` is named loudly,
+    // not coerced to a non-integer that crashes later in
+    // `server.listen()` without the env var attached. See the matching
+    // case in the #145 block for the full rationale (paraclaw#148 fold).
+    process.env.PORT = '1.5';
     expect(() => resolvePort(manifestPath)).toThrow(/PORT is not a valid port/);
   });
 });

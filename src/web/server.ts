@@ -152,11 +152,18 @@ export function resolvePort(manifestPath?: string): {
   }
 
   // 2. PARACHUTE_AGENT_WEB_PORT (or legacy PARACLAW_WEB_PORT) — explicit
-  //    process-scope override, beats bare PORT.
+  //    process-scope override, beats bare PORT. `Number.isInteger` here
+  //    (not just `Number.isFinite`) so fractional strings like `1.5` are
+  //    rejected — matches scribe's `parsePort` strictness
+  //    (`parachute-scribe/src/port-resolve.ts`), which uses an integer
+  //    regex `/^[1-9]\d{0,4}$/` for string input. Reviewer fold on
+  //    paraclaw#148: the original `isFinite`-only guard let `1.5`
+  //    coerce to a non-integer that would then crash later in the
+  //    `server.listen()` path, where the error wouldn't name the env var.
   const envRaw = readEnvWithLegacy('PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT');
   if (envRaw !== undefined && envRaw !== '') {
     const n = Number(envRaw);
-    if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+    if (!Number.isInteger(n) || n <= 0 || n > 65535) {
       throw new Error(`PARACHUTE_AGENT_WEB_PORT is not a valid port number: ${envRaw}`);
     }
     return { port: n, source: 'env', existingEntry };
@@ -164,12 +171,13 @@ export function resolvePort(manifestPath?: string): {
 
   // 3. PORT — PaaS back-compat / what hub's port-assigner writes into the
   //    service-managed `.env`. Same parsing strictness as the specific
-  //    env tier so a bad value surfaces loudly instead of degrading to
-  //    the canonical default and masking the misconfig.
+  //    env tier (integer-only, see comment above) so a bad value
+  //    surfaces loudly instead of degrading to the canonical default
+  //    and masking the misconfig.
   const portRaw = process.env.PORT;
   if (portRaw !== undefined && portRaw !== '') {
     const n = Number(portRaw);
-    if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+    if (!Number.isInteger(n) || n <= 0 || n > 65535) {
       throw new Error(`PORT is not a valid port number: ${portRaw}`);
     }
     return { port: n, source: 'port', existingEntry };
