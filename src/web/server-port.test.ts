@@ -1,17 +1,26 @@
 /**
- * Boot-time port resolution + bind-failure tests for paraclaw#145.
+ * Boot-time port resolution + bind-failure tests for paraclaw#145, plus
+ * the bare `PORT` env tier added in paraclaw#147 to match scribe's
+ * 4-tier ladder (parachute-scribe/src/port-resolve.ts).
  *
  * Issue: the web server hardcoded its port to 1944 (env-overridable but
  * never reading services.json), and `upsertService` re-stamped 1944 on
  * every boot — operator-edited services.json values were silently
  * reverted, and a port collision with scribe (also racing for 1944) made
  * the second-to-bind crash with EADDRINUSE that hub-side `parachute
- * start` didn't surface. Fix: services.json > env > default 1944, plus
- * a loud bind-error path. Precedence is symmetric with parachute-scribe#41
- * (services.json > SCRIBE_PORT > PORT > default 1943) so operators who
- * learn the rule from one service don't get surprised by the other —
- * the bug class both PRs address is "stale env clobbers operator-set
- * manifest values," and services.json-wins is what fixes it.
+ * start` didn't surface. Fix: services.json > PARACHUTE_AGENT_WEB_PORT
+ * > PORT > default 1944, plus a loud bind-error path. Precedence is
+ * symmetric with parachute-scribe (services.json > SCRIBE_PORT > PORT >
+ * default 1943) so operators who learn the rule from one service don't
+ * get surprised by the other — the bug class paraclaw#145 addresses is
+ * "stale env clobbers operator-set manifest values," and
+ * services.json-wins is what fixes it. The bare `PORT` tier (paraclaw#147)
+ * is the generic PaaS / hub-injection path that `parachute install
+ * parachute-agent` writes into the service-managed `.env`; it sits below
+ * the specific env so an operator's `PARACHUTE_AGENT_WEB_PORT` shell
+ * export isn't silently overridden by a stale `PORT=…` line. The 4-tier
+ * ladder is documented in `parachute-patterns/patterns/cli-as-port-authority.md`
+ * (patterns#45).
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
@@ -25,7 +34,11 @@ import { upsertService } from './services-manifest.js';
 
 let tmp: string;
 let manifestPath: string;
-const ENV_KEYS = ['PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT'] as const;
+// PORT must be scrubbed alongside the agent-specific names — paraclaw#147
+// added a bare-PORT tier, and a stray PORT in the test runner's env (e.g.
+// inherited from a parent shell) would otherwise leak into the
+// "manifest absent + no env vars → default" assertions.
+const ENV_KEYS = ['PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT', 'PORT'] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -130,6 +143,93 @@ describe('resolvePort — paraclaw#145 services.json port respect', () => {
     const r = resolvePort(manifestPath);
     expect(r.port).toBe(1947);
     expect(r.source).toBe('manifest');
+  });
+});
+
+describe('resolvePort — paraclaw#147 bare PORT env tier', () => {
+  // The four cases from #147 spec, in the precedence order they exercise.
+  // Symmetric with parachute-scribe/src/port-resolve.test.ts; same shape
+  // as the patterns#45 documented ladder. The point is to pin every
+  // adjacent ordering so a future refactor that flips two tiers can't
+  // pass the existing #145 tests by coincidence.
+
+  it('manifest absent + PARACHUTE_AGENT_WEB_PORT=1947 + PORT=1948 → binds 1947 (specific env wins)', () => {
+    // Concrete decision: an operator's deliberate `export
+    // PARACHUTE_AGENT_WEB_PORT=…` must not be silently overridden by a
+    // stale `PORT=…` left in the service-managed `.env` by a previous
+    // hub install. Specific-env-over-bare-PORT is the rule.
+    process.env.PARACHUTE_AGENT_WEB_PORT = '1947';
+    process.env.PORT = '1948';
+    const r = resolvePort(manifestPath);
+    expect(r.port).toBe(1947);
+    expect(r.source).toBe('env');
+    expect(r.existingEntry).toBeNull();
+  });
+
+  it('manifest absent + no specific env + PORT=1948 → binds 1948 (bare PORT used as fallback)', () => {
+    // The generic PaaS / hub-injection path. `parachute install
+    // parachute-agent` writes `PORT=<n>` into the service-managed `.env`;
+    // when no agent-specific override is set and the manifest has no
+    // entry yet (first-run / fresh install), bare PORT is what the
+    // service binds.
+    process.env.PORT = '1948';
+    const r = resolvePort(manifestPath);
+    expect(r.port).toBe(1948);
+    expect(r.source).toBe('port');
+    expect(r.existingEntry).toBeNull();
+  });
+
+  it('manifest absent + no env vars → binds 1944 (canonical default)', () => {
+    // Sanity: the default tier still terminates the chain when nothing
+    // upstream is set. Already covered in the #145 block; re-pinned here
+    // alongside the new #147 cases so the four-case spec lives as one
+    // adjacent cluster matching scribe's port-resolve.test.ts.
+    const r = resolvePort(manifestPath);
+    expect(r.port).toBe(1944);
+    expect(r.source).toBe('default');
+    expect(r.existingEntry).toBeNull();
+  });
+
+  it('manifest=1949 + PARACHUTE_AGENT_WEB_PORT=1947 + PORT=1948 → binds 1949 (manifest wins over both env tiers)', () => {
+    // Top of the ladder: services.json beats every env tier, including
+    // bare PORT. Re-asserts the #145 invariant in the presence of the
+    // new tier, so a future refactor that promotes PORT above manifest
+    // by mistake fails this test.
+    upsertService(
+      { name: 'agent', port: 1949, paths: ['/agent'], health: '/api/health', version: '0.1.3-rc.3' },
+      manifestPath,
+    );
+    process.env.PARACHUTE_AGENT_WEB_PORT = '1947';
+    process.env.PORT = '1948';
+    const r = resolvePort(manifestPath);
+    expect(r.port).toBe(1949);
+    expect(r.source).toBe('manifest');
+    expect(r.existingEntry?.port).toBe(1949);
+  });
+
+  it('treats an empty PORT value as unset (falls through to default)', () => {
+    // Mirrors the existing empty-string handling for the specific env
+    // tier — keeps the two env tiers symmetric. A blank `PORT=` line in
+    // a `.env` file shouldn't crash boot or coerce to NaN.
+    process.env.PORT = '';
+    const r = resolvePort(manifestPath);
+    expect(r.port).toBe(1944);
+    expect(r.source).toBe('default');
+  });
+
+  it('rejects a non-numeric PORT loudly rather than coercing to NaN', () => {
+    // Same parsing strictness as `PARACHUTE_AGENT_WEB_PORT` — surface a
+    // misconfigured `.env` immediately instead of silently degrading to
+    // the canonical default and masking the misconfig.
+    process.env.PORT = 'not-a-port';
+    expect(() => resolvePort(manifestPath)).toThrow(/PORT is not a valid port/);
+  });
+
+  it('rejects an out-of-range PORT (0, > 65535)', () => {
+    process.env.PORT = '0';
+    expect(() => resolvePort(manifestPath)).toThrow(/PORT is not a valid port/);
+    process.env.PORT = '70000';
+    expect(() => resolvePort(manifestPath)).toThrow(/PORT is not a valid port/);
   });
 });
 

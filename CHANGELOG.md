@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.3-rc.3] - 2026-05-08
+
+### Added
+
+- **Bare `PORT` env tier in `resolvePort()` to match scribe's 4-tier ladder (paraclaw#147).** `src/web/server.ts` now resolves its listen port from a 4-tier chain — `services.json` agent entry > `PARACHUTE_AGENT_WEB_PORT` (or legacy `PARACLAW_WEB_PORT`) > **bare `PORT` env (new)** > canonical `1944` — matching `parachute-scribe/src/port-resolve.ts` exactly. The bare `PORT` tier is the generic PaaS / hub-injection path: `parachute install parachute-agent` writes `PORT=<n>` into the service-managed `.env`, and now agent honors that value when no agent-specific override is set and the manifest has no entry yet (first-run / fresh install). Specific env wins over bare `PORT` so an operator's deliberate `export PARACHUTE_AGENT_WEB_PORT=…` isn't silently overridden by a stale `.env` line; manifest still beats every env tier (the paraclaw#145 invariant). The 4-tier ladder is the canonical service-side shape documented in `parachute-patterns/patterns/cli-as-port-authority.md` (patterns#45) — closing this gap lets the patterns doc cleanly say "scribe + agent both implement," instead of qualifying the symmetry. Coverage: 7 new tests in `src/web/server-port.test.ts` covering the four spec cases (specific-env beats `PORT`; `PORT`-as-fallback when only `PORT` is set; default when nothing is set; manifest beats both env tiers) plus empty-string + non-numeric + out-of-range `PORT` rejection so a misconfigured `.env` surfaces loudly instead of degrading to default. Bind-error hint extended with a `port` source case so EADDRINUSE diagnostics name `PORT` explicitly when bare `PORT` was the resolved tier. Companions: parachute-scribe#41 (the symmetry target); parachute-agent#146 (the 3-tier predecessor we're extending).
+
 ## [0.1.3-rc.2] - 2026-05-08
 
 ### Fixed
