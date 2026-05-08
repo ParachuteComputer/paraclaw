@@ -70,7 +70,7 @@ import { handleAgentProviderRoute, handleGroupAgentProviderRoute } from './route
 import { handleSetupStatusRoute } from './routes/setup-status.js';
 import { handleVaultsRoute } from './routes/vaults.js';
 import { forwardToVault, mintVaultTokenHttp } from './vault-proxy.js';
-import { upsertService } from './services-manifest.js';
+import { readService, upsertService } from './services-manifest.js';
 import { makeServeStatic, normalizeMount } from './static-serve.js';
 import { wireDmToAgent } from './wire-channel.js';
 import { getChannelAdapterByBotId, registerBotAdapter } from '../channels/channel-registry.js';
@@ -83,11 +83,78 @@ import { readEnvWithLegacy } from '../env.js';
 
 const UI_DIST = path.resolve(PROJECT_ROOT, 'web/ui/dist');
 // Canonical Parachute slot per parachute-patterns/patterns/canonical-ports.md
-// (1944, claimed for parachute-agent 2026-04-27 via parachute-hub#…). Override
-// via PARACHUTE_AGENT_WEB_PORT for tests / non-default deployments. Legacy
-// `PARACLAW_WEB_PORT` accepted through 0.1.x with a one-shot warning.
-const PORT = Number(readEnvWithLegacy('PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT') ?? 1944);
+// (1944, claimed for parachute-agent 2026-04-27 via parachute-hub#…). The port
+// the server actually binds is resolved at boot (see `resolvePort` below) —
+// services.json existing entry > env override > this default. Legacy
+// `PARACLAW_WEB_PORT` is accepted through 0.1.x with a one-shot warning.
+const DEFAULT_PORT = 1944;
 const HOST = readEnvWithLegacy('PARACHUTE_AGENT_WEB_BIND', 'PARACLAW_WEB_BIND') ?? '127.0.0.1';
+
+/**
+ * Boot-time port resolution. Reads (in order):
+ *   1. The agent entry in `~/.parachute/services.json`, if it has a port.
+ *   2. `PARACHUTE_AGENT_WEB_PORT` env var (or legacy `PARACLAW_WEB_PORT`).
+ *   3. The default canonical slot (1944).
+ *
+ * Why services.json wins over env (mirrors parachute-scribe#41): hub's
+ * port-assigner walked the canonical slot once and stamped `PORT=1944`
+ * (or `PARACHUTE_AGENT_PORT=1944`) into a service-managed env file. With
+ * env winning over services.json, that stale stamp would silently revert
+ * an operator-set manifest value on every boot — exactly the bug class
+ * paraclaw#145 was opened against. With services.json winning over env,
+ * an operator can correct the port via manifest edit and have it persist
+ * across restarts even when the hub-stamped env var is still present.
+ * Symmetric with scribe so operators who learn the pattern from one
+ * service don't get surprised by the other.
+ *
+ * Whichever wins, we *do not* stamp it back into services.json on every
+ * boot — `upsertService` below only writes the port on first-run (when no
+ * existing entry exists). After that, agent reads but doesn't write the
+ * port field, so an operator who set agent.port = 1947 in services.json
+ * stays at 1947 across restarts. (paraclaw#145.)
+ *
+ * `source` is returned so the caller can decide whether to stamp port on
+ * the next manifest write; `existingEntry` is returned so the manifest
+ * write can preserve fields the existing row carries (paths, health,
+ * displayName) that we don't actively re-set per boot.
+ */
+export function resolvePort(manifestPath?: string): {
+  port: number;
+  source: 'env' | 'manifest' | 'default';
+  existingEntry: ReturnType<typeof readService>;
+} {
+  // readService is best-effort — log + fall through to the env / default
+  // path if it throws (corrupt manifest); the boot path shouldn't be
+  // blocked by an unrelated manifest read failure.
+  let existingEntry: ReturnType<typeof readService> = null;
+  try {
+    existingEntry = manifestPath ? readService('agent', manifestPath) : readService('agent');
+  } catch (err) {
+    log.warn('services manifest read failed during port resolution', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 1. services.json — operator-set / persisted state wins (see preamble
+  //    above + scribe#41 for the rationale).
+  if (existingEntry && typeof existingEntry.port === 'number' && existingEntry.port > 0) {
+    return { port: existingEntry.port, source: 'manifest', existingEntry };
+  }
+
+  // 2. PARACHUTE_AGENT_WEB_PORT (or legacy PARACLAW_WEB_PORT) — env
+  //    override only takes effect when the manifest does not pin a port.
+  const envRaw = readEnvWithLegacy('PARACHUTE_AGENT_WEB_PORT', 'PARACLAW_WEB_PORT');
+  if (envRaw !== undefined && envRaw !== '') {
+    const n = Number(envRaw);
+    if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+      throw new Error(`PARACHUTE_AGENT_WEB_PORT is not a valid port number: ${envRaw}`);
+    }
+    return { port: n, source: 'env', existingEntry };
+  }
+
+  // 3. Canonical default.
+  return { port: DEFAULT_PORT, source: 'default', existingEntry };
+}
 // When fronted by `parachute expose tailnet` at a path prefix, set
 // PARACHUTE_AGENT_WEB_MOUNT to that prefix (e.g. `/agent`) so static-serve
 // strips it before resolving against dist/. The hub-managed lifecycle
@@ -921,6 +988,7 @@ async function handleApi(
  */
 export function startWebServer(): http.Server {
   const serveStatic = makeServeStatic({ distDir: UI_DIST, mount: MOUNT });
+  const { port: PORT, source: portSource, existingEntry: existingServiceEntry } = resolvePort();
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -990,19 +1058,62 @@ export function startWebServer(): http.Server {
     }
   });
 
+  // Bind-error handler MUST be wired BEFORE listen() — once `error` fires
+  // synchronously inside listen() (the EADDRINUSE path on macOS), an
+  // un-handled `error` on the http.Server crashes the process with an
+  // unhelpful node-internal stack. We surface a named conflict instead so
+  // operators see *which* port is taken (paraclaw#145 — silent boot failures
+  // when scribe and agent both raced for 1944 was the original symptom).
+  // Then we exit non-zero so the supervisor (launchd / systemd / hub) sees
+  // the failure, rather than leaving a half-booted host process running.
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      log.error('Web server failed to bind — port in use', {
+        port: PORT,
+        host: HOST,
+        portSource,
+        hint:
+          portSource === 'manifest'
+            ? `another service holds ${HOST}:${PORT}; check ~/.parachute/services.json or run \`lsof -i :${PORT}\``
+            : portSource === 'env'
+              ? `PARACHUTE_AGENT_WEB_PORT=${PORT} but ${HOST}:${PORT} is already taken`
+              : `default canonical slot ${PORT} is held by another process; set PARACHUTE_AGENT_WEB_PORT or edit ~/.parachute/services.json`,
+      });
+    } else {
+      log.error('Web server error', { err: err.message, code: err.code });
+    }
+    // Fail loudly. Don't trap-and-continue on bind errors — leaves the
+    // host process running without a web surface, which is exactly the
+    // silent failure mode #145 surfaced.
+    process.exit(1);
+  });
+
   server.listen(PORT, HOST, () => {
     log.info('Web server listening', {
       url: `http://${HOST}:${PORT}`,
       uiDist: fs.existsSync(UI_DIST) ? UI_DIST : null,
       mount: MOUNT || null,
+      portSource,
     });
     // Self-register so `parachute status` + `parachute expose` see the agent.
     // Best-effort: a manifest write failure (perms / disk / race) doesn't
     // block the server from doing its job locally.
+    //
+    // Port-write rule (paraclaw#145): only stamp `port` when there's no
+    // existing entry yet (first run). After that, we still refresh the
+    // metadata fields the agent owns (version, paths, health, displayName,
+    // installDir) but leave `port` alone so an operator who set
+    // agent.port = 1947 in services.json stays at 1947 across restarts —
+    // even if the env var that pointed agent at 1947 is later unset.
     try {
+      // When there's an existing entry, write back its `port` value
+      // unchanged — re-stamping the same number is a no-op vs. the file
+      // and preserves operator-set values across restarts. When this is a
+      // first run, stamp the resolved port (env override or default).
+      const portToWrite = existingServiceEntry?.port ?? PORT;
       upsertService({
         name: 'agent',
-        port: PORT,
+        port: portToWrite,
         paths: ['/agent'],
         health: '/api/health',
         version: SERVICE_VERSION,
