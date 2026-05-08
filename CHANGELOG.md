@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.3-rc.2] - 2026-05-08
+
+### Fixed
+
+- **SPA `/oauth/register` sends `credentials: 'include'` so the hub session cookie can auto-approve DCR (parachute-agent#140).** The agent SPA's `ensureClient` posts to `<hub>/oauth/register` from a different origin than the hub (the SPA's container-deployed origin vs the operator's hub origin), and `fetch` defaults to omitting cookies cross-origin. Without the cookie, the hub-side auto-approve path (parachute-hub#199, the companion change) can't recognize the signed-in operator and DCR falls through to the "App not yet approved" interstitial — the failure shape Aaron hit on 2026-05-08 when clicking a Notes link (paraclaw#138 cache-staleness was the underlying trigger). One-line opt-in on the SPA side: add `credentials: 'include'` to the registration fetch. No-op until hub#199 ships; harmless when it does. Sibling fix on the Notes SPA at parachute-notes#106. New unit test pins the field so a future edit can't silently regress it.
+
 ## [0.1.3-rc.1] - 2026-05-06
 
 ### Added

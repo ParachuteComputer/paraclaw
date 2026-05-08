@@ -181,6 +181,12 @@ export async function ensureClient(hubOrigin: string): Promise<string> {
   const res = await fetch(`${hubOrigin}/oauth/register`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
+    // Send the `parachute_hub_session` cookie so the hub can auto-approve
+    // DCR for an already-signed-in operator (parachute-hub#199). Cross-origin
+    // by default omits cookies — the SPA's container-deployed origin differs
+    // from the operator's hub origin, so this opt-in is required. No-op until
+    // hub#199 ships; harmless when it does. (parachute-agent#140)
+    credentials: "include",
     body: JSON.stringify({
       redirect_uris: [redirectUri],
       scope: REQUESTED_SCOPES,

@@ -237,6 +237,30 @@ describe('ensureClient — /oauth/register body', () => {
     expect(body.token_endpoint_auth_method).toBe('none');
   });
 
+  /**
+   * `credentials: 'include'` is load-bearing for the hub-side auto-approve
+   * path (parachute-hub#199). Without it, the browser omits the
+   * `parachute_hub_session` cookie on the cross-origin POST (SPA's
+   * container-deployed origin vs operator's hub origin), the hub can't
+   * recognize the signed-in operator, and DCR falls through to the
+   * "App not yet approved" interstitial — the failure mode Aaron hit on
+   * 2026-05-08. Pin the field so a future edit can't silently regress.
+   * (parachute-agent#140)
+   */
+  it("sends credentials: 'include' so the hub session cookie travels with DCR", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ client_id: 'returned-client-id' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await ensureClient('http://hub.test');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init.credentials).toBe('include');
+  });
+
   it('reuses the cached client_id when redirect_uri matches the current bootstrap', async () => {
     // Pre-seed a record whose redirect_uri matches what getRedirectUri()
     // computes in this test environment (same logic as the prod helper:
