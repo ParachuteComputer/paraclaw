@@ -46,6 +46,22 @@ function readManifest(path: string): ServicesManifest {
   return raw as ServicesManifest;
 }
 
+/**
+ * Read an existing service entry from the manifest. Returns `null` when the
+ * file is missing or there's no row matching `name`. Used by boot-time port
+ * resolution (paraclaw#145) so the agent respects an operator-set port in
+ * services.json instead of stamping its hardcoded default on every boot.
+ *
+ * Best-effort like `upsertService`: a malformed manifest still throws (so a
+ * silent first-write doesn't shadow a corrupt-by-hand file), but the caller
+ * is expected to fall back to the env-var / default path on `null`.
+ */
+export function readService(name: string, path: string = resolveManifestPath()): ServiceEntry | null {
+  const manifest = readManifest(path);
+  const row = manifest.services.find((s) => s.name === name);
+  return row ?? null;
+}
+
 export function upsertService(entry: ServiceEntry, path: string = resolveManifestPath()): void {
   mkdirSync(dirname(path), { recursive: true });
   const manifest = readManifest(path);

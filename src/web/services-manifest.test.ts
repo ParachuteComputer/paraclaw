@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { upsertService } from './services-manifest.js';
+import { readService, upsertService } from './services-manifest.js';
 
 let tmp: string;
 let path: string;
@@ -144,5 +144,34 @@ describe('upsertService', () => {
     expect(() =>
       upsertService({ name: 'agent', port: 1944, paths: ['/agent'], health: '/api/health', version: 'x' }, path),
     ).toThrow(/malformed/);
+  });
+});
+
+describe('readService — boot-time port resolution lookup (paraclaw#145)', () => {
+  it('returns null when the manifest file does not exist', () => {
+    expect(readService('agent', path)).toBeNull();
+  });
+
+  it('returns null when the manifest exists but has no row for the requested name', () => {
+    upsertService({ name: 'vault', port: 1940, paths: ['/vault'], health: '/health', version: '0.3.0' }, path);
+    expect(readService('agent', path)).toBeNull();
+  });
+
+  it('returns the existing entry for a registered service so the boot path can read its port', () => {
+    // Operator-set port (1947) — this is exactly the case #145 protects:
+    // the agent must read it back instead of clobbering with its default.
+    upsertService({ name: 'agent', port: 1947, paths: ['/agent'], health: '/api/health', version: '0.1.3-rc.1' }, path);
+    const row = readService('agent', path);
+    expect(row).not.toBeNull();
+    expect(row?.port).toBe(1947);
+    expect(row?.name).toBe('agent');
+  });
+
+  it('throws on a malformed manifest rather than silently returning null', () => {
+    // If we returned null on a corrupt file, the boot path would fall
+    // through to the default port and clobber the (still corrupt) file
+    // on the next upsert — masking the real issue.
+    writeFileSync(path, '{"services": "not an array"}');
+    expect(() => readService('agent', path)).toThrow(/malformed/);
   });
 });
