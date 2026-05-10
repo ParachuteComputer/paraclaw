@@ -261,7 +261,7 @@ describe('getHubOrigin', () => {
     expect(getHubOrigin()).toBe('http://localhost:9999');
   });
 
-  it('falls back to legacy PARACLAW_HUB_ORIGIN through 0.1.x compat', () => {
+  it('PARACLAW_HUB_ORIGIN overrides PARACHUTE_HUB_ORIGIN (legacy pair takes precedence)', () => {
     process.env.PARACHUTE_HUB_ORIGIN = 'https://parachute.taildf9ce2.ts.net';
     process.env.PARACLAW_HUB_ORIGIN = 'http://localhost:9998';
     expect(getHubOrigin()).toBe('http://localhost:9998');
