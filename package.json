@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/agent",
-  "version": "0.1.3",
+  "version": "0.1.4-rc.1",
   "description": "Parachute Agent — per-session containerized AI agent companion.",
   "license": "AGPL-3.0",
   "type": "module",
@@ -29,6 +29,7 @@
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openparachute/scope-guard": "^0.2.1",
     "chat": "^4.24.0",
     "cron-parser": "5.5.0",
     "jose": "^6.2.2",

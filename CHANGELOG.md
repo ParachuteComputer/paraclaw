@@ -2,6 +2,24 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.4-rc.1] - 2026-05-10
+
+### Added
+
+- **Hub-revocation-list enforcement on hub-issued JWTs (parachute-hub#212 Phase 4).** Adopt `@openparachute/scope-guard@^0.2.1`, which fetches `<hub-origin>/.well-known/parachute-revocation.json` (60s cache, fail-closed on cold start, fail-open with last-good cache on transient outage), and rejects any JWT whose `jti` appears on the list. `src/web/auth.ts:validateHubJwt` now delegates to `guard.validateHubJwt` from a process-wide `ScopeGuard` instance bound to agent's `getHubOrigin()` resolver — keeping the existing `PARACHUTE_AGENT_HUB_ORIGIN` → `PARACLAW_HUB_ORIGIN` (legacy) → `PARACHUTE_HUB_ORIGIN` → loopback precedence intact. The `authenticate()` seam every `/api/*` handler runs through is unchanged for callers; signature/issuer/audience/expiry rejections preserve their existing 401 messages bit-for-bit. Re-exports `resetRevocationCache()` alongside `resetJwksCache()` for test-clean lifecycle. Aligns agent with vault (PR #281) and scribe (PR #43) so the three resource servers share one trust kernel — no silent drift on the worst place to drift. Coverage: existing 17 hub-JWT tests preserved as migration regression; 3 new tests pin the scope-guard wiring + response-shape contract (happy path, revoked rejection, cold-start unreachable).
+
+- **Operator-debuggability fix: sanitized client messages on revocation rejections; full diagnostics routed to server-side audit log.** When `authenticate()` catches a `HubJwtError` with `code === "revoked"` or `code === "revocation_unavailable"`, it logs the full `err.message` (which carries the `jti` for `revoked`, and the implementation-detail phrasing "no last-good cache" for `revocation_unavailable`) via `console.warn` for the audit trail, then returns a code-shaped sanitized message to the unauthenticated caller — `"token has been revoked"` or `"token cannot be validated: revocation list unavailable"`. The jti never leaks in the response body; the operator chasing a 401 in production logs can still correlate to which token was retired. Inheritable pattern across vault/scribe/agent: *all revocation-related codes get sanitized client messages, full detail lives in server-side audit logs*. Other `HubJwtError` codes (signature, audience, expired, etc.) carry generic messages and are forwarded as-is — only the two revocation-flavored codes need the sanitization seam.
+
+### Changed
+
+- **`pnpm-workspace.yaml`: first `minimumReleaseAgeExclude` entry, narrowly scoped.** Aaron-approved exclusion of `@openparachute/scope-guard@0.2.1` from the 3-day registry-age gate. The gate exists to mitigate unknown-upstream supply-chain risk; that risk doesn't apply to a parachute-org package Aaron publishes himself, so this carve-out unblocks Phase 4 cascade timing without weakening the policy. Pinned exact version — any future scope-guard publish goes through the gate by default. Pattern-establishing rationale comment lives in `pnpm-workspace.yaml`.
+
+### Tests
+
+- **Hub fixture extended to serve `/.well-known/parachute-revocation.json`.** The existing `startJwksFixture` (renamed `startHubFixture`) now serves both well-known endpoints from one `node:http` server with mutable `setRevoked: (jtis: string[]) => void` and `setRevocationFails: (fails: boolean) => void` setters per-test. Pattern mirrors scribe's `auth-hub-jwt.test.ts` (PR #43) so the three RS adopters share a fixture shape; agent's twist is `node:http` + vitest in place of `Bun.serve` + bun:test. Empty revocation list is the default in `beforeEach`, which is what every pre-Phase-4 test assumes — no per-test fixture mutation needed in the migration regression set.
+
+- **Three new revocation-enforcement integration tests in `src/web/auth.test.ts`.** Happy-path regression (signed valid JWT not in revocation list → 200 + claims); revoked-jti rejection (sanitized 401 message; `vi.spyOn(console, "warn")` asserts the audit log carries the full diagnostic with `jti`); cold-start unreachable (revocation server 503s; sanitized 401; spy asserts the implementation-detail "no last-good cache" phrase stays in the audit log only). Skips the explicit fail-open-with-last-good case — scope-guard's own unit suite covers the cache mechanics.
+
 ## [0.1.3] - 2026-05-09
 
 ### Added

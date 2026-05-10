@@ -1,11 +1,18 @@
 /**
- * Hub-issued JWT validation. Paraclaw's web server as resource server: trusts
- * tokens that the hub signs against keys we fetch from `/.well-known/jwks.json`.
+ * Hub-issued JWT validation. Parachute-agent's web server as resource server:
+ * trusts tokens that the hub signs against keys we fetch from the hub's
+ * `/.well-known/jwks.json`, and rejects tokens whose `jti` appears on the
+ * hub's `/.well-known/parachute-revocation.json` list.
  *
- * Shape mirrors `parachute-vault/src/hub-jwt.ts` deliberately — same trust
- * model, same load-bearing checks (`iss` strict; `aud` parsed not enforced).
- * The shared scope-guard library proposed in cli#59 will eventually absorb
- * both.
+ * The trust kernel — JWKS fetch + verify, issuer pin, RFC 7519 string-or-array
+ * `aud` handling, revocation-list cache + fail-closed cold-start — lives in
+ * the shared `@openparachute/scope-guard` library so vault, scribe, and
+ * parachute-agent can't silently drift on the worst place to drift. This
+ * file is the agent-side adapter: hub-origin resolution (env-var precedence
+ * + loopback fallback), agent-specific scope vocabulary
+ * (`agent:read`/`agent:write`/`agent:admin` + `vault:admin` catch-all + legacy
+ * `claw:*` normalization), and the `authenticate()` seam every `/api/*`
+ * handler runs through.
  *
  * Hub origin resolution: `PARACHUTE_AGENT_HUB_ORIGIN` (test override; legacy
  * `PARACLAW_HUB_ORIGIN` accepted through 0.1.x with a one-shot warning) →
@@ -13,7 +20,7 @@
  * service — see `parachute-hub/src/commands/lifecycle.ts`) → loopback
  * `http://127.0.0.1:1939`. We intentionally do NOT read services.json —
  * the hub is the dispatcher, not a registered service in that file
- * (matching vault's choice). Tailnet-served parachute-agent must see the
+ * (matching vault and scribe). Tailnet-served parachute-agent must see the
  * hub's tailnet origin or `iss` mismatch rejects every JWT.
  *
  * Scope vocabulary: `agent:read` / `agent:write` / `agent:admin` with
@@ -28,7 +35,7 @@
  * with grandfathered grants keep working. Drop the compat normalization in
  * 0.2.0 (tracked as a follow-up at PR open time).
  */
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { createScopeGuard, HubJwtError, type HubJwtClaims } from '@openparachute/scope-guard';
 
 import { readEnvWithLegacy } from '../env.js';
 
@@ -63,68 +70,43 @@ export function getHubOrigin(): string {
   return DEFAULT_HUB_LOOPBACK;
 }
 
-export interface HubJwtClaims {
-  sub: string;
-  scopes: string[];
-  aud: string | undefined;
-  jti: string | undefined;
-  clientId: string | undefined;
-}
+// Process-wide guard. The resolver form lets tests flip env vars between
+// cases — scope-guard re-resolves on every `validateHubJwt` and
+// `resetJwksCache` call so the env-var change picks up without a server
+// restart. JWKS cache (5min/30s defaults) and revocation cache (60s default)
+// live inside the guard, shared across requests.
+const guard = createScopeGuard({ hubOrigin: () => getHubOrigin() });
 
-export class HubJwtError extends Error {
-  override name = 'HubJwtError';
-}
+export type { HubJwtClaims };
+export { HubJwtError };
 
-type JwksGetter = ReturnType<typeof createRemoteJWKSet>;
-let cachedGetter: JwksGetter | null = null;
-let cachedOrigin: string | null = null;
-
-function getJwksGetter(origin: string): JwksGetter {
-  if (cachedGetter && cachedOrigin === origin) return cachedGetter;
-  cachedGetter = createRemoteJWKSet(new URL(`${origin}/.well-known/jwks.json`), {
-    cacheMaxAge: 5 * 60 * 1000,
-    cooldownDuration: 30 * 1000,
-  });
-  cachedOrigin = origin;
-  return cachedGetter;
-}
-
-export function resetJwksCache(): void {
-  cachedGetter = null;
-  cachedOrigin = null;
+/**
+ * Verify a presented JWT against the hub's JWKS + revocation list. Throws
+ * `HubJwtError` (with a `code`) on any failure. The `iss` claim MUST equal
+ * the configured hub origin — load-bearing trust check; without it, anyone
+ * could mint a token against any RSA key and pass verification. Revocation
+ * runs LAST: cheap checks (signature, iss, expiry) reject first, so a bad
+ * signature never costs a network roundtrip.
+ */
+export async function validateHubJwt(token: string): Promise<HubJwtClaims> {
+  return guard.validateHubJwt(token);
 }
 
 /**
- * Verify a presented JWT against the hub's JWKS. Throws `HubJwtError` on any
- * failure. The `iss` claim MUST equal the configured hub origin — load-bearing
- * trust check; without it, anyone could mint a token against any RSA key and
- * pass verification.
+ * Reset the cached JWKS getter. Tests use this to switch origins between
+ * cases; production callers shouldn't need it (origin is process-stable).
  */
-export async function validateHubJwt(token: string): Promise<HubJwtClaims> {
-  const origin = getHubOrigin();
-  const getter = getJwksGetter(origin);
+export function resetJwksCache(): void {
+  guard.resetJwksCache();
+}
 
-  let payload: JWTPayload;
-  try {
-    const verified = await jwtVerify(token, getter, { issuer: origin });
-    payload = verified.payload;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new HubJwtError(`hub JWT verification failed: ${msg}`);
-  }
-
-  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-    throw new HubJwtError('hub JWT missing required `sub` claim');
-  }
-
-  const scopeRaw = (payload as { scope?: unknown }).scope;
-  const scopes = typeof scopeRaw === 'string' ? parseScopes(scopeRaw) : [];
-  const aud = typeof payload.aud === 'string' ? payload.aud : undefined;
-  const jti = typeof payload.jti === 'string' ? payload.jti : undefined;
-  const clientIdRaw = (payload as { client_id?: unknown }).client_id;
-  const clientId = typeof clientIdRaw === 'string' ? clientIdRaw : undefined;
-
-  return { sub: payload.sub, scopes, aud, jti, clientId };
+/**
+ * Reset the cached revocation list. Tests use this to start from a clean
+ * fail-closed state between cases; production callers shouldn't need it
+ * (the cache refreshes itself on TTL expiry).
+ */
+export function resetRevocationCache(): void {
+  guard.resetRevocationCache();
 }
 
 export function parseScopes(raw: string | null | undefined): string[] {
@@ -184,6 +166,15 @@ function extractBearer(header: string | undefined): string | null {
  * Bearer <jwt>` off the request, validates it, checks scope. Returns
  * structured pass/fail rather than throwing so callers can shape the
  * response uniformly (RFC-6749-style 403 body for insufficient_scope).
+ *
+ * Revocation-related codes get sanitized client messages: server-side
+ * audit log carries the full diagnostic (jti for `revoked`,
+ * implementation-detail phrasing for `revocation_unavailable`); the
+ * unauthenticated caller gets a code-shaped sentence with no internals.
+ * Inheritable pattern across vault/scribe/agent — all revocation-related
+ * codes get sanitized client messages, full detail lives in server-side
+ * audit logs. Other HubJwtError codes (signature, audience, expired, etc.)
+ * carry generic messages and are forwarded as-is.
  */
 export async function authenticate(authHeader: string | undefined, required: AgentScope): Promise<AuthResult> {
   const token = extractBearer(authHeader);
@@ -194,11 +185,22 @@ export async function authenticate(authHeader: string | undefined, required: Age
   try {
     claims = await validateHubJwt(token);
   } catch (err) {
-    return {
-      ok: false,
-      status: 401,
-      error: err instanceof HubJwtError ? err.message : 'token validation failed',
-    };
+    if (err instanceof HubJwtError) {
+      if (err.code === 'revoked') {
+        console.warn(`[agent-auth] hub JWT rejected: ${err.message}`);
+        return { ok: false, status: 401, error: 'token has been revoked' };
+      }
+      if (err.code === 'revocation_unavailable') {
+        console.warn(`[agent-auth] hub JWT rejected: ${err.message}`);
+        return {
+          ok: false,
+          status: 401,
+          error: 'token cannot be validated: revocation list unavailable',
+        };
+      }
+      return { ok: false, status: 401, error: err.message };
+    }
+    return { ok: false, status: 401, error: 'token validation failed' };
   }
   if (!hasScope(claims.scopes, required)) {
     return {

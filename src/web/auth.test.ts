@@ -4,11 +4,20 @@
  * bun:test). A fake JWKS endpoint signs locally with a known RSA keypair;
  * cases cover the spec failure modes plus paraclaw's agent-scope inheritance
  * + vault:admin catch-all + legacy `claw:*` compat normalization.
+ *
+ * Hub-side fixture serves BOTH `/.well-known/jwks.json` AND
+ * `/.well-known/parachute-revocation.json` — single server, two endpoints,
+ * mutable state flags. Pattern mirrors scribe's `auth-hub-jwt.test.ts` so
+ * the three RS adopters share a fixture shape; agent's twist is node:http +
+ * vitest in place of `Bun.serve` + bun:test. scope-guard's own unit suite
+ * covers the cache mechanics (TTL refresh, fail-open with last-good,
+ * single-flight); this file pins the agent-side wiring + the response-shape
+ * contract.
  */
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 
 import {
@@ -17,6 +26,7 @@ import {
   hasScope,
   HubJwtError,
   resetJwksCache,
+  resetRevocationCache,
   SCOPE_AGENT_ADMIN,
   SCOPE_AGENT_READ,
   SCOPE_AGENT_WRITE,
@@ -49,28 +59,44 @@ async function makeKeypair(kid: string): Promise<Keypair> {
   };
 }
 
-interface JwksFixture {
+interface HubFixture {
   origin: string;
   stop: () => Promise<void>;
   setKeys: (keys: Keypair[]) => void;
-  setUnreachable: (down: boolean) => void;
+  /** When true, the JWKS endpoint returns 503 — exercises JWKS unreachable. */
+  setJwksFails: (down: boolean) => void;
+  /** Drive the revocation list contents; empty by default. */
+  setRevoked: (jtis: string[]) => void;
+  /** When true, the revocation endpoint returns 503 — exercises fail-closed. */
+  setRevocationFails: (fails: boolean) => void;
 }
 
-function startJwksFixture(): Promise<JwksFixture> {
+function startHubFixture(): Promise<HubFixture> {
   return new Promise((resolve) => {
     let keys: Keypair[] = [];
-    let down = false;
+    let jwksDown = false;
+    let revokedJtis: string[] = [];
+    let revocationFails = false;
     const server = http.createServer((req, res) => {
-      if (req.url !== '/.well-known/jwks.json') {
-        res.writeHead(404).end('not found');
+      if (req.url === '/.well-known/jwks.json') {
+        if (jwksDown) {
+          res.writeHead(503).end('upstream down');
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ keys: keys.map((k) => k.publicJwk) }));
         return;
       }
-      if (down) {
-        res.writeHead(503).end('upstream down');
+      if (req.url === '/.well-known/parachute-revocation.json') {
+        if (revocationFails) {
+          res.writeHead(503).end('hub down');
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ generated_at: new Date().toISOString(), jtis: revokedJtis }));
         return;
       }
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ keys: keys.map((k) => k.publicJwk) }));
+      res.writeHead(404).end('not found');
     });
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address() as AddressInfo;
@@ -83,8 +109,14 @@ function startJwksFixture(): Promise<JwksFixture> {
         setKeys: (next) => {
           keys = next;
         },
-        setUnreachable: (v) => {
-          down = v;
+        setJwksFails: (v) => {
+          jwksDown = v;
+        },
+        setRevoked: (jtis) => {
+          revokedJtis = jtis;
+        },
+        setRevocationFails: (v) => {
+          revocationFails = v;
         },
       });
     });
@@ -100,6 +132,8 @@ interface SignOpts {
   expiresAtSeconds?: number;
   kid?: string;
   clientId?: string;
+  /** Override the default jti — needed when a test wants to revoke this exact token. */
+  jti?: string;
 }
 
 async function signJwt(kp: Keypair, opts: SignOpts): Promise<string> {
@@ -115,16 +149,16 @@ async function signJwt(kp: Keypair, opts: SignOpts): Promise<string> {
     .setAudience(opts.aud ?? 'hub')
     .setIssuedAt(iat)
     .setExpirationTime(exp)
-    .setJti('jti-1')
+    .setJti(opts.jti ?? 'jti-1')
     .sign(kp.privateKey);
 }
 
-let fixture: JwksFixture;
+let fixture: HubFixture;
 let kp: Keypair;
 let prevHubOrigin: string | undefined;
 
 beforeAll(async () => {
-  fixture = await startJwksFixture();
+  fixture = await startHubFixture();
   kp = await makeKeypair('k1');
   fixture.setKeys([kp]);
 });
@@ -138,14 +172,19 @@ afterAll(async () => {
 beforeEach(() => {
   prevHubOrigin = process.env.PARACHUTE_AGENT_HUB_ORIGIN;
   process.env.PARACHUTE_AGENT_HUB_ORIGIN = fixture.origin;
-  fixture.setUnreachable(false);
+  fixture.setJwksFails(false);
   fixture.setKeys([kp]);
+  fixture.setRevoked([]);
+  fixture.setRevocationFails(false);
   resetJwksCache();
+  resetRevocationCache();
 });
 
 afterEach(() => {
   if (prevHubOrigin === undefined) delete process.env.PARACHUTE_AGENT_HUB_ORIGIN;
   else process.env.PARACHUTE_AGENT_HUB_ORIGIN = prevHubOrigin;
+  resetJwksCache();
+  resetRevocationCache();
 });
 
 describe('validateHubJwt', () => {
@@ -175,7 +214,7 @@ describe('validateHubJwt', () => {
   });
 
   it('rejects when JWKS endpoint is unreachable', async () => {
-    fixture.setUnreachable(true);
+    fixture.setJwksFails(true);
     const token = await signJwt(kp, { iss: fixture.origin });
     await expect(validateHubJwt(token)).rejects.toBeInstanceOf(HubJwtError);
   });
@@ -331,5 +370,96 @@ describe('authenticate', () => {
     });
     const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_ADMIN);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe('authenticate — revocation enforcement (Phase 4)', () => {
+  // Three integration cases pinning the agent-side wiring + the response-shape
+  // contract. scope-guard's own unit suite covers cache mechanics; this block
+  // verifies that revocation outcomes propagate through `authenticate()` with
+  // the right sanitization + audit-log invariants.
+
+  it('happy path: signed valid JWT not in revocation list → 200 + claims', async () => {
+    fixture.setRevoked([]);
+    const token = await signJwt(kp, {
+      iss: fixture.origin,
+      scope: 'agent:read',
+      jti: 'jti-not-revoked',
+    });
+    const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_READ);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.claims.jti).toBe('jti-not-revoked');
+  });
+
+  it('revoked jti → 401 sanitized; full diagnostic (with jti) routed to console.warn audit log', async () => {
+    const revokedJti = 'jti-revoked-by-operator';
+    fixture.setRevoked([revokedJti]);
+    const token = await signJwt(kp, {
+      iss: fixture.origin,
+      scope: 'agent:read',
+      jti: revokedJti,
+    });
+
+    // Spy + suppress so the assertion is the audit-trail invariant for this
+    // scenario, not a stderr inspection. Pattern carries from vault PR #281
+    // through scribe PR #43 to here.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_READ);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.status).toBe(401);
+        // Client-facing message must NOT carry the jti — that's a server-side
+        // audit-log concern only. See the `code === "revoked"` branch in
+        // auth.ts:authenticate for the sanitization.
+        expect(r.error).toBe('token has been revoked');
+        expect(r.error).not.toContain(revokedJti);
+      }
+
+      // Audit-log invariant: console.warn fires exactly once with a message
+      // that carries the jti, so an operator chasing a 401 in production logs
+      // can correlate to which token was retired.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const warnArg = warnSpy.mock.calls[0]![0] as string;
+      expect(warnArg).toContain(revokedJti);
+      expect(warnArg).toContain('revoked');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('revocation list unreachable on cold start → 401 sanitized; full diagnostic routed to console.warn', async () => {
+    // Hub is reachable for JWKS but the revocation endpoint 503s. Cold cache
+    // + first-fetch-fail = "unknown" outcome, surfaced as
+    // HubJwtError(code: "revocation_unavailable"). Client gets a code-shaped
+    // sentence; the implementation-detail phrasing ("no last-good cache")
+    // stays in the server-side audit log.
+    fixture.setRevocationFails(true);
+    const token = await signJwt(kp, {
+      iss: fixture.origin,
+      scope: 'agent:read',
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = await authenticate(`Bearer ${token}`, SCOPE_AGENT_READ);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.status).toBe(401);
+        // Client message: code-shaped, no internals.
+        expect(r.error).toBe('token cannot be validated: revocation list unavailable');
+        // The internal phrase "no last-good cache" is a scope-guard
+        // implementation detail and must not leak into the public response.
+        expect(r.error).not.toContain('last-good cache');
+      }
+
+      // Audit-log invariant: full diagnostic routed to console.warn so
+      // operators can distinguish cold-start from sustained outage.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const warnArg = warnSpy.mock.calls[0]![0] as string;
+      expect(warnArg).toContain('no last-good cache');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
