@@ -6,6 +6,7 @@
   "kind": "frontend",
   "port": 1944,
   "paths": ["/agent"],
+  "uiUrl": "/agent",
   "health": "/api/health",
   "startCmd": ["bun", "src/index.ts"],
   "scopes": {
