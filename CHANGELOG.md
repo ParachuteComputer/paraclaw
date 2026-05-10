@@ -2,19 +2,15 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
-## [0.1.4-rc.2] - 2026-05-10
-
-### Added
-
-- **`uiUrl: "/agent"` in `.parachute/module.json` (parachute-patterns#52).** Adopt the [`module-ui-declaration`](https://github.com/ParachuteComputer/parachute-patterns/blob/main/patterns/module-ui-declaration.md) convention — services declare their user-facing UI URL in `module.json`, and hub's discovery page renders one tile per declaring service. Agent's UI (combining run + config + admin) lives at `/agent`, so the field mirrors the existing `paths[0]`. Pairs with `parachute-notes` (already declares `uiUrl: "/notes"`); vault and scribe stay absent until each grows a UI surface. Step 2 of the cross-repo adoption sequence (patterns convention defined → modules declare → hub consumer-side reads). Backwards-compatible: hub before its consumer-side update simply ignores the new field; nothing else in the agent repo reads it today.
-
-## [0.1.4-rc.1] - 2026-05-10
+## [0.1.4] - 2026-05-10
 
 ### Added
 
 - **Hub-revocation-list enforcement on hub-issued JWTs (parachute-hub#212 Phase 4).** Adopt `@openparachute/scope-guard@^0.2.1`, which fetches `<hub-origin>/.well-known/parachute-revocation.json` (60s cache, fail-closed on cold start, fail-open with last-good cache on transient outage), and rejects any JWT whose `jti` appears on the list. `src/web/auth.ts:validateHubJwt` now delegates to `guard.validateHubJwt` from a process-wide `ScopeGuard` instance bound to agent's `getHubOrigin()` resolver — keeping the existing `PARACHUTE_AGENT_HUB_ORIGIN` → `PARACLAW_HUB_ORIGIN` (legacy) → `PARACHUTE_HUB_ORIGIN` → loopback precedence intact. The `authenticate()` seam every `/api/*` handler runs through is unchanged for callers; signature/issuer/audience/expiry rejections preserve their existing 401 messages bit-for-bit. Re-exports `resetRevocationCache()` alongside `resetJwksCache()` for test-clean lifecycle. Aligns agent with vault (PR #281) and scribe (PR #43) so the three resource servers share one trust kernel — no silent drift on the worst place to drift. Coverage: existing 23 hub-JWT tests preserved as migration regression; 3 new tests pin the scope-guard wiring + response-shape contract (happy path, revoked rejection, cold-start unreachable).
 
 - **Operator-debuggability fix: sanitized client messages on revocation rejections; full diagnostics routed to server-side audit log.** When `authenticate()` catches a `HubJwtError` with `code === "revoked"` or `code === "revocation_unavailable"`, it logs the full `err.message` (which carries the `jti` for `revoked`, and the implementation-detail phrasing "no last-good cache" for `revocation_unavailable`) via `console.warn` for the audit trail, then returns a code-shaped sanitized message to the unauthenticated caller — `"token has been revoked"` or `"token cannot be validated: revocation list unavailable"`. The jti never leaks in the response body; the operator chasing a 401 in production logs can still correlate to which token was retired. Inheritable pattern across vault/scribe/agent: *all revocation-related codes get sanitized client messages, full detail lives in server-side audit logs*. Other `HubJwtError` codes (signature, audience, expired, etc.) carry generic messages and are forwarded as-is — only the two revocation-flavored codes need the sanitization seam.
+
+- **`uiUrl: "/agent"` in `.parachute/module.json` (parachute-patterns#52).** Adopt the [`module-ui-declaration`](https://github.com/ParachuteComputer/parachute-patterns/blob/main/patterns/module-ui-declaration.md) convention — services declare their user-facing UI URL in `module.json`, and hub's discovery page renders one tile per declaring service. Agent's UI (combining run + config + admin) lives at `/agent`, so the field mirrors the existing `paths[0]`. Pairs with `parachute-notes` (already declares `uiUrl: "/notes"`); vault and scribe stay absent until each grows a UI surface. Step 2 of the cross-repo adoption sequence (patterns convention defined → modules declare → hub consumer-side reads). Backwards-compatible: hub before its consumer-side update simply ignores the new field; nothing else in the agent repo reads it today.
 
 ### Changed
 
