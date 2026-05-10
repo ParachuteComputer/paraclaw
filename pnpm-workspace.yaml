@@ -6,3 +6,10 @@ onlyBuiltDependencies:
 
 pnpm:
   minimumReleaseAge: 4320
+  # Aaron-approved 2026-05-10: scope-guard is a parachute-org package
+  # published by Aaron; the 3-day gate exists to mitigate unknown-upstream
+  # supply-chain risk, which doesn't apply when upstream is a package we
+  # control. Pinned exact version — any future scope-guard publish goes
+  # through the gate by default.
+  minimumReleaseAgeExclude:
+    - "@openparachute/scope-guard@0.2.1"
