@@ -2,6 +2,12 @@
 
 All notable changes to parachute-agent will be documented in this file.
 
+## [0.1.4-rc.2] - 2026-05-10
+
+### Added
+
+- **`uiUrl: "/agent"` in `.parachute/module.json` (parachute-patterns#52).** Adopt the [`module-ui-declaration`](https://github.com/ParachuteComputer/parachute-patterns/blob/main/patterns/module-ui-declaration.md) convention — services declare their user-facing UI URL in `module.json`, and hub's discovery page renders one tile per declaring service. Agent's UI (combining run + config + admin) lives at `/agent`, so the field mirrors the existing `paths[0]`. Pairs with `parachute-notes` (already declares `uiUrl: "/notes"`); vault and scribe stay absent until each grows a UI surface. Step 2 of the cross-repo adoption sequence (patterns convention defined → modules declare → hub consumer-side reads). Backwards-compatible: hub before its consumer-side update simply ignores the new field; nothing else in the agent repo reads it today.
+
 ## [0.1.4-rc.1] - 2026-05-10
 
 ### Added
