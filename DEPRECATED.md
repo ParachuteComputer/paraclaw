@@ -24,12 +24,12 @@ Don't install parachute-agent. Instead:
    token = os.environ["PARACHUTE_VAULT_TOKEN"]
    hub = os.environ["PARACHUTE_HUB_URL"]
    # Fetch your job notes via vault REST
-   # For each one, spawn: claude -p --mcp-config "$(parachute-vault mcp-config <name>)" ...
+   # For each one, spawn: claude -p --mcp-config '<json>' ...  # construct the JSON manually, or use 'parachute-vault mcp-config <name>' (vault 0.4.6+)
    # Write outputs back via vault REST
    ```
 4. `crontab -e` to schedule it.
 
-The `parachute-vault mcp-config <name>` CLI (vault 0.4.6-rc.5+) gives you the inline MCP config JSON, eliminating boilerplate.
+Vault 0.4.6 ships a `parachute-vault mcp-config <name>` CLI that emits the MCP config JSON for you, eliminating boilerplate — until it's on `@latest`, you can construct the JSON manually.
 
 ### If you're running a hosted multi-tenant scenario (untrusted prompts, sandbox isolation)
 
@@ -38,8 +38,15 @@ The container-isolation architecture is genuinely valuable here. parachute-cloud
 ## Status
 
 - No new features. Bugfixes only.
-- npm deprecate warning on install (after Aaron runs `npm deprecate ...`).
+- npm deprecate warning on install (after Aaron runs the command below).
 - Existing installs continue working. Nothing has been unpublished. Roll back to a specific version if needed.
+
+The deprecation command (for Aaron — copy-paste, kept under 80 chars so npm install doesn't wrap awkwardly):
+
+```bash
+npm deprecate @openparachute/agent "Deprecated 2026-05-20. Use cron + claude -p instead. See repo DEPRECATED.md"
+```
+
 - `@latest` and `@rc` tags maintained for now.
 - Retirement timeline: when `parachute-jobs` (TBD module) ships AND has been stable for 1-2 months, parachute-agent moves out of the committed-core list entirely. This is expected in Q3 2026.
 
