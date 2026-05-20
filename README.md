@@ -1,5 +1,19 @@
 # parachute-agent
 
+> [!CAUTION]
+> **`@openparachute/agent` is deprecated as of 2026-05-20.**
+>
+> Most users should NOT install this module. The "Claude in containers" architecture proved too heavy for the owner-operated, trusted-vault use case it was built for. A simpler primitive — a cron-scheduled Python runner that spawns `claude -p` with inline MCP config against your vault — handles 90% of the actual use cases at a fraction of the complexity.
+>
+> **What to use instead:**
+> - **For owner-operated automation**: write a small runner script. See the [Gitcoin Brain pattern](https://github.com/unforced-dev/gitcoin-brain) (TBD link — may not be public) or roll your own ~200-line Python+cron equivalent. The new `parachute-vault mcp-config <name>` CLI gives you the inline MCP config JSON for free.
+> - **For hosted multi-tenant or untrusted prompts**: parachute-agent's container isolation IS the right shape — but this scenario will be served by `parachute-cloud` (TBD), not by self-hosting `@openparachute/agent` directly.
+> - **For experimentation**: this repo and module remain installable; nothing's been removed. Read [DEPRECATED.md](./DEPRECATED.md) for the full rationale.
+
+(The rest of the README is below for historical reference.)
+
+---
+
 <p align="center">
   An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs. A [Parachute](https://parachute.computer) module.
 </p>
